@@ -1,7 +1,6 @@
 # Atropa, Dysnomia — Game Strategy & Memory
 
 **Source**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
-**Maintained by**: busytoby (contributors: James, Maria, 414dev)
 **Game UI**: https://entropy-dysnomia.vercel.app
 **Chain**: PulseChain
 **Dev Branch**: `claude/atropa-dysnomia-setup-MEZKh`
@@ -40,7 +39,7 @@ Everything is on-chain and permanent. Your character, inventory, social history,
 ### AFFECTION (Ⓐ) — The Universal Gateway
 **Address**: `0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D`
 
-**This is the most important token.** Every single DYSNOMIA token has AFFECTION set as a market rate at exactly `1 AFFECTION per token` at construction:
+Every single DYSNOMIA token has AFFECTION set as a market rate at exactly `1 AFFECTION per token` at construction:
 ```solidity
 AddMarketRate(AFFECTIONContract, 1 * 10 ** decimals());
 ```
@@ -56,7 +55,7 @@ Token-earning actions on LAU (each triggers `_mintToCap()`):
 - `Username(newUsername)` — set display name
 - `Chat(chatline)` — post a chat message
 - `Alias(address, value)` — create address alias
-- `Void(true, true)` — re-enter the Void and remint
+- `Void(true, true)` — re-enter the Void
 - `Withdraw(token, amount)` — withdraw assets (onlyOwners)
 
 ### Token Supply Mechanics
