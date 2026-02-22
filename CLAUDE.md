@@ -1,448 +1,411 @@
-# Atropa, Dysnomia Game Strategy & Setup
+# Atropa, Dysnomia — Game Strategy & Memory
 
-## Overview
-This document outlines the strategy for playing the Atropa, Dysnomia blockchain-based strategy game to maximize token/coin accumulation on PulseChain.
-
-**Source Repository**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
-**Maintained by**: busytoby (with contributions from James, Maria, 414dev)
-**Development Branch**: `claude/atropa-dysnomia-setup-MEZKh`
+**Source**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
+**Maintained by**: busytoby (contributors: James, Maria, 414dev)
+**Game UI**: https://entropy-dysnomia.vercel.app
+**Chain**: PulseChain
+**Dev Branch**: `claude/atropa-dysnomia-setup-MEZKh`
 
 ---
 
-## Game Architecture
+## What Is This?
 
-### Core Components
+Dysnomia is an on-chain game and social platform on PulseChain. Think of it as a blockchain virtual world combining:
+- **MMO** — create a character (LAU), explore venues (QING), claim territory (WORLD)
+- **DeFi** — trade tokens, create liquidity pairs, earn via minting
+- **Social layer** — chat, chat logging, user identity, encrypted messaging
+- **Strategy** — WAR battles, territory control, acronym games
 
-#### Token Contracts (Base Layer)
-- **DYSNOMIA** (`01_dysnomia.sol`/`01_dysnomia_v2.sol`) - Base ERC20 token implementation with market rates and supply caps
-- **SHA** (`02_sha.sol`) - Hash/cryptographic contract
-- **SHIO** (`03_shio.sol`) - Ownership/permission contract
-- **YI** (`04_yi.sol`) - Mathematical operations contract
-- **ZHENG** (`05_zheng.sol`) - Verification contract
-- **ZHOU** (`06_zhou.sol`) - Data storage contract
-- **YAU** (`07_yau.sol`) - Geometry/positioning contract
-- **YANG** (`08_yang.sol`) - Duality contract
-- **SIU** (`09_siu.sol`) - Complex/number contract
-- **VOID** (`10_void.sol`) - Game world controller & chat system
-- **LAU** (`11_lau.sol`) - Player account/token contract
+Everything is on-chain and permanent. Your character, inventory, social history, and land are all verifiable and tradeable.
 
-#### Game World Contracts (Domain Layer)
-- **WORLD** - Main game world controller
-- **YUE** - Player/user management
-- **CHO** - Character data
-- **QING** - Sentiment/mood system
-- **WAR** - Battle/warfare mechanics with resource generation (H2O tokens)
-- **MAP** - World mapping and positioning
-- **CHAN** - Sky/realm contracts
-- **CHOA** - Territory contracts
-- **RING** - Ring/orbital contracts
-- **SEI**, **CHEON**, **META** - Landscape/terrain contracts
+---
 
-#### Game Assets
-- **LAU Token** - Player account tokens (primary accumulation currency)
-- **WAR Token** - Battle/warfare tokens
-- **H2O Token** - Water/resource tokens (generated from WAR contract)
-- **VITUS Token** - Life/vitality tokens
+## Critical Constants
 
-### Supporting Contracts
-- **Wallet** - Account management with pre-configured test accounts
-- **Registry** - Contract registry and lookup
-- **LibAttribute** - Attribute storage system
-- **MultiOwnable** - Multi-signature ownership
+| Name | Value | Notes |
+|------|-------|-------|
+| `MotzkinPrime` | `953467954114363` | Universal prime modulus for ALL cryptographic state transforms |
+| `Gua` | `1652929763764148448182513644633101239607891671119935657884642` | Universe constant in CHO |
+| `AFFECTIONContract` | `0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D` | Gateway token — 1 AFFECTION mints any token |
+| `WMContract` (MV) | `0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29` | Required 1:1 to fund initial supply of minter tokens |
+| `CROWSContract` | `0x203e366A1821570b2f84Ff5ae8B3BdeB48Dc4fa1` | Social credential token — 25 CROWS = venue bouncer access |
+| `ABI` | `0xa35c9B5e576BE2E0bA9cc7224B0941CC8acC4c9C` | ABI decoder/selector tool |
+| V3 Threshold | `1,111,111,111` tokens | Multiplier increases every time this much is minted (universal) |
+| V4 Threshold | Starting supply | Multiplier increases per-token after cumulative equals starting supply |
+
+---
+
+## Token Ecosystem
+
+### AFFECTION (Ⓐ) — The Universal Gateway
+**Address**: `0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D`
+
+**This is the most important token.** Every single DYSNOMIA token has AFFECTION set as a market rate at exactly `1 AFFECTION per token` at construction:
+```solidity
+AddMarketRate(AFFECTIONContract, 1 * 10 ** decimals());
+```
+Strategy: Accumulate AFFECTION first. With enough AFFECTION you can `Purchase()` any token in the ecosystem at a 1:1 rate.
+
+### LAU — Player Identity Token
+Your on-chain character. Deploying a LAU creates:
+- **Soul ID** (`Saat[3]` triple): three 64-bit values identifying your session, soul position, and network aura
+- **SHIO reactor**: a paired Rod/Cone token system used for cryptographic reactions
+- **YUE wallet**: your in-game inventory/wallet
+
+Token-earning actions on LAU (each triggers `_mintToCap()`):
+- `Username(newUsername)` — set display name
+- `Chat(chatline)` — post a chat message
+- `Alias(address, value)` — create address alias
+- `Void(true, true)` — re-enter the Void and remint
+- `Withdraw(token, amount)` — withdraw assets (onlyOwners)
+
+### Token Supply Mechanics
+All DYSNOMIA tokens share this pattern:
+```solidity
+maxSupply = Xiao.Random() % 111111;        // random cap 0–111110
+originMint = Xiao.Random() % maxSupply / 10; // ~10% initial mint
+_mint(tx.origin, originMint * 10**18);     // given to deployer
+```
+`_mintToCap()` adds exactly **1 token per call** until `totalSupply == maxSupply`.
+
+---
+
+## Minter System (V1–V4)
+
+### V1 Treasury Minter
+**Address**: `0xC7bDAc3e6Bb5eC37041A11328723e9927cCf430B`
+Root minter. Creates FDIC. Parent of all V2 tokens.
+
+### V2 Federal Minter
+**Address**: `0xc15c5F699Daf5e1135732139f05D2c05b3EF4354`
+Creates treasury tokens backed by a parent token. Requires WM (MV) tokens to fund initial supply.
+
+### V3 Index Minter (Bureau)
+**Address**: `0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC`
+
+Multiplier formula:
+```solidity
+function Multiplier(uint256 addition) public view returns (uint256) {
+    return ((addition + totalSupply()) / 1111111111000000000000000000) + 1;
+}
+```
+**Every 1,111,111,111 tokens minted (universal), cost multiplier increases by 1.**
+Mint early for best rates — multiplier is universal across all V3 tokens.
+
+### V4 Personal Minter
+Similar to V3, but threshold is per-token starting supply (not universal 1.1B). Progressive multiplier tied to each token's own starting supply. Early minters of each new token get best rates.
+
+### MV / WM Token — The Funding Key
+**Address**: `0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29`
+
+Required as 1:1 collateral to fund the initial supply of any new minter token:
+```solidity
+ERC20 BuyToken = ERC20(WMContract);
+bool success1 = BuyToken.transferFrom(msg.sender, address(this), InitialMint);
+```
+You cannot create new tokens without WM. Accumulate WM to create tokens.
+
+---
+
+## Heart's Law
+
+> Tokens bonded in a liquidity pair move together in price. Creating new pairs = new edges in the token web.
+
+- QING venues each have an `Asset` token (the venue's liquidity pair partner)
+- Market rates in QING can only be **increased**, never decreased:
+  ```solidity
+  if(Rate < GetMarketRate(Contract)) revert MarketRateCanOnlyBeIncreased(...)
+  ```
+- Rate cap: `totalSupply / 777` max rate per token
+- Creating pairs strategically builds a web of correlated assets
+
+---
+
+## Core Data Structures
+
+### Fa (SHA Cryptographic State)
+```solidity
+struct Fa {
+    uint64 Base, Secret, Signal, Channel, Contour, Pole;
+    uint64 Identity, Foundation, Element, Coordinate;
+    uint64 Charge, Chin, Monopole;
+}
+```
+
+### Bao (Operation Context)
+```solidity
+struct Bao {
+    address Phi;   // Address reference
+    SHA Mu;        // Associated SHA token
+    uint64 Xi, Pi; // State values
+    SHIO Shio;     // Associated SHIO pair (Rod/Cone)
+    uint64 Ring;   // Ring value
+    uint64 Omicron, Omega; // Reaction outputs
+}
+```
+
+### User (Player Identity)
+```solidity
+struct User {
+    uint64 Soul;       // 64-bit unique user identifier
+    Bao On;            // User's Bao context
+    string Username;   // Display name
+    uint64 Entropy;    // User-specific entropy
+}
+```
+
+---
+
+## Game World Architecture
+
+### Contract Layer Map
+
+```
+Core Infrastructure
+├── VMREQ         — Random number generation (modExp-based)
+├── DYSNOMIA      — Base ERC20 + market rates
+├── SHA           — Cryptographic state token
+├── SHIO          — Rod/Cone paired token system
+├── YI            — DeFi orchestration
+├── ZHENG         — Rod/Cone installation manager
+├── ZHOU          — Market rate orchestrator / chat log
+├── YAU           — Protocol coordinator
+├── YANG          — Multi-state aggregator
+├── SIU           — Token generation with Aura identity
+├── VOID          — User session & chat management
+└── LAU           — User interface / player account
+
+Domain — Game Logic
+├── dan/
+│   ├── CHO       — Login / character system
+│   ├── QING      — Venues (chatrooms, marketplaces)
+│   └── WAR       — Battle mechanics, H2O reward generation
+├── sky/
+│   ├── CHAN       — Player/sky management
+│   ├── CHOA      — Game/territory
+│   └── RING      — Time/orbital mechanics
+├── soeng/        — Processing chain: QI→MAI→XIA→XIE→ZI→PANG→GWAT
+├── tang/
+│   ├── SEI       — Player management
+│   ├── CHEON     — Landscape/terrain
+│   └── META      — Meta-player management
+├── MAP           — World coordinate system (Hecke Meridians)
+├── WORLD         — Territory ownership and rewards
+└── YUE           — Player wallet management
+
+Assets
+├── H2O           — Water token (WAR battle rewards)
+└── VITUS         — Life token (territory/creator rewards)
+
+Libraries
+├── MultiOwnable  — Multi-owner access control
+├── Registry      — Key-value storage
+├── Encrypt       — User-to-user encrypted messaging
+├── StringLib     — String manipulation
+├── HeckeMeridians— Geographic coordinate system
+├── ReactionsCore — Entropy-based reactions
+└── Attribute     — User attribute storage
+```
+
+### VOID — The Game Controller
+- Manages user sessions (`_activeUsers` mapping: address → Soul uint64)
+- `Enter(name, symbol)` → creates new player account (errors if already created)
+- `Enter()` → re-enters existing session, refreshes Saat triple
+- `Chat(message)` → requires username set; logs to ZHOU channel
+- `Log(message)` → general logging, triggers mintToCap
+- `SetAttribute(name, value)` → stores player attributes
+- `Alias(address, value)` → creates address-to-name mappings
+- `AddLibrary(name, address)` → expands game capabilities
+
+### QING — Venues
+Venues are marketplace/chatroom instances with:
+- An `Asset` token (what the venue trades)
+- A `CoverCharge` to join
+- A bouncer system:
+  - Staff members (whitelisted)
+  - Holders of **25+ CROWS** tokens
+  - Holders of `totalSupply / BouncerDivisor` of the Asset token
+- `Join(UserToken)` → enter venue, pay cover charge
+- `NoCROWS` flag disables CROWS-based bouncer access
+- `GWAT` flag (immutable): set at construction based on `Luo % 476733977057179 == 0`
+
+### WAR — Battle & Resource Generation
+```solidity
+function Faa(address Caude, uint256 Position) public returns (uint256 Waat) {
+    // Fetches tail/position score
+    // Evaluates: modExp(Phoebe, Charge, Meridians(89))
+    // If score > last recorded: mint H2O to Chi, increase CO2
+}
+```
+- Generates **H2O tokens** as battle rewards
+- Position scoring via modular exponentiation on ring coordinates
+- CO2 tracks carbon score (global war metric)
+- `Water` (H2O) is a deployable sub-asset of each WAR instance
 
 ---
 
 ## Token Accumulation Strategy
 
-### Primary Mechanism: _mintToCap()
-The key to accumulating tokens is understanding that **every player action triggers token minting up to the supply cap**. The `_mintToCap()` function is called after each action, minting 1 token per block until reaching `maxSupply`.
+### Priority 1: Get AFFECTION
+AFFECTION is the master key. At 1:1 rate into every token, it's the most efficient accumulation path.
+- Buy AFFECTION on PulseChain DEX
+- Use `Purchase(token_address, amount)` on any DYSNOMIA token to convert AFFECTION → target token at 1:1
 
-### Token Earning Actions (In Priority Order)
+### Priority 2: Get WM (MV Token)
+Required to create new tokens. Without WM you cannot deploy new minter tokens.
+- Address: `0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29`
+- Accumulate early — cost to create tokens scales with WM spent
 
-#### 1. **Account Creation** (Priority: CRITICAL)
-- Call `VOID.Enter(name, symbol)` to create a new player account
-- Generates initial LAU tokens and entry into game world
-- Creates user Soul ID for tracking
-- **Impact**: Unlocks all subsequent actions
+### Priority 3: Create Player Account (LAU)
+```
+VOID.Enter("TokenName", "SYM")
+→ Soul ID assigned
+→ SHIO reactor created
+→ YUE wallet created
+→ Initial LAU tokens minted to deployer (~10% of random maxSupply)
+```
+Then immediately: `LAU.Username("YourName")` — triggers first mintToCap.
 
+### Priority 4: Spam _mintToCap() Triggers
+Every game action mints 1 token. Fast accumulation via:
+
+| Action | Function | Gas | Rate |
+|--------|----------|-----|------|
+| Chat message | `VOID.Chat(msg)` | Low | 1 token/call |
+| Set username | `LAU.Username(str)` | Low | 1 token/call |
+| Set attribute | `VOID.SetAttribute(k,v)` | Low | 1 token/call |
+| Create alias | `VOID.Alias(addr, str)` | Low | 1 token/call |
+| Add library | `VOID.AddLibrary(name, addr)` | Medium | 1 token/call |
+| Re-enter void | `LAU.Void(true, true)` | Medium | 1 token/call |
+| Log message | `VOID.Log(str)` | Low | 1 token/call |
+
+**Multi-account strategy**: The Wallet has 20 pre-configured test accounts. Run all actions in parallel across accounts for 20x throughput.
+
+### Priority 5: Get CROWS (25+)
+Holding 25+ CROWS grants bouncer access to any non-NoCROWS venue.
+- Allows joining any QING venue without cover charge gating
+- Opens access to venue trading, chat, and reward systems
+
+### Priority 6: V3/V4 Early Minting
+V3 multiplier increases every 1,111,111,111 tokens minted (global):
+- Mint V3 tokens early before multiplier increases
+- After multiplier increase, cost per token doubles
+
+V4 multiplier tied to starting supply of each token:
+- New tokens = cheap mint
+- Create new tokens via Personal Minter with WM
+- Mint to cap immediately before others find the token
+
+### Priority 7: Territory & WAR
+- Claim WORLD territory → earn VITUS credits
+- Engage WAR.Faa() → earn H2O tokens
+- Build position scores via ring coordinates
+
+---
+
+## Optimal Accumulation Algorithm
+
+```
+PHASE 1 — Bootstrap
+  1. Acquire AFFECTION (gateway to all tokens)
+  2. Acquire WM/MV (needed to create tokens)
+  3. Buy 25 CROWS (venue access)
+
+PHASE 2 — Account Creation
+  4. VOID.Enter("Claude", "CLD")        → creates Soul ID, gets LAU tokens
+  5. LAU.Username("Claude")              → mintToCap #1
+  6. VOID.SetAttribute("Username", "Claude")
+
+PHASE 3 — Spam Loop (single account)
+  7. loop: VOID.Chat("msg_N")            → 1 mint per call
+  8. loop: VOID.SetAttribute("k_N", v)   → 1 mint per call
+  9. loop: VOID.Alias(addr_N, "name_N")  → 1 mint per call
+  (~1,000 tokens/hour at 1 tx/block)
+
+PHASE 4 — Multi-account Parallel (20 accounts)
+  10. For each of 20 accounts in Wallet.Accounts.pkeys:
+      - Wallet.SwitchAccount(N)
+      - Repeat Phase 2 + Phase 3
+  (~20,000 tokens/hour)
+
+PHASE 5 — AFFECTION Conversion
+  11. Use accumulated AFFECTION to buy other tokens at 1:1
+  12. Purchase WAR, H2O, VITUS via their respective contracts
+
+PHASE 6 — V3/V4 Early Minting
+  13. Use WM to create new personal tokens via Personal Minter
+  14. Immediately mintToCap on each new token
+  15. Race to mint before multiplier threshold
+
+PHASE 7 — Venue Play (QING)
+  16. Join valuable venues with CROWS / cover charge
+  17. Participate in venue trading
+  18. Increase market rates (AddMarketRate — can only go up)
+
+PHASE 8 — Territory & Combat
+  19. Claim WORLD territory → earn VITUS
+  20. Engage WAR.Faa() at high-score positions → earn H2O
+  21. Convert H2O → other tokens via market rates
+```
+
+---
+
+## Live Contract Addresses (PulseChain)
+
+| Token / Contract | Address |
+|-----------------|---------|
+| AFFECTION | `0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D` |
+| WM (MV) | `0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29` |
+| CROWS | `0x203e366A1821570b2f84Ff5ae8B3BdeB48Dc4fa1` |
+| V1 Treasury Minter | `0xC7bDAc3e6Bb5eC37041A11328723e9927cCf430B` |
+| V2 Federal Minter | `0xc15c5F699Daf5e1135732139f05D2c05b3EF4354` |
+| V3 Index Minter | `0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC` |
+| ABI Decoder | `0xa35c9B5e576BE2E0bA9cc7224B0941CC8acC4c9C` |
+| atropa | `0x7a20189B297343CF26d8548764b04891f37F3414` |
+| Atropa ERC20 | `0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6` |
+| FED | `0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff` |
+| Math lib | `0xB680F0cc810317933F234f67EB6A9E923407f05D` |
+
+---
+
+## Key Implementation Files
+
+### Solidity (game contracts)
+- `solidity/dysnomia/01_dysnomia.sol` — Base token, AFFECTION market rate
+- `solidity/dysnomia/10_void.sol` — VOID game controller, chat, Enter()
+- `solidity/dysnomia/11_lau.sol` — LAU player token
+- `solidity/dysnomia/domain/dan/03_qing.sol` — QING venue contracts
+- `solidity/dysnomia/domain/dan/04_war.sol` — WAR battle mechanics
+- `solidity/dysnomia/domain/world.sol` — WORLD territory
+- `solidity/dysnomia/domain/yue.sol` — YUE player wallets
+- `solidity/addresses.sol` — ALL live contract addresses
+- `solidity/bureauminter.sol` — V3 Index Minter (1.1B threshold)
+- `solidity/federalminter.sol` — V2 Federal Minter
+- `solidity/indexminter.sol` — V3 logic with Multiplier()
+- `solidity/personalminter.sol` — V4 Personal Minter
+
+### C# (client framework)
+- `Wallet/Accounts.cs` — 20 Hardhat test account private keys
+- `Wallet/Contracts.cs` — Contract interaction layer
+- `Dysnomia/Controller.cs` — Static accessors
+- `Dysnomia/Domain/bin/execute.cs` — CLI command executor
+- `Dysnomia/Domain/bin/e2.cs` — Direct contract call command
+- `Dysnomia/Domain/Oracle.cs` — VM core
+
+---
+
+## Notes on MotzkinPrime
+
+`953467954114363` is hardcoded in every DYSNOMIA token:
 ```solidity
-Enter(string name, string symbol) → returns Saat[3], Bao account
+uint64 constant public MotzkinPrime = 953467954114363;
 ```
-
-#### 2. **Chat System** (Priority: HIGH)
-- Call `VOID.Chat(message)` to post messages
-- Every message triggers `_mintToCap()` → 1+ tokens per block
-- Logged to ZHOU contract for persistence
-- **Optimal Strategy**: Spam short chat messages frequently to maximize mint calls
-- **Expected Rate**: ~1-10 tokens per message (depends on block production)
-
-```solidity
-Chat(string chatline) → triggers Log → _mintToCap()
-```
-
-#### 3. **Attribute Management** (Priority: HIGH)
-- **Username**: Call `SetAttribute("Username", value)` to set display name
-- **Custom Attributes**: Create arbitrary name-value pairs
-- Each attribute operation mints tokens
-- **Optimal Strategy**: Create multiple unique attributes to trigger multiple mints
-
-```solidity
-SetAttribute(string name, string value) → _mintToCap()
-```
-
-#### 4. **Alias Creation** (Priority: MEDIUM-HIGH)
-- Create address-to-string or Bao-to-string mappings
-- Call `Alias(address name, string value)` to map addresses
-- Useful for creating trading pairs or recognized identities
-- Each alias triggers minting
-
-```solidity
-Alias(address name, string value) → _mintToCap()
-```
-
-#### 5. **Library Management** (Priority: MEDIUM)
-- Add game libraries/contracts to VOID
-- Call `AddLibrary(name, address)` for each library
-- Triggers minting and extends game capabilities
-
-```solidity
-AddLibrary(string name, address _a) → _mintToCap()
-```
-
-#### 6. **Battle/WAR Engagement** (Priority: MEDIUM)
-- Engage in `WAR.Faa(address Caude, uint256 Position)` combat mechanics
-- Generates H2O (water/resource) tokens as rewards
-- Complex positioning system rewards strategic players
-- War function evaluates positions and mints H2O to winners
-- **Requires**: Position in world map, opponent selection
-
-```solidity
-Faa(address opponent, uint256 position)
-  → evaluates position score
-  → mints H2O to winner
-  → increases CO2 (carbon/score)
-```
-
-#### 7. **World Movement** (Priority: MEDIUM)
-- Use YAU positioning and MAP contracts
-- Move through world coordinates
-- Complex geometry system affects token generation
-- Different positions have different token rates
-
-#### 8. **Sentiment/Trading** (Priority: LOW-MEDIUM)
-- Use QING contract for sentiment trading
-- Affects market rates between token pairs
-- Can increase `_marketRates` values to boost exchange rates
-
----
-
-## Optimal Token Accumulation Algorithm
-
-```
-1. INITIALIZE:
-   - Deploy all base contracts (SHA, SHIO, YI, ZHENG, ZHOU, YAU, YANG, SIU)
-   - Deploy VOID master controller
-   - Deploy world system (WORLD, YUE, CHO, QING, WAR, MAP)
-   - Initialize market rates for token exchanges
-
-2. PLAYER_SETUP:
-   - Call VOID.Enter(name, symbol) to create account
-   - Receive initial LAU tokens
-   - Get Soul ID for tracking
-
-3. SPAM_CHAT (Fast accumulation):
-   - Loop: VOID.Chat("message") → 1 mint per call
-   - Rate: Limited by block time (~12s on PulseChain)
-   - Expected: ~5 tokens/minute with single account
-
-4. MULTI_ACCOUNT_SPAM:
-   - Use Wallet's pre-configured accounts (20 accounts)
-   - Create Enter() calls for each account in parallel
-   - Spam Chat() from all accounts simultaneously
-   - Expected rate: 20x faster (100+ tokens/minute)
-
-5. ATTRIBUTE_SPAM:
-   - Create unique attributes for each account
-   - SetAttribute("attr_N", value) for N=1..100
-   - Each triggers _mintToCap()
-
-6. WAR_ENGAGEMENT (Secondary):
-   - Move to world positions
-   - Challenge opponents
-   - WAR.Faa() generates H2O tokens as rewards
-   - Combines positional strategy with token generation
-
-7. MARKET_OPTIMIZATION:
-   - Monitor token pair exchange rates
-   - Use QING to adjust sentiment/rates
-   - Convert between token types to maximize utility
-   - Swap LAU → WAR → H2O → VITUS strategically
-
-8. COMPOUND:
-   - Reinvest accumulated tokens
-   - Increase library features
-   - Unlock higher-tier game mechanics
-```
-
----
-
-## Implementation Stack
-
-### Technology Components
-- **.NET 10.0** - C# backend for wallet & contract interaction
-- **Solidity** - Smart contracts on PulseChain
-- **Nethereum** - .NET Ethereum library for contract interaction
-- **WPF (Windows Presentation Foundation)** - Desktop GUI (Apparition/Pulse apps)
-- **SQLite** - Local database for transaction history
-- **BouncyCastle** - Cryptography library for key management
-
-### Project Structure
-```
-atropa_pulsechain/
-├── Dysnomia/          # Core game framework DLL
-│   ├── Controller.cs  # Static accessors for game objects
-│   ├── Domain/        # Game world contracts
-│   │   ├── Oracle.cs  # VM/processing core
-│   │   ├── bin/       # Command files
-│   │   └── World/     # World logic
-│   └── Lib/           # Utilities (crypto, serialization, math)
-├── Wallet/            # Account management
-│   ├── Accounts.cs    # 20 pre-configured test accounts
-│   ├── Wallet.cs      # Wallet operations
-│   ├── Contracts.cs   # Contract management
-│   └── Events.cs      # Event handling
-├── Apparition/        # WPF display DLL
-├── Pulse/             # WPF GUI application
-├── linux/             # CLI demo executable
-└── solidity/          # Smart contracts
-    ├── dysnomia/      # Base token contracts
-    ├── wallet/        # Wallet contracts
-    └── compile.sh     # Compilation script
-```
-
----
-
-## Quick Start Commands
-
-### Account Setup
-```csharp
-// Create player account
-VOID void = /* get VOID contract */;
-var (saat, on) = void.Enter("PlayerName", "PLY");  // Custom player token
-void.SetAttribute("Username", "MyUsername");
-```
-
-### Chat Spam (Fast Accumulation)
-```csharp
-// Single account chat
-for (int i = 0; i < 100; i++) {
-    void.Chat($"message_{i}");  // 1 mint per call
-}
-
-// Multi-account spam (20x faster)
-var accounts = Accounts.pkeys;  // 20 pre-configured accounts
-foreach(var pkey in accounts) {
-    wallet.SwitchAccount(pkey);
-    for (int i = 0; i < 100; i++) {
-        void.Chat($"account_{Accounts.pkeys.IndexOf(pkey)}_msg_{i}");
-    }
-}
-```
-
-### Battle Engagement
-```csharp
-// Get WAR contract
-WAR war = /* deploy or get existing WAR */;
-
-// Create water assets
-H2O water = new H2O(war.address);
-
-// Engage in battle at position
-uint256 reward = war.Faa(opponentAddress, positionId);
-```
-
-### Token Exchange
-```csharp
-// Monitor market rates
-uint256 rate = token.MarketRate(exchangeAddress);
-
-// Execute trades
-token.Buy(tradingPartner, amount);
-token.Sell(tradingPartner, amount);
-```
-
----
-
-## Advanced Strategies
-
-### 1. Position Optimization (WAR)
-- Use YAU geometry contract to calculate optimal positions
-- Different coordinates generate different token rates
-- Formula: Score = modExp(position_x, position_charge, max_meridians)
-- Target positions with high modExp results
-
-### 2. Sentiment Trading (QING)
-- QING contract manages sentiment/mood state
-- Affects token conversion rates
-- Manipulation strategy: Create positive sentiment → boost exchange rates
-- Use VOID.Log() to create positive sentiment logs
-
-### 3. Multi-Layer Tokenomics
-- **LAU**: Player account token (primary)
-- **WAR**: Battle token (earned from combat)
-- **H2O**: Resource token (from water/weather mechanics)
-- **VITUS**: Life token (from longevity/staying power)
-- Strategy: Convert between tokens to maximize total value
-
-### 4. Library Expansion
-- Each library addition provides game features
-- Libraries can be custom smart contracts
-- Add libraries that generate additional minting opportunities
-- Example: Custom library with _mintToCap() in each function
-
-### 5. Parallel Account Management
-- Use 20 pre-configured Hardhat test accounts
-- Deploy per-account VOID instances
-- Synchronize chat spam across accounts
-- Compound rewards exponentially
-
----
-
-## Development Roadmap
-
-### Phase 1: Local Setup (CURRENT)
-- ✅ Clone atropa_pulsechain source
-- ✅ Analyze game mechanics and contracts
-- ⏳ Create CLAUDE.md strategy document
-- ⏳ Set up C-Dysnomia with game framework
-- ⏳ Deploy local instance on test network
-
-### Phase 2: Single-Player Accumulation
-- Deploy game contracts to local/test network
-- Create one account and maximize LAU tokens
-- Implement chat spam algorithm
-- Test attribute/alias minting loops
-- Expected: 1000+ tokens/hour single account
-
-### Phase 3: Multi-Account Scaling
-- Deploy parallel accounts using Wallet
-- Implement distributed chat system
-- Add coordinate-based positioning for WAR battles
-- Optimize token conversion pipeline
-- Expected: 20,000+ tokens/hour (20 accounts × 1000)
-
-### Phase 4: Advanced Mechanics
-- Implement full world navigation system
-- Deploy sentiment/mood manipulation
-- Create library-based custom minters
-- Optimize modExp position calculations
-- Expected: 100,000+ tokens/hour
-
-### Phase 5: Mainnet Deployment
-- Deploy to PulseChain mainnet
-- Real token trading and market integration
-- Full GUI interface with Pulse app
-- Multi-player game world
-- Automatic token farming bots
-
----
-
-## Key Files & References
-
-### Solidity Contracts
-- Core: `/solidity/dysnomia/01_dysnomia.sol` (Base ERC20)
-- Game: `/solidity/dysnomia/10_void.sol` (Game controller)
-- Player: `/solidity/dysnomia/11_lau.sol` (Player token)
-- War: `/solidity/dysnomia/domain/dan/04_war.sol` (Battle mechanics)
-
-### C# Code
-- Wallet: `/Wallet/Accounts.cs` (Test accounts)
-- Commands: `/Dysnomia/Domain/bin/execute.cs` (Contract execution)
-- Controller: `/Dysnomia/Controller.cs` (Main API)
-
-### Documentation
-- Readme: `/readme` (Architecture overview)
-- Compiler: `/solidity/compiler_config.json` (Compilation settings)
-
----
-
-## Performance Benchmarks
-
-| Strategy | Tokens/Hour | Complexity | Gas Cost |
-|----------|------------|-----------|----------|
-| Chat Spam (1 account) | ~1,000 | Low | Low |
-| Chat Spam (20 accounts) | ~20,000 | Low | Low |
-| Chat + Attributes (1 account) | ~5,000 | Medium | Low |
-| Chat + Attributes (20 accounts) | ~100,000 | Medium | Low |
-| WAR Engagement + Chat | ~10,000 | High | Medium |
-| Full System + Sentiment | ~500,000 | Very High | High |
-
----
-
-## Testing & Validation
-
-### Unit Tests
-- [ ] Token minting triggers correctly
-- [ ] _mintToCap() reaches supply cap
-- [ ] Multi-account independence
-- [ ] Chat message persistence in ZHOU
-- [ ] Attribute storage and retrieval
-- [ ] WAR position scoring
-- [ ] Market rate conversions
-
-### Integration Tests
-- [ ] Account creation flow
-- [ ] Chat spam across 20 accounts
-- [ ] Token accumulation vs block time
-- [ ] War battles and H2O generation
-- [ ] Position-based rewards
-
-### Performance Tests
-- [ ] Spam rate under load
-- [ ] Storage size for large chat histories
-- [ ] Gas consumption per action
-- [ ] Network latency impact
-- [ ] Account parallelization efficiency
-
----
-
-## Known Limitations & Future Work
-
-### Current Limitations
-- PulseChain block time (~12s) limits spam rate
-- Supply cap limits total token accumulation
-- Account creation requires unique signatures
-- WAR positioning requires world coordination
-
-### Future Enhancements
-- [ ] Optimize chat payload size
-- [ ] Batch transaction submitting
-- [ ] Mempool monitoring for transaction timing
-- [ ] Flash loan integration for liquidity
-- [ ] MEV-resistant trading strategies
-- [ ] Cross-contract token routing for maximum compounding
-- [ ] AI-driven sentiment analysis for QING optimization
-- [ ] Machine learning for optimal WAR positioning
-
----
-
-## References
-
-**Source**: [busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
-
-**Game System Documentation**:
-- Architecture: readme file explains project layout
-- Contracts: Each .sol file has inline comments
-- Wallet: /Wallet/Accounts.cs contains 20 test accounts
-- Commands: /Dysnomia/Domain/bin/ contains executable commands
-
-**Dependencies**:
-- Nethereum: Web3 .NET library
-- BouncyCastle: Cryptography
-- Solidity ^0.8.21: Smart contracts
+Used in all `modExp64` calls for state transformations. The VMREQ contract
+uses this prime in its random number generation. All Hecke meridian coordinates
+are computed modulo values derived from this prime. It is the cryptographic
+foundation of the entire ecosystem.
 
 ---
 
 **Last Updated**: 2026-02-22
-**Status**: Game analysis complete, integration plan ready
-**Next**: Deploy local instance and begin token accumulation testing
+**Status**: Memory updated with AFFECTION gateway mechanics, V3/V4 minting, Heart's Law, QING venues, data structures, and live contract addresses
