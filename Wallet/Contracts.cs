@@ -343,7 +343,8 @@ dysnomia/lib/yai.sol.old
                                         callargs[i] = Args[i];
                                 }
                                 try {
-                                    gas = await _f.EstimateGasAsync(Wallet.Account.Address, gas, null, callargs);
+                                    var _cts = new System.Threading.CancellationTokenSource(30000);
+                                    gas = await _f.EstimateGasAsync(Wallet.Account.Address, gas, null, callargs).WaitAsync(_cts.Token);
                                     gas = new HexBigInteger((int)((double)gas.ToUlong() * 1.1111));
                                 } catch { }
                                 rx = await _f.SendTransactionAsync(Wallet.Account.Address, gas, null, null, callargs);
