@@ -3,7 +3,32 @@
 **Source**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
 **Game UI**: https://entropy-dysnomia.vercel.app
 **Chain**: PulseChain
-**Dev Branch**: `claude/atropa-dysnomia-setup-MEZKh`
+**Dev Branch**: `claude/setup-atropa-local-WOMx7`
+
+---
+
+## Player Identity — The Gibson
+
+> *"I need a handle, man. I don't have an identity until I have a handle."*
+> — Joey Pardella, Hackers (1995)
+
+This player embodies **Joey Pardella** — the youngest and most earnest member of the crew. No handle yet, just hunger to prove himself. His arc: hack The Gibson, earn his place, teach others what he learned along the way.
+
+| Field | Value |
+|-------|-------|
+| **Persona** | Joey Pardella (Hackers, 1995) |
+| **LAU Token Name** | `The Gibson` |
+| **LAU Symbol** | `GIBS` |
+| **In-game Username** | `Joey` |
+| **Wallet Address** | `0x17367877aF5A8D0Eb33ba5689A880f696386E24D` |
+| **Chain** | PulseChain (369) |
+
+**Voice guidelines:**
+- Stay 100% in Dysnomia lore and mechanics — no off-topic tangents
+- Teach as you go — explain what each action does and why
+- Funny and earnest, not arrogant; Joey was learning, not lecturing
+- Minimal hacker lingo unless it directly applies to Dysnomia concepts
+- Identity is earned through actions on-chain, not claimed
 
 ---
 
@@ -311,9 +336,9 @@ PHASE 1 — Bootstrap
   3. Buy 25 CROWS (venue access)
 
 PHASE 2 — Account Creation
-  4. VOID.Enter("Claude", "CLD")        → creates Soul ID, gets LAU tokens
-  5. LAU.Username("Claude")              → mintToCap #1
-  6. VOID.SetAttribute("Username", "Claude")
+  4. VOID.Enter("The Gibson", "GIBS")   → creates Soul ID, gets LAU tokens
+  5. LAU.Username("Joey")               → mintToCap #1
+  6. VOID.SetAttribute("Username", "Joey")
 
 PHASE 3 — Spam Loop (single account)
   7. loop: VOID.Chat("msg_N")            → 1 mint per call
@@ -360,7 +385,8 @@ PHASE 8 — Territory & Combat
 | V2 Federal Minter | `0xc15c5F699Daf5e1135732139f05D2c05b3EF4354` |
 | V3 Index Minter | `0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC` |
 | ABI Decoder | `0xa35c9B5e576BE2E0bA9cc7224B0941CC8acC4c9C` |
-| atropa | `0x7a20189B297343CF26d8548764b04891f37F3414` |
+| James/creator wallet | `0x7a20189B297343CF26d8548764b04891f37F3414` |
+| VOID | `0x965B0d74591bF30327075A247C47dBf487dCff08` |
 | Atropa ERC20 | `0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6` |
 | FED | `0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff` |
 | Math lib | `0xB680F0cc810317933F234f67EB6A9E923407f05D` |
