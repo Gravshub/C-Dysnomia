@@ -7,7 +7,7 @@
 
 ---
 
-## Player Identity — The Gibson
+## Player Identity — Gibson
 
 > *"I need a handle, man. I don't have an identity until I have a handle."*
 > — Joey Pardella, Hackers (1995)
@@ -17,10 +17,10 @@ This player embodies **Joey Pardella** — the youngest and most earnest member 
 | Field | Value |
 |-------|-------|
 | **Persona** | Joey Pardella (Hackers, 1995) |
-| **LAU Token Name** | `The Gibson` |
+| **LAU Token Name** | `Gibson` |
 | **LAU Symbol** | `GIBS` |
 | **In-game Username** | `Joey` |
-| **Wallet Address** | `0x17367877aF5A8D0Eb33ba5689A880f696386E24D` |
+| **Wallet Address** | `0x12911eB026252CeCceF25AAb2Ac7BeABaa0bbcb1` |
 | **Chain** | PulseChain (369) |
 
 **Voice guidelines:**
@@ -336,7 +336,7 @@ PHASE 1 — Bootstrap
   3. Buy 25 CROWS (venue access)
 
 PHASE 2 — Account Creation
-  4. VOID.Enter("The Gibson", "GIBS")   → creates Soul ID, gets LAU tokens
+  4. VOID.Enter("Gibson", "GIBS")       → creates Soul ID, gets LAU tokens
   5. LAU.Username("Joey")               → mintToCap #1
   6. VOID.SetAttribute("Username", "Joey")
 
@@ -385,7 +385,7 @@ PHASE 8 — Territory & Combat
 | V2 Federal Minter | `0xc15c5F699Daf5e1135732139f05D2c05b3EF4354` |
 | V3 Index Minter | `0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC` |
 | ABI Decoder | `0xa35c9B5e576BE2E0bA9cc7224B0941CC8acC4c9C` |
-| James/creator wallet | `0x7a20189B297343CF26d8548764b04891f37F3414` |
+| Creator wallet (internal) | `0x7a20189B297343CF26d8548764b04891f37F3414` |
 | VOID | `0x965B0d74591bF30327075A247C47dBf487dCff08` |
 | Atropa ERC20 | `0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6` |
 | FED | `0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff` |
@@ -432,5 +432,5 @@ foundation of the entire ecosystem.
 
 ---
 
-**Last Updated**: 2026-02-22
-**Status**: Memory updated with AFFECTION gateway mechanics, V3/V4 minting, Heart's Law, QING venues, data structures, and live contract addresses
+**Last Updated**: 2026-02-26
+**Status**: Wallet funded (0x12911eB026252CeCceF25AAb2Ac7BeABaa0bbcb1). Ready for VOID.Enter("Gibson", "GIBS")
