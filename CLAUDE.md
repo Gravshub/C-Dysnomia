@@ -3,7 +3,22 @@
 **Source**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
 **Game UI**: https://entropy-dysnomia.vercel.app
 **Chain**: PulseChain
-**Dev Branch**: `claude/setup-atropa-local-WOMx7`
+**Dev Branch**: `claude/consolidate-repos-Id4Hn`  ← CURRENT (supersedes WOMx7)
+
+<!-- BRANCH HISTORY (for future Claude sessions):
+  - claude/atropa-dysnomia-setup-MEZKh  — DEPRECATED (2026-02-26)
+      3 commits. Initial CLAUDE.md docs only. Never had any code.
+      Superseded by WOMx7. Do not use.
+  - claude/setup-atropa-local-WOMx7     — ARCHIVED (2026-02-26)
+      7 commits. Full working implementation from yesterday's session.
+      Brought in: entire C# client stack (Wallet/, Dysnomia/, linux/),
+      all Wallet/codegen ABIs, all Solidity contracts, GIBS LAU deploy,
+      DysnomiaSelfSnipev4 deploy, Joey live at 3,303 GIBS.
+      Superseded by Id4Hn (this consolidation branch).
+  - claude/consolidate-repos-Id4Hn      — ACTIVE (branched from WOMx7 tip)
+      Current working branch. All WOMx7 history preserved here.
+      Use this for all future development.
+-->
 
 ---
 
@@ -467,3 +482,41 @@ foundation of the entire ecosystem.
 
 **Last Updated**: 2026-02-26
 **Status**: OPERATIONAL. Joey is in the VOID. GIBS LAU active. DSS deployed. 3,303 GIBS minted.
+
+---
+
+## Branch Consolidation — 2026-02-26
+
+### What happened & why
+
+Two development branches accumulated from previous Claude sessions:
+
+| Branch | Commits | Content | Status |
+|--------|---------|---------|--------|
+| `claude/atropa-dysnomia-setup-MEZKh` | 3 | CLAUDE.md docs only (no code) | **DEPRECATED** — dead end |
+| `claude/setup-atropa-local-WOMx7` | 7 | Full implementation (see below) | **ARCHIVED** — superseded |
+| `claude/consolidate-repos-Id4Hn` | 7 | Identical to WOMx7 tip + this consolidation commit | **ACTIVE** |
+
+### Yesterday's work recap (WOMx7, 4 key commits)
+
+1. **`Set up atropa_pulsechain client`** — Stood up the entire C# client framework:
+   - `Wallet/` — 20 Hardhat accounts, contract interaction layer, codegen ABIs for all contracts
+   - `Dysnomia/` — Oracle VM, Controller, LiveContracts auto-loader, Domain bin (execute/e2)
+   - `linux/` — Linux entrypoint
+   - `solidity/` — Full contract source tree (dysnomia/, domain/, lib/, minters)
+   - `setup.sh`, `.gitignore`, `readme`
+
+2. **`Rename LAU to Gibson`** — Token name/symbol set to `Gibson/GIBS`, wallet updated,
+   internal names scrubbed from docs.
+
+3. **`Add DysnomiaSelfSnipev4.sol`** — Self-contained sniper contract (no imports,
+   pragma ^0.8.21). Deployed to `0x91Df693177eE5C81016d0B7c4c2052A7d229c031`.
+
+4. **`feat: Joey is live`** — GIBS LAU deployed, username set, DSS added as owner,
+   6 VOID chat messages minted. 3,303 GIBS in wallet. Nonce 11 all mined.
+
+### Consolidation rationale
+
+MEZKh was a dead branch — never advanced beyond 3 doc-only commits. WOMx7 is the
+real history. Id4Hn branches from WOMx7's tip and is the canonical going-forward
+branch. MEZKh can be ignored; it exists on remote but has no unique content.
