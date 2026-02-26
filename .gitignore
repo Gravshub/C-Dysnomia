@@ -1,0 +1,11 @@
+# Environment — contains private key, never commit
+.env
+
+# Build artifacts
+bin/
+obj/
+Wallet/bin/Contracts/
+
+# .NET build output
+*.user
+.vs/
