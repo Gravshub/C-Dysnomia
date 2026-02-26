@@ -3,7 +3,7 @@
 // Modified constructor: removed address[] _snipeTokens param for CLI deploy compatibility.
 // Use addToken() post-deploy to populate snipe targets.
 
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.21;
 
 interface IERC20 {
     function allowance(address _owner, address _spender) external view returns (uint256);

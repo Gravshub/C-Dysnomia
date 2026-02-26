@@ -55,6 +55,16 @@ namespace Dysnomia
             await TryLoad("LAUFactory", "0x965B0d74591bF30327075A247C47dBf487dCff08",
                 "dysnomia/11c_laufactory.sol");
 
+            // ── Player LAU token ─────────────────────────────────────────────────────
+            // GIBS (Gibson) — Joey's LAU token deployed at 0x66a08aa12da955eb63d7ac121a88b2b210a07b03
+            await TryLoad("GIBS", "0x66a08aa12da955eb63d7ac121a88b2b210a07b03",
+                "dysnomia/11_lau.sol");
+
+            // ── DysnomiaSelfSnipev4 (DSS) — Joey's self-sniper ───────────────────────
+            // Deployed at 0x91Df693177eE5C81016d0B7c4c2052A7d229c031 (block 25887000)
+            await TryLoad("DysnomiaSelfSnipev4", "0x91Df693177eE5C81016d0B7c4c2052A7d229c031",
+                "dysnomia/etc/DysnomiaSelfSnipev4.sol");
+
             // ── Note: BUREAU/FEDERAL/TREASURY minters require @openzeppelin ──────────
             // Run: npm install in solidity/ to enable, then re-add here.
 

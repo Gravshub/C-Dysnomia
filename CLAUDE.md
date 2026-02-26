@@ -20,7 +20,7 @@ This player embodies **Joey Pardella** — the youngest and most earnest member 
 | **LAU Token Name** | `Gibson` |
 | **LAU Symbol** | `GIBS` |
 | **In-game Username** | `Joey` |
-| **Wallet Address** | `0x12911eB026252CeCceF25AAb2Ac7BeABaa0bbcb1` |
+| **Wallet Address** | `0x17367877aF5A8D0Eb33ba5689A880f696386E24D` |
 | **Chain** | PulseChain (369) |
 
 **Voice guidelines:**
@@ -390,6 +390,18 @@ PHASE 8 — Territory & Combat
 | Atropa ERC20 | `0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6` |
 | FED | `0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff` |
 | Math lib | `0xB680F0cc810317933F234f67EB6A9E923407f05D` |
+| SIU | `0x43136735603d4060f226c279613a4dd97146937c` |
+| YANG | `0xb702b3ec6d9de1011be963efe30a28b6ddfbe011` |
+| YAU | `0x7e91d862a346659daeed93726e733c8c1347a225` |
+| ZHOU | `0x5cc318d0c01fed5942b5ed2f53db07727d36e261` |
+| ZHENG | `0x24e62c39e34d7fe2b7df1162e1344eb6eb3b3e15` |
+| Fomalhaute (ZHOU SHIO = XIA power token) | `0x7ae73c498a308247be73688c09c96b3fd06ddb84` |
+| Eris (QI SHIO, ~99K supply) | `0xe843765114992e18061498aed708537ce9d924fa` |
+| Fornax (XIE SHIO — hunting, no DEX LP yet) | `0x4Df51741F2926525A21bF63E4769bA70633D2792` |
+| Noumenon's YUE (reference) | `0x935a694377cf48d8fc934f17db289774f0ce7075` |
+| **GIBS** (Joey's LAU token) | `0x66a08aa12da955eb63d7ac121a88b2b210a07b03` |
+| GIBS (LAU 1 — orphaned spare) | `0xabf97a71dfd71f3763c86080693c1ec94e5de846` |
+| **DysnomiaSelfSnipev4** (DSS) | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` |
 
 ---
 
@@ -413,9 +425,11 @@ PHASE 8 — Territory & Combat
 - `Wallet/Accounts.cs` — 20 Hardhat test account private keys
 - `Wallet/Contracts.cs` — Contract interaction layer
 - `Dysnomia/Controller.cs` — Static accessors
-- `Dysnomia/Domain/bin/execute.cs` — CLI command executor
+- `Dysnomia/Domain/bin/execute.cs` — CLI command executor (note: use `execute CONTRACT func arg` NOT `execute 0 CONTRACT func arg`)
 - `Dysnomia/Domain/bin/e2.cs` — Direct contract call command
 - `Dysnomia/Domain/Oracle.cs` — VM core
+- `Dysnomia/LiveContracts.cs` — Auto-loads GIBS + DSSv4 on every start
+- `solidity/dysnomia/etc/DysnomiaSelfSnipev4.sol` — DSS self-sniper contract (no-import, pragma ^0.8.21)
 
 ---
 
@@ -432,5 +446,24 @@ foundation of the entire ecosystem.
 
 ---
 
+## Session Log — Joey Is Live
+
+| Event | TX / Address | Block |
+|-------|-------------|-------|
+| LAU 1 deployed (orphaned) | `0xc9f3827...` | 26,215,634 |
+| **GIBS LAU deployed** | `0x62c78cd...` → `0x66a08aa...` | 26,215,664 |
+| **Username "Joey" set** | `0x1d46e25...` | 25,886,977 |
+| **DysnomiaSelfSnipev4 deployed** | `0x763b3da...` → `0x91Df693...` | 25,887,000 |
+| DSS added as GIBS owner | `0x39f470f...` | 25,887,010 |
+| 6 VOID chat messages posted via chatAndClaim | — | ~25,887,0xx |
+
+**Wallet nonce after session**: 11 (all mined)
+**GIBS balance at wallet**: 3,303 GIBS
+
+### Key Bugs Discovered & Fixed
+- **`execute 0 X func arg` bug**: The `execute.cs` command overwrites `Alias` with the account number string, taking the wrong execution branch. Use `execute X func arg` (no leading `0`) instead.
+- **C# `SendTransactionAsync` hang**: Nethereum's `Function.SendTransactionAsync` with 5-arg form hangs on PulseChain. All tx-sending was moved to Python `web3.py` which works reliably.
+- **`solc` version mismatch**: `DysnomiaSelfSnipev4.sol` pragma `^0.8.28` needed downgrade to `^0.8.21` to match the installed solc.
+
 **Last Updated**: 2026-02-26
-**Status**: Wallet funded (0x12911eB026252CeCceF25AAb2Ac7BeABaa0bbcb1). Ready for VOID.Enter("Gibson", "GIBS")
+**Status**: OPERATIONAL. Joey is in the VOID. GIBS LAU active. DSS deployed. 3,303 GIBS minted.
