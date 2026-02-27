@@ -402,6 +402,18 @@ PHASE 8 — Territory & Combat
 | **GIBS** (Joey's LAU token) | `0x66a08aa12da955eb63d7ac121a88b2b210a07b03` |
 | GIBS (LAU 1 — orphaned spare) | `0xabf97a71dfd71f3763c86080693c1ec94e5de846` |
 | **DysnomiaSelfSnipev4** (DSS) | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` |
+| **Joey's YUE wallet** | TBD — pending SEI.Start() |
+| **GIBS QING venue** | TBD — pending MAP.New(GIBS) |
+| **SEI** (player management) | `0x3dC54d46e030C42979f33C9992348a990acb6067` |
+| **MAP** (venue factory, 272 QINGs created) | `0xD3a7A95012Edd46Ea115c693B74c5e524b3DdA75` |
+| **CHAN** (player/sky manager) | `0xe250bf9729076B14A8399794B61C72d0F4AeFcd8` |
+| **CHO** (login/character system) | `0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB` |
+| **ZUO** (game QING venue) | `0xb0Ba7D36B7F0505879179ecE7401F24eB653c6E1` |
+| **QI** (processing chain) | `0x4d9Ce396BE95dbc5F71808c38107eB7422FD9a03` |
+| **MAI** (processing chain) | `0xc48B0a4E79eF302c8Eb5be71F562d08fB8E6A3d8` |
+| **XIA** (processing chain) | `0x7f4a4DD4a6f233d2D82BE38b2F9fc0Fef46f25FA` |
+| **HECKE** (Hecke Meridians coordinate lib) | `0x29A924D9B0233026B9844f2aFeB202F1791D7593` |
+| **Noumenon wallet** | `0xEbE9B8673d7096DCEE26DA7d9eaf6fc4eBe30980` |
 
 ---
 
@@ -456,14 +468,33 @@ foundation of the entire ecosystem.
 | **DysnomiaSelfSnipev4 deployed** | `0x763b3da...` → `0x91Df693...` | 25,887,000 |
 | DSS added as GIBS owner | `0x39f470f...` | 25,887,010 |
 | 6 VOID chat messages posted via chatAndClaim | — | ~25,887,0xx |
+| **SEI.Start() — YUE wallet created** | TBD | pending |
+| **MAP.New(GIBS) — QING venue created** | TBD | pending |
 
 **Wallet nonce after session**: 11 (all mined)
-**GIBS balance at wallet**: 3,303 GIBS
+**PLS balance**: 80,024 PLS
+
+### Token Scoreboard
+| Token | Address | Supply | Joey Holds | Notes |
+|-------|---------|--------|-----------|-------|
+| **GIBS** | `0x66a08aa...` | 3,305 | 3,303 | 2 in contract buffer |
+| **SEI** | `0x3dC54d46...` | 577 | 0 | +1 after Start() call |
+| **VOID** | `0x965B0d74...` | 80,373 | 0 | Game controller |
+| **ZHOU** | `0x5cC318d0...` | 37,636 | 0 | Chat log |
+| **PLS** (gas) | native | — | 80,024 | ~72,518 after deploys |
+| **YUE** (Joey's wallet) | TBD | new | staff | Pending SEI.Start() |
+| **GIBS-QING** | TBD | new | staff | Pending MAP.New(GIBS) |
 
 ### Key Bugs Discovered & Fixed
 - **`execute 0 X func arg` bug**: The `execute.cs` command overwrites `Alias` with the account number string, taking the wrong execution branch. Use `execute X func arg` (no leading `0`) instead.
 - **C# `SendTransactionAsync` hang**: Nethereum's `Function.SendTransactionAsync` with 5-arg form hangs on PulseChain. All tx-sending was moved to Python `web3.py` which works reliably.
 - **`solc` version mismatch**: `DysnomiaSelfSnipev4.sol` pragma `^0.8.28` needed downgrade to `^0.8.21` to match the installed solc.
 
-**Last Updated**: 2026-02-26
-**Status**: OPERATIONAL. Joey is in the VOID. GIBS LAU active. DSS deployed. 3,303 GIBS minted.
+### On-Chain Intelligence Notes (2026-02-27)
+- **Noumenon** (`0xEbE9B8673d...`) has 2,473 txs, active gifter — distributed AFFECTION + named tokens to ~20+ community members (blocks 25,840,497–25,841,624). Most recent message: "gifts for the game"
+- **MAP** has 272 QINGs created by other players — the venue ecosystem is active
+- **Active bot**: `0xb1c9b8d6...` → `0xc078C8DaE2...` (8,156 bytes, selector `0x00000002`) running chatAndClaim-style loop
+- **SEI.totalSupply = 577** — 577 YUE wallets created by other players before Joey
+
+**Last Updated**: 2026-02-27
+**Status**: OPERATIONAL. All infrastructure addresses verified. YUE + QING transactions next.
