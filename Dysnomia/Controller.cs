@@ -22,7 +22,7 @@ namespace Dysnomia
             Oracle = new Oracle();
             Console.Error.WriteLine("[Controller] Oracle created");
 
-            string rpc = System.Environment.GetEnvironmentVariable("DYSNOMIA_RPC") ?? "https://rpc.pulsechain.com";
+            string rpc = System.Environment.GetEnvironmentVariable("DYSNOMIA_RPC") ?? "https://rpc.pulsechainstats.com";
             string solc = System.Environment.GetEnvironmentVariable("DYSNOMIA_SOLC") ?? "/usr/local/bin/solc";
             string repo = System.Environment.GetEnvironmentVariable("DYSNOMIA_REPO") ?? System.AppContext.BaseDirectory;
 

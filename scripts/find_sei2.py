@@ -6,7 +6,7 @@ from web3 import Web3
 from eth_utils import keccak
 import rlp
 
-RPC = "https://rpc.pulsechain.com"
+RPC = "https://rpc.pulsechainstats.com"
 w3 = Web3(Web3.HTTPProvider(RPC))
 print(f"Connected: {w3.is_connected()}  Block: {w3.eth.block_number:,}")
 
