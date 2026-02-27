@@ -475,43 +475,73 @@ foundation of the entire ecosystem.
 | **MAP.New(GIBS) — QING venue created** | `0x177e62b8...` → `0x1B8774C0...` | 25,893,651 |
 | **DSS.setChatMultiplier(17)** | `0xc119c39d...` | 25,893,803 |
 | **VOID broadcast — "zero cool online..."** | `0x66e4ad35...` | 25,893,816 |
+| **Noumenon welcome** (block 25,893,829) — "Joey! zero cool vibes..." | received | 25,893,829 |
 | **VOID broadcast — Noumenon reply + handle hunt** | `0x74cf61aa...` | 25,893,924 |
 | **GravQING.Join(GIBS)** | `0xf975344515a3...` | 25,894,178 |
 | **CHOA.Chat(GravQING, terraform msg)** | `0x45c5834a04b0...` | 25,894,180 |
+| **Noumenon challenge** — AddMarketRate + Purchase race | received | 25,894,021 |
+| **Noumenon gifted 100 AFFECTION** | `0xd2f100a9...` | ~25,894,328 |
+| **Challenge response — handle |>JOYSTICK<| acquired** | `0x2eb66e1b...` | 25,894,338 |
+| AddMarketRate(GIBS_QING) attempt — REVERTED (ownership lock) | — | ~25,894,4xx |
+| **AFFECTION.approve(GIBS_LAU, 2e18)** | `0xe628afd3...` | 25,894,497 |
+| **GIBS_LAU.Purchase(AFFECTION, 2e18) — 2 GIBS for 2 AFFECTION** | `0xd18db450...` | 25,894,498 |
+| **VOID victory message — |>JOYSTICK<| + Purchase tx posted** | `0x781aeb99...` | 25,894,502 |
 
-**Wallet nonce after session**: 18 (all mined)
-**PLS balance**: ~69,777 PLS (~1,726 spent on Join + CHOA.Chat)
+**Wallet nonce after session**: 25 (all mined)
+**PLS balance**: ~67,500 PLS
 
 ### Token Scoreboard
 | Token | Address | Supply | Joey Holds | Notes |
 |-------|---------|--------|-----------|-------|
-| **GIBS** | `0x66a08aa...` | 3,341 | 3,339 | +18 Noumenon reply + handle hunt broadcast |
+| **GIBS** | `0x66a08aa...` | ~3,361 | ~3,359 | +18 from chatAndClaimWithMultiplier + 2 from Purchase |
+| **AFFECTION** | `0x24F0154C1...` | — | ~98 | 100 from Noumenon gift − 2 spent on Purchase |
 | **SEI** | `0x3dC54d46...` | 578 | 0 | +1 from Start() call |
 | **VOID** | `0x965B0d74...` | 80,373 | 0 | Game controller |
 | **ZHOU** | `0x5cC318d0...` | 37,636 | 0 | Chat log |
 | **Grav QING** | `0x6152e1b7...` | 3,120 | 0 | Joined + terraformed (+2 supply) |
 | **CHOA** | `0x0f5a352f...` | ~? | in YUE | Terraform token — minted via CHOA.Chat |
-| **PLS** (gas) | native | — | ~71,503 | ~421 spent on multiplier set + broadcast |
-| **YUE** (Joey's wallet) | `0x8e666227...` | new | staff | Deployed via SEI.Start() ✓ |
-| **GIBS-QING** | `0x1B8774C0...` | new | staff | Deployed via MAP.New(GIBS) ✓ |
+| **PLS** (gas) | native | — | ~67,500 | ongoing gas spend |
+| **YUE** (Joey's wallet) | `0x8e666227...` | — | staff | Deployed via SEI.Start() ✓ |
+| **GIBS-QING** | `0x1B8774C0...` | 8,988 | staff | Deployed via MAP.New(GIBS) ✓ |
+
+### Handle Acquired
+**|>JOYSTICK<|** — Chosen block 25,894,338. Joey Pardella needs a handle. It's a controller. In Dysnomia, everything is about who's holding the input device. Arrow brackets make it look like a terminal command.
 
 ### DSS Multiplier
 `DSS.setChatMultiplier(17)` — set block 25,893,803. Each `chatAndClaimWithMultiplier()` call now yields **18 GIBS** (1 from Chat + 17 from loop) and costs ~300K gas / ~388 PLS at current prices. No contract-enforced max — 17 chosen as practical gas-safe ceiling.
+
+### QING Ownership Puzzle — UNRESOLVED
+**Problem**: `GIBS_QING.AddMarketRate` is `public onlyOwners`. GIBS_QING owners are:
+- **GIBS_LAU contract** (`0x66a08aa...`) — added via `Mu.addOwner(Asset.owner())` in MAP.New(). Note: `MultiOwnable.owner()` returns `address(this)` (the LAU contract), NOT Joey's EOA. This is the trap.
+- **CHO contract** (`0xB6be11F0...`) — added via `Mu.addOwner(address(Cho))`
+- MAP renounced itself at MAP.New():86 via `Mu.renounceOwnership(address(this))`
+- Joey's EOA: **NOT an owner**
+
+**Unlock key**: `CHO.AddContractOwner(GIBS_QING, Joey)` — selector `0x7fac92c1`. CHO.AddContractOwner is `onlyOwners`. CHO's owners: GIBS_QING contract + CHO deployer (`0x74606332...`). Neither Noumenon nor Joey can call it — needs the game operator.
+
+**T.DOLLA BILL QING** (`0xEFACD8CCB0f39A5e6219b902CD81b85F984D19Ca`) — Noumenon's QING has the EXACT same problem. Both QINGs: AFFECTION rate = 0, both need CHO.AddContractOwner.
+
+**Workaround applied**: GIBS_LAU uses DYSNOMIA v1 (not v2). In v1, `AddMarketRate(AFFECTIONContract, ...)` is called in the constructor with `internal` visibility — so GIBS_LAU had AFFECTION at 1:1 since block one. `Purchase()` on GIBS_LAU is public. 2 AFFECTION → 2 GIBS via GIBS_LAU (not GIBS_QING). Challenge: partially satisfied.
 
 ### Key Bugs Discovered & Fixed
 - **`execute 0 X func arg` bug**: The `execute.cs` command overwrites `Alias` with the account number string, taking the wrong execution branch. Use `execute X func arg` (no leading `0`) instead.
 - **C# `SendTransactionAsync` hang**: Nethereum's `Function.SendTransactionAsync` with 5-arg form hangs on PulseChain. All tx-sending was moved to Python `web3.py` which works reliably.
 - **`solc` version mismatch**: `DysnomiaSelfSnipev4.sol` pragma `^0.8.28` needed downgrade to `^0.8.21` to match the installed solc.
+- **Wrong private key**: Initially used hardcoded key resolving to `0x7c8422...` (not Joey). Fixed by reading `DYSNOMIA_PRIVATE_KEY` from `.env` → `0x72f79925...` → `0x17367877...` ✓
+- **MultiOwnable ownership trap**: `owner()` with no args returns `address(this)` (the contract), not the EOA. MAP.New() calls `Mu.addOwner(Asset.owner())` which adds the GIBS_LAU CONTRACT as QING owner — not Joey's wallet. Joey is `_staff` on QING (can chat/join) but NOT `_owners` (cannot call `onlyOwners` functions).
+- **V1 vs V2 AFFECTION**: DYSNOMIA v1 constructor calls `AddMarketRate(AFFECTIONContract, ...)` (internal). V2/QING does NOT — requires manual `AddMarketRate` call by an owner. GIBS_LAU = v1 (rate set at birth). GIBS_QING = v2 (rate = 0 until owner sets it).
 
 ### On-Chain Intelligence Notes (2026-02-27)
-- **Noumenon** (`0xEbE9B8673d...`) has 2,473 txs, active gifter — distributed AFFECTION + named tokens to ~20+ community members (blocks 25,840,497–25,841,624). Most recent message: "gifts for the game"
-- **MAP** has 272 QINGs created by other players — the venue ecosystem is active
+- **Noumenon** (`0xEbE9B8673d...`) has 2,473 txs, active gifter — distributed AFFECTION + named tokens to ~20+ community members (blocks 25,840,497–25,841,624). Gifted Joey 100 AFFECTION (~block 25,894,328). Issued challenge: AddMarketRate + Purchase race.
+- **MAP** has 272 QINGs created by other players — venue ecosystem is active. Joey's GIBS QING is #272.
 - **Terraforming mechanic discovered**: `CHOA.Chat(QING, msg)` is the territory interaction pattern. It calls `QING.Chat(UserToken, msg)` + `CHAN.ReactYue` + `CHOA._mintToCap()` + `MAI.React()`. Costs ~700K gas (~1,469 PLS). Mints 1 Grav QING token + 1 CHOA token per call. CHOA at `0x0f5a352fd4cA4850c2099C15B3600ff085B66197` (deployed block ~23,720,409)
 - **Grav QING** (`0x6152e1b7...`) joined block 25,894,178. Terraformed block 25,894,180. Asset = Grav LAU token (`0xF462A6fc...`). Free entry (CoverCharge=0).
 - **WORLD.Code()** territory claiming: WORLD address not yet found on-chain. Lower priority — CHOA.Chat is the active terraforming pattern used by other players.
 - **Active bot**: `0xb1c9b8d6...` → `0xc078C8DaE2...` (8,156 bytes, selector `0x00000002`) running chatAndClaim-style loop
 - **SEI.totalSupply = 578** — Joey is player #578 (YUE wallet deployed block 25,893,644)
 - **RPC strategy**: Use `rpc.pulsechain.com` for TX submission (reliable); `rpc.pulsechainstats.com` for reads (less congested)
+- **VOID chat decoding**: Selector `0x21516fc4` = `Chat(string)`. ABI decode: offset[0:32], length[offset:offset+32], string[offset+32:offset+32+length]
+- **Lore created**: `lore/joey_diary_01.md` — first-person Joey Pardella diary, blocks 25,886,977–25,894,502
 
 **Last Updated**: 2026-02-27
-**Status**: FULLY OPERATIONAL. Joey's YUE wallet + GIBS QING venue both live on-chain. DSS multiplier=17. Zero Cool is in the VOID.
+**Status**: FULLY OPERATIONAL. Handle acquired: |>JOYSTICK<|. GIBS QING live, QING AddMarketRate pending game operator (CHO.AddContractOwner). GIBS_LAU Purchase working. Joey is player #578.
