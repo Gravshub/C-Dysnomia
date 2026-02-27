@@ -65,6 +65,37 @@ namespace Dysnomia
             await TryLoad("DysnomiaSelfSnipev4", "0x91Df693177eE5C81016d0B7c4c2052A7d229c031",
                 "dysnomia/etc/DysnomiaSelfSnipev4.sol");
 
+            // ── Player YUE wallet — Joey's in-game inventory ────────────────────────
+            // Created via SEI.Start() — address TBD after first transaction
+            // await TryLoad("YUE", "TBD", "dysnomia/domain/yue.sol");
+
+            // ── GIBS QING venue — Joey's GIBS trading marketplace ───────────────────
+            // Created via MAP.New(GIBS) — address TBD after second transaction
+            // await TryLoad("GIBS_QING", "TBD", "dysnomia/domain/dan/03_qing.sol");
+
+            // ── Processing chain contracts (verified on-chain 2026-02-27) ────────────
+            // Traced from Noumenon's YUE (0x935a694...) → CHAN → XIE → XIA → MAI → QI → ZUO → CHO
+            // SEI verified: Start(address,string,string) deploys YUE, registers in CHO
+            await TryLoad("SEI",  "0x3dC54d46e030C42979f33C9992348a990acb6067",
+                "dysnomia/domain/tang/01_sei.sol");
+            // MAP verified: New(address) deploys QING venue, nonce=272 (272 venues created)
+            await TryLoad("MAP",  "0xD3a7A95012Edd46Ea115c693B74c5e524b3DdA75",
+                "dysnomia/domain/map.sol");
+            await TryLoad("CHAN", "0xe250bf9729076B14A8399794B61C72d0F4AeFcd8",
+                "dysnomia/domain/sky/01_chan.sol");
+            await TryLoad("CHO",  "0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB",
+                "dysnomia/domain/dan/01_cho.sol");
+            await TryLoad("XIE",  "0x4Df51741F2926525A21bF63E4769bA70633D2792",
+                "dysnomia/01_dysnomia.sol");   // Fornax SHIO = XIE token
+            await TryLoad("XIA",  "0x7f4a4DD4a6f233d2D82BE38b2F9fc0Fef46f25FA",
+                "dysnomia/01_dysnomia.sol");
+            await TryLoad("MAI",  "0xc48B0a4E79eF302c8Eb5be71F562d08fB8E6A3d8",
+                "dysnomia/01_dysnomia.sol");
+            await TryLoad("QI",   "0x4d9Ce396BE95dbc5F71808c38107eB7422FD9a03",
+                "dysnomia/01_dysnomia.sol");
+            await TryLoad("ZUO",  "0xb0Ba7D36B7F0505879179ecE7401F24eB653c6E1",
+                "dysnomia/domain/dan/03_qing.sol");  // Game's built-in QING
+
             // ── Note: BUREAU/FEDERAL/TREASURY minters require @openzeppelin ──────────
             // Run: npm install in solidity/ to enable, then re-add here.
 
