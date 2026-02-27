@@ -424,6 +424,12 @@ PHASE 8 — Territory & Combat
 | **XIA** (processing chain) | `0x7f4a4DD4a6f233d2D82BE38b2F9fc0Fef46f25FA` |
 | **HECKE** (Hecke Meridians coordinate lib) | `0x29A924D9B0233026B9844f2aFeB202F1791D7593` |
 | **Noumenon wallet** | `0xEbE9B8673d7096DCEE26DA7d9eaf6fc4eBe30980` |
+| **Enteh's QING** (Fornax source — Join+Redeem) | `0xA43F71ac277022A547c56706fbBc5d93f88C3467` |
+| **Enteh's LAU** (enteh token) | `0xccE83CfF8B531EaDdcf11AB414C59DC046D1aAc7` |
+| **Enteh EOA** | `0x18F621662D6A1f23700EA32D146B32195DC33111` |
+| **RatKing EOA** (Fornax whale, 25K) | `0x530c8cE74897805A4612EAFf07972D049aCaf95F` |
+| **PulseX V2 Router** | `0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02` |
+| **WITHOUT** (ban token — must hold 0) | `0x173216Ed67eBF3E6767D86e8b3Ff32e0d64437bF` |
 
 ---
 
@@ -613,14 +619,37 @@ All three tokens (Fornax, Fomalhaute, CHO) have **zero balance** at GIBS_LAU and
 
 **Key correction**: `0x4Df51741...` is the **XIE contract**, NOT Fornax. The real Fornax is at `0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7` (read from `XIE.Fornax()`).
 
-**Unblock strategy** (needs further investigation):
-1. Purchase() on SHIO tokens requires contract self-balance > 0 (currently 0 — maxed out)
-2. Tokens exist but are distributed across unknown holder addresses
-3. Options: DEX purchase, gift from Noumenon, or discover the earning mechanism
-4. CHEON.Su() gas estimate: ~818K gas (~1,085 PLS) — callable but returns 0,0,0 until SHIO tokens acquired
-5. Alternatively: ask Noumenon (active gifter) for Fornax/Fomalhaute/CHO tokens
+**SHIO Acquisition Strategy** (researched 2026-02-27):
 
-**Script**: `scripts/beat_recon.py` — comprehensive read-only recon with dry-run diagnostics
+**Fornax** — NO DEX pairs, all 50,977 maxed out, self-balance=0. Acquired via **enteh's QING Redeem**:
+- Enteh's QING (`0xA43F71ac...`): CoverCharge=0, holds 11 Fornax, GetMarketRate(FORNAX)=0.1
+- Flow: Join(GIBS_LAU) × N → Purchase(AFFECTION, N) → Redeem(FORNAX, N) → get N × 0.1 Fornax
+- Key discovery: **QING.Join() does NOT call bouncer()** — no CROWS needed. Bouncer only gates admin functions.
+- CROWS token is NOT a DYSNOMIA token (fixed 800 supply, owner renounced, ~19.2M WPLS/CROWS on DEX)
+
+**Fomalhaute** — PulseX V2 DEX pairs available:
+- PulseX V2/AFFECTION pair (`0x856DAe0C...`): 2.533 Fomalhaute / 9,101 AFFECTION
+- 5 AFFECTION → ~0.00139 Fomalhaute (sufficient — need > 0.00007 per address)
+
+**CHO** — PulseX V2 DEX pairs available:
+- PulseX V2/AFFECTION pair (`0xB7853a09...`): 34.238 CHO / 5,386 AFFECTION
+- 2 AFFECTION → ~0.01267 CHO (sufficient — need > 0.00007 per address)
+
+**Total cost**: ~10 AFFECTION + ~16,000 PLS gas (Joey has 98 Ⓐ and ~67,500 PLS)
+
+**Enteh player analysis** (reference Beat caller):
+- 25-26 successful Beat calls, all same QingWaat, gas ~1.9M-3.5M
+- SHIO at LAU: Fornax=11, Fomalhaute=0.001, CHO=0.001
+- Skips CHEON.Su() entirely — calls Beat directly
+
+**Scripts**:
+- `scripts/beat_recon.py` — read-only recon with dry-run diagnostics
+- `scripts/shio_acquisition_recon.py` — SHIO token holder/DEX analysis
+- `scripts/fornax_holders_recon.py` — Fornax holder investigation
+- `scripts/qing_bouncer_check.py` — enteh QING Join verification (dry-run confirmed SUCCESS)
+- `scripts/crows_recon.py` — CROWS token availability analysis
+- `scripts/tx_acquire_shio.py` — **EXECUTE**: acquire all 3 SHIO tokens + transfer to targets
+- `scripts/tx_beat.py` — **EXECUTE**: META.Beat() with pre-flight verification
 
 **Last Updated**: 2026-02-27
-**Status**: FULLY OPERATIONAL. Handle acquired: |>JOYSTICK<|. GIBS QING live, QING AddMarketRate pending game operator (CHO.AddContractOwner). GIBS_LAU Purchase working. Joey is player #578. **Beat: researched, blocked on SHIO token acquisition.**
+**Status**: FULLY OPERATIONAL. Handle: |>JOYSTICK<|. GIBS QING live. Player #578. **Beat: scripts ready, SHIO acquisition paths confirmed. Run tx_acquire_shio.py → tx_beat.py.**
