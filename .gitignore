@@ -6,6 +6,10 @@ bin/
 obj/
 Wallet/bin/Contracts/
 
+# Exception: source files in Domain/bin/ are C# command handlers, not build output
+!Dysnomia/Domain/bin/
+!Dysnomia/Domain/bin/*.cs
+
 # .NET build output
 *.user
 .vs/
