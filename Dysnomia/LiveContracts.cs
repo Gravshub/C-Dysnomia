@@ -66,12 +66,14 @@ namespace Dysnomia
                 "dysnomia/etc/DysnomiaSelfSnipev4.sol");
 
             // ── Player YUE wallet — Joey's in-game inventory ────────────────────────
-            // Created via SEI.Start() — address TBD after first transaction
-            // await TryLoad("YUE", "TBD", "dysnomia/domain/yue.sol");
+            // Created via SEI.Start(GIBS, "Gibson Wallet", "GIBSw") block 25,893,644
+            await TryLoad("YUE", "0x8e666227B0C5A42075a4f9bdf5d2176f287a9cf0",
+                "dysnomia/domain/yue.sol");
 
             // ── GIBS QING venue — Joey's GIBS trading marketplace ───────────────────
-            // Created via MAP.New(GIBS) — address TBD after second transaction
-            // await TryLoad("GIBS_QING", "TBD", "dysnomia/domain/dan/03_qing.sol");
+            // Created via MAP.New(GIBS) block 25,893,651; Asset = GIBS
+            await TryLoad("GIBS_QING", "0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35",
+                "dysnomia/domain/dan/03_qing.sol");
 
             // ── Processing chain contracts (verified on-chain 2026-02-27) ────────────
             // Traced from Noumenon's YUE (0x935a694...) → CHAN → XIE → XIA → MAI → QI → ZUO → CHO

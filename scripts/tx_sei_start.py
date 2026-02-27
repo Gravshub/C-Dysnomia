@@ -7,8 +7,10 @@ from web3 import Web3
 from eth_account import Account
 import json, os
 
-RPC = "https://rpc.pulsechain.com"
-w3 = Web3(Web3.HTTPProvider(RPC))
+# Use main RPC for tx submission (reliable), pulsechainstats for reads
+SUBMIT_RPC = "https://rpc.pulsechain.com"
+RPC = "https://rpc.pulsechainstats.com"
+w3 = Web3(Web3.HTTPProvider(SUBMIT_RPC))
 print(f"Connected: {w3.is_connected()}  Block: {w3.eth.block_number:,}")
 
 # Addresses
