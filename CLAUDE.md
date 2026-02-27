@@ -3,7 +3,9 @@
 **Source**: [github.com/busytoby/atropa_pulsechain](https://github.com/busytoby/atropa_pulsechain)
 **Game UI**: https://entropy-dysnomia.vercel.app
 **Chain**: PulseChain
-**Dev Branch**: `claude/setup-atropa-local-WOMx7`
+**Dev Branch convention**: `claude/dysnomia-MMDDYY-<sessionID>` (e.g. `claude/dysnomia-022726-Z7QDr`)
+- `claude/` prefix and session-ID suffix are required by git infrastructure (push auth)
+- Current session: `claude/lau-implementation-planning-Z7QDr` (legacy name — apply new convention from next session)
 
 ---
 
@@ -470,20 +472,25 @@ foundation of the entire ecosystem.
 | 6 VOID chat messages posted via chatAndClaim | — | ~25,887,0xx |
 | **SEI.Start() — YUE wallet created** | `0x00da3e5a...` → `0x8e666227...` | 25,893,644 |
 | **MAP.New(GIBS) — QING venue created** | `0x177e62b8...` → `0x1B8774C0...` | 25,893,651 |
+| **DSS.setChatMultiplier(17)** | `0xc119c39d...` | 25,893,803 |
+| **VOID broadcast — "zero cool online..."** | `0x66e4ad35...` | 25,893,816 |
 
-**Wallet nonce after session**: 13 (all mined)
-**PLS balance**: 71,924 PLS
+**Wallet nonce after session**: 15 (all mined)
+**PLS balance**: ~71,503 PLS
 
 ### Token Scoreboard
 | Token | Address | Supply | Joey Holds | Notes |
 |-------|---------|--------|-----------|-------|
-| **GIBS** | `0x66a08aa...` | 3,305 | 3,303 | 2 in contract buffer |
+| **GIBS** | `0x66a08aa...` | 3,323 | 3,321 | +18 from first chatAndClaimWithMultiplier |
 | **SEI** | `0x3dC54d46...` | 578 | 0 | +1 from Start() call |
 | **VOID** | `0x965B0d74...` | 80,373 | 0 | Game controller |
 | **ZHOU** | `0x5cC318d0...` | 37,636 | 0 | Chat log |
-| **PLS** (gas) | native | — | 71,924 | ~8,100 spent on YUE+QING deploys |
+| **PLS** (gas) | native | — | ~71,503 | ~421 spent on multiplier set + broadcast |
 | **YUE** (Joey's wallet) | `0x8e666227...` | new | staff | Deployed via SEI.Start() ✓ |
 | **GIBS-QING** | `0x1B8774C0...` | new | staff | Deployed via MAP.New(GIBS) ✓ |
+
+### DSS Multiplier
+`DSS.setChatMultiplier(17)` — set block 25,893,803. Each `chatAndClaimWithMultiplier()` call now yields **18 GIBS** (1 from Chat + 17 from loop) and costs ~300K gas / ~388 PLS at current prices. No contract-enforced max — 17 chosen as practical gas-safe ceiling.
 
 ### Key Bugs Discovered & Fixed
 - **`execute 0 X func arg` bug**: The `execute.cs` command overwrites `Alias` with the account number string, taking the wrong execution branch. Use `execute X func arg` (no leading `0`) instead.
@@ -498,4 +505,4 @@ foundation of the entire ecosystem.
 - **RPC strategy**: Use `rpc.pulsechain.com` for TX submission (reliable); `rpc.pulsechainstats.com` for reads (less congested)
 
 **Last Updated**: 2026-02-27
-**Status**: FULLY OPERATIONAL. Joey's YUE wallet + GIBS QING venue both live on-chain.
+**Status**: FULLY OPERATIONAL. Joey's YUE wallet + GIBS QING venue both live on-chain. DSS multiplier=17. Zero Cool is in the VOID.
