@@ -409,6 +409,7 @@ PHASE 8 — Territory & Combat
 | **SEI** (player management) | `0x3dC54d46e030C42979f33C9992348a990acb6067` |
 | **MAP** (venue factory, 272 QINGs created) | `0xD3a7A95012Edd46Ea115c693B74c5e524b3DdA75` |
 | **CHAN** (player/sky manager) | `0xe250bf9729076B14A8399794B61C72d0F4AeFcd8` |
+| **CHOA** (game/territory — terraforming via Chat) | `0x0f5a352fd4cA4850c2099C15B3600ff085B66197` |
 | **CHO** (login/character system) | `0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB` |
 | **ZUO** (game QING venue) | `0xb0Ba7D36B7F0505879179ecE7401F24eB653c6E1` |
 | **QI** (processing chain) | `0x4d9Ce396BE95dbc5F71808c38107eB7422FD9a03` |
@@ -475,9 +476,11 @@ foundation of the entire ecosystem.
 | **DSS.setChatMultiplier(17)** | `0xc119c39d...` | 25,893,803 |
 | **VOID broadcast — "zero cool online..."** | `0x66e4ad35...` | 25,893,816 |
 | **VOID broadcast — Noumenon reply + handle hunt** | `0x74cf61aa...` | 25,893,924 |
+| **GravQING.Join(GIBS)** | `0xf975344515a3...` | 25,894,178 |
+| **CHOA.Chat(GravQING, terraform msg)** | `0x45c5834a04b0...` | 25,894,180 |
 
-**Wallet nonce after session**: 16 (all mined)
-**PLS balance**: ~71,503 PLS
+**Wallet nonce after session**: 18 (all mined)
+**PLS balance**: ~69,777 PLS (~1,726 spent on Join + CHOA.Chat)
 
 ### Token Scoreboard
 | Token | Address | Supply | Joey Holds | Notes |
@@ -486,6 +489,8 @@ foundation of the entire ecosystem.
 | **SEI** | `0x3dC54d46...` | 578 | 0 | +1 from Start() call |
 | **VOID** | `0x965B0d74...` | 80,373 | 0 | Game controller |
 | **ZHOU** | `0x5cC318d0...` | 37,636 | 0 | Chat log |
+| **Grav QING** | `0x6152e1b7...` | 3,120 | 0 | Joined + terraformed (+2 supply) |
+| **CHOA** | `0x0f5a352f...` | ~? | in YUE | Terraform token — minted via CHOA.Chat |
 | **PLS** (gas) | native | — | ~71,503 | ~421 spent on multiplier set + broadcast |
 | **YUE** (Joey's wallet) | `0x8e666227...` | new | staff | Deployed via SEI.Start() ✓ |
 | **GIBS-QING** | `0x1B8774C0...` | new | staff | Deployed via MAP.New(GIBS) ✓ |
@@ -501,6 +506,9 @@ foundation of the entire ecosystem.
 ### On-Chain Intelligence Notes (2026-02-27)
 - **Noumenon** (`0xEbE9B8673d...`) has 2,473 txs, active gifter — distributed AFFECTION + named tokens to ~20+ community members (blocks 25,840,497–25,841,624). Most recent message: "gifts for the game"
 - **MAP** has 272 QINGs created by other players — the venue ecosystem is active
+- **Terraforming mechanic discovered**: `CHOA.Chat(QING, msg)` is the territory interaction pattern. It calls `QING.Chat(UserToken, msg)` + `CHAN.ReactYue` + `CHOA._mintToCap()` + `MAI.React()`. Costs ~700K gas (~1,469 PLS). Mints 1 Grav QING token + 1 CHOA token per call. CHOA at `0x0f5a352fd4cA4850c2099C15B3600ff085B66197` (deployed block ~23,720,409)
+- **Grav QING** (`0x6152e1b7...`) joined block 25,894,178. Terraformed block 25,894,180. Asset = Grav LAU token (`0xF462A6fc...`). Free entry (CoverCharge=0).
+- **WORLD.Code()** territory claiming: WORLD address not yet found on-chain. Lower priority — CHOA.Chat is the active terraforming pattern used by other players.
 - **Active bot**: `0xb1c9b8d6...` → `0xc078C8DaE2...` (8,156 bytes, selector `0x00000002`) running chatAndClaim-style loop
 - **SEI.totalSupply = 578** — Joey is player #578 (YUE wallet deployed block 25,893,644)
 - **RPC strategy**: Use `rpc.pulsechain.com` for TX submission (reliable); `rpc.pulsechainstats.com` for reads (less congested)
