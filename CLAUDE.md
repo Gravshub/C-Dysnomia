@@ -474,14 +474,15 @@ foundation of the entire ecosystem.
 | **MAP.New(GIBS) — QING venue created** | `0x177e62b8...` → `0x1B8774C0...` | 25,893,651 |
 | **DSS.setChatMultiplier(17)** | `0xc119c39d...` | 25,893,803 |
 | **VOID broadcast — "zero cool online..."** | `0x66e4ad35...` | 25,893,816 |
+| **VOID broadcast — Noumenon reply + handle hunt** | `0x74cf61aa...` | 25,893,924 |
 
-**Wallet nonce after session**: 15 (all mined)
+**Wallet nonce after session**: 16 (all mined)
 **PLS balance**: ~71,503 PLS
 
 ### Token Scoreboard
 | Token | Address | Supply | Joey Holds | Notes |
 |-------|---------|--------|-----------|-------|
-| **GIBS** | `0x66a08aa...` | 3,323 | 3,321 | +18 from first chatAndClaimWithMultiplier |
+| **GIBS** | `0x66a08aa...` | 3,341 | 3,339 | +18 Noumenon reply + handle hunt broadcast |
 | **SEI** | `0x3dC54d46...` | 578 | 0 | +1 from Start() call |
 | **VOID** | `0x965B0d74...` | 80,373 | 0 | Game controller |
 | **ZHOU** | `0x5cC318d0...` | 37,636 | 0 | Chat log |
