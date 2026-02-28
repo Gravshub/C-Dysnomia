@@ -1,0 +1,27 @@
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.DotSettings.user
+
+# NuGet
+packages/
+*.nupkg
+
+# Local session data
+# profile.dat lives in %APPDATA%/dysnomia/ by default (outside this repo)
+# If you override the path to somewhere inside the project, add it here:
+# config/profile.dat
+
+# Environment / local config — never commit these
+.env
+.env.local
+*.env
+
+# macOS
+.DS_Store
+
+# JetBrains / Rider
+.idea/
