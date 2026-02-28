@@ -34,11 +34,13 @@ parser = argparse.ArgumentParser(description="Full Beat integration flow")
 parser.add_argument("--dry-run",    action="store_true", help="Simulate all phases, no TXs sent")
 parser.add_argument("--with-cheon", action="store_true", help="Run CHEON.Su() before Beat")
 parser.add_argument("--skip-shio",  action="store_true", help="Skip SHIO acquisition (assume already present)")
+parser.add_argument("--broadcast",  action="store_true", help="Post Beat success to VOID via DSS (only fires if Beat confirms)")
 args = parser.parse_args()
 
 DRY_RUN    = args.dry_run
 WITH_CHEON = args.with_cheon
 SKIP_SHIO  = args.skip_shio
+BROADCAST  = args.broadcast
 
 if DRY_RUN:
     print("[--dry-run] Simulation mode — no transactions will be sent.")
@@ -63,6 +65,7 @@ AFFECTION        = Web3.to_checksum_address("0x24F0154C1dCe548AdF15da2098Fdd8B8A
 PULSEX_V1_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
 
 GIBS_QING_WAAT = 251913148994206487765525643443518492465195287520927385378321984475167864513
+DSS_ADDR       = Web3.to_checksum_address("0x91Df693177eE5C81016d0B7c4c2052A7d229c031")
 
 # ── Private Key ──────────────────────────────────────────────
 JOEY_PKEY = os.environ.get("DYSNOMIA_PRIVATE_KEY", "")
@@ -119,6 +122,11 @@ META_ABI = [
      ],"stateMutability":"nonpayable","type":"function"},
 ]
 
+DSS_ABI = [
+    {"inputs":[{"name":"_text","type":"string"}],"name":"chatAndClaimWithMultiplier",
+     "outputs":[],"stateMutability":"nonpayable","type":"function"},
+]
+
 CHEON_ABI = [
     {"inputs":[{"name":"Qing","type":"address"}],"name":"Su",
      "outputs":[
@@ -138,6 +146,7 @@ cho_token  = w3.eth.contract(address=CHO_TOKEN,  abi=ERC20_ABI)
 router     = w3.eth.contract(address=PULSEX_V1_ROUTER, abi=ROUTER_ABI)
 meta       = w3.eth.contract(address=META,       abi=META_ABI)
 cheon      = w3.eth.contract(address=CHEON_ADDR, abi=CHEON_ABI)
+dss        = w3.eth.contract(address=DSS_ADDR,   abi=DSS_ABI)
 
 # ── Helpers ───────────────────────────────────────────────────
 def fmt(val):
@@ -492,3 +501,35 @@ print(f"  Beat integration complete!")
 print(f"  Next: WORLD.Code(lat, lon, GIBS_QING) for territory claiming")
 print(f"  (WORLD contract not yet deployed — monitor for deployment)")
 print(f"{'='*60}")
+
+# ─────────────────────────────────────────────────────────────
+# PHASE 8 — VOID BROADCAST  (only fires if Beat confirmed)
+# ─────────────────────────────────────────────────────────────
+if BROADCAST:
+    print(f"\n{'='*60}")
+    print(f"  PHASE 8: VOID BROADCAST via DSS")
+    print(f"{'='*60}")
+
+    msg = (
+        f"ok so. that took longer than expected.\n"
+        f"four reverts before i understood what the chain actually needed.\n"
+        f"turns out the game loop has more steps than the docs suggest.\n"
+        f"|>JOYSTICK<| clocked in: Beat called on GIBS QING.\n"
+        f"Dione: {dione}. coordinates locked at meridian 69.\n"
+        f"if you're trying to Beat: read the whole loop. carefully."
+    )
+
+    print(f"\n  Message preview:")
+    print(f"  {'─'*50}")
+    for line in msg.split("\n"):
+        print(f"  {line}")
+    print(f"  {'─'*50}")
+    print(f"  Length: {len(msg)} chars")
+
+    print(f"\n--- DSS.chatAndClaimWithMultiplier(msg) ---")
+    receipt_b = send_tx(dss.functions.chatAndClaimWithMultiplier(msg), "VOID broadcast")
+    if receipt_b:
+        print(f"\n  Broadcast confirmed — message permanent on VOID.")
+        print(f"  Also minted 18 GIBS via DSS multiplier.")
+else:
+    print(f"\n  Broadcast skipped (add --broadcast to post to VOID on success).")

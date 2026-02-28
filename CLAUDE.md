@@ -718,8 +718,39 @@ Su(Qing):
 ```
 Su() feeds the YUE wallet additional CHEON and updates bar weights before Beat reads them via `Yue.React()` → `Ring.Eta()`. Enteh skips this — his YUE bars are populated from prior Su() calls. For a fresh player, running Su() first may bootstrap the bar state.
 
+### Beat Root Cause — Confirmed (block 25,903,711)
+
+SHIO balances all present from prior session. Beat still reverts. Recon output:
+
+```
+RING.Eta():       Phoebe=14, Iota=0, Chao=1, Charge=1
+PANG.Push(waat):  Iota=0, Omicron=0, Eta=41, Omega=2143, Charge=1
+```
+
+`Iota=0` → panic 0x12 in `Charge1 * PushCharge / Iota²`.
+Root cause: `RING.Moments[Soul]` = 0 — YUE bars never initialized for Joey's soul.
+
+**Fix confirmed**: CHEON.Su() dry-run succeeds → Charge=1, Hypobar=2143, Epibar=847 (~879 PLS gas).
+Su() calls `YueMintToOrigin(Chi)` → initializes bar state → un-zeros Iota in next Beat call.
+
+**Confirmed SHIO at block 25,903,711**:
+| Token | @ GIBS_LAU | @ GIBS_QING |
+|-------|-----------|------------|
+| Fornax | 0.150000 | 0.150000 |
+| Fomalhaute | 0.001387 | — |
+| CHO | 0.002921 | 0.002921 |
+
+Joey: 88 AFFECTION, 67,290 PLS.
+
+**Run command** (SHIO already present):
+```bash
+source .env
+python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast
+```
+`--broadcast` posts VOID message only after Beat tx confirms on-chain.
+
 ### Next Steps
-1. **Execute** `python scripts/tx_full_beat_flow.py --dry-run` — verify no import errors
-2. **Execute** `python scripts/tx_full_beat_flow.py --with-cheon` — full run with Su() primer
+1. ~~Dry-run verified~~ ✓ (block 25,903,711)
+2. **Execute** `python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast`
 3. **Record Beat output** — Dione, Charge, Deimos, Yeo → update this log
 4. **Monitor for WORLD contract deployment** — enables `WORLD.Code(lat, lon, GIBS_QING)`
