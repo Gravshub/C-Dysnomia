@@ -469,6 +469,15 @@ PHASE 8 — Territory & Combat
 - `Dysnomia/LiveContracts.cs` — Auto-loads GIBS + DSSv4 on every start
 - `solidity/dysnomia/etc/DysnomiaSelfSnipev4.sol` — DSS self-sniper contract (no-import, pragma ^0.8.21)
 
+### Python (transaction scripts)
+- `scripts/tx_full_beat_flow.py` — **PRIMARY**: Full orchestration — SHIO acquisition → optional CHEON.Su() → META.Beat()
+- `scripts/tx_cheon_su.py` — CHEON.Su() wrapper — YUE bar primer (optional Beat pre-step)
+- `scripts/tx_acquire_shio.py` — SHIO acquisition phases 1-5 (V2 router — use p2 instead)
+- `scripts/tx_acquire_shio_p2.py` — SHIO acquisition phases 2-5 with V1 router fix
+- `scripts/tx_beat.py` — META.Beat() standalone with pre-flight SHIO check
+- `scripts/beat_recon.py` — Read-only Beat call chain analysis
+- `scripts/shio_acquisition_recon.py` — SHIO token holder and DEX pair analysis
+
 ---
 
 ## Notes on MotzkinPrime
@@ -648,8 +657,69 @@ All three tokens (Fornax, Fomalhaute, CHO) have **zero balance** at GIBS_LAU and
 - `scripts/fornax_holders_recon.py` — Fornax holder investigation
 - `scripts/qing_bouncer_check.py` — enteh QING Join verification (dry-run confirmed SUCCESS)
 - `scripts/crows_recon.py` — CROWS token availability analysis
-- `scripts/tx_acquire_shio.py` — **EXECUTE**: acquire all 3 SHIO tokens + transfer to targets
-- `scripts/tx_beat.py` — **EXECUTE**: META.Beat() with pre-flight verification
+- `scripts/tx_acquire_shio.py` — SHIO acquisition phases 1-5 (V2 router — deprecated, use p2)
+- `scripts/tx_acquire_shio_p2.py` — SHIO acquisition with V1 router fix (standalone)
+- `scripts/tx_beat.py` — META.Beat() standalone with pre-flight verification
+- `scripts/tx_cheon_su.py` — **NEW**: CHEON.Su() YUE bar primer (optional pre-Beat step)
+- `scripts/tx_full_beat_flow.py` — **NEW PRIMARY**: Full orchestration — auto-acquire SHIO + optional Su() + Beat
 
-**Last Updated**: 2026-02-27
-**Status**: FULLY OPERATIONAL. Handle: |>JOYSTICK<|. GIBS QING live. Player #578. **Beat: scripts ready, SHIO acquisition paths confirmed. Run tx_acquire_shio.py → tx_beat.py.**
+**CHEON.Su() details** (added Session 3):
+```solidity
+function Su(address Qing) public returns (uint256 Charge, uint256 Hypobar, uint256 Epibar)
+```
+- Called on `CHEON` (`0x3d23084cA3F40465553797b5138CFC456E61FB5D`) with `GIBS_QING` address
+- Calls `Sei.Chan().ReactYue(Chi, Qing)` → same SHIO prerequisite as Beat
+- Returns YUE bar weights that prime `Yue.React()` inside `Ring.Eta()`
+- Enteh skips it entirely — optional but may improve territory metric outputs
+- Use `--with-cheon` flag in `tx_full_beat_flow.py` to include it
+
+**Last Updated**: 2026-02-28
+**Status**: FULLY OPERATIONAL. Handle: |>JOYSTICK<|. GIBS QING live. Player #578. **Beat integration orchestration complete. Run: `python scripts/tx_full_beat_flow.py [--dry-run] [--with-cheon]`**
+
+---
+
+## Session 3 Log (2026-02-28)
+
+**Branch**: `claude/lau-gibson-beat-integration-ty33f`
+**Focus**: Complete the Beat integration — build orchestration layer for the full game loop
+
+### Work Done This Session
+
+**Scripts added**:
+- `scripts/tx_cheon_su.py` — CHEON.Su() standalone wrapper
+  - Extracts Su() ABI from `solidity/dysnomia/domain/tang/02_cheon.sol`
+  - Returns `(Charge, Hypobar, Epibar)` — YUE bar weights
+  - Supports `--dry-run` flag; aborts if SHIO balances zero
+- `scripts/tx_full_beat_flow.py` — Single-command Beat orchestration
+  - Phase 0: SHIO status check at GIBS_LAU + GIBS_QING
+  - Phase 1-3: Auto-acquire missing SHIO (Fornax via enteh QING, Fomalhaute/CHO via V1 router)
+  - Phase 4: Optional CHEON.Su() YUE primer (`--with-cheon`)
+  - Phase 5: Beat dry-run (abort if still reverting)
+  - Phase 6: Beat execute
+  - Phase 7: Summary with all balances
+  - Supports `--dry-run`, `--with-cheon`, `--skip-shio`
+
+**Documentation updated**:
+- Added Python scripts section to Key Implementation Files
+- Updated BEAT Analysis scripts list with new scripts
+- Added CHEON.Su() ABI and details
+
+### Key Architecture Insight — Su() vs Direct Beat
+
+From reading `02_cheon.sol`:
+```
+Su(Qing):
+  Sei.Chi()                    → gets Joey's YUE (Chi) and LAU (UserToken)
+  Sei.Chan().ReactYue(Chi, Qing) → Charge (CHO/Xia energy level)
+  Sei.Chan().Xie().Xia().Mai().React(Saat(1), Waat) → Mai amount
+  transfer CHEON → Chi (up to 1 CHEON)
+  Sei.Chan().YueMintToOrigin(Chi)
+  Chi.Bar(Qing)                → (Hypobar, Epibar)
+```
+Su() feeds the YUE wallet additional CHEON and updates bar weights before Beat reads them via `Yue.React()` → `Ring.Eta()`. Enteh skips this — his YUE bars are populated from prior Su() calls. For a fresh player, running Su() first may bootstrap the bar state.
+
+### Next Steps
+1. **Execute** `python scripts/tx_full_beat_flow.py --dry-run` — verify no import errors
+2. **Execute** `python scripts/tx_full_beat_flow.py --with-cheon` — full run with Su() primer
+3. **Record Beat output** — Dione, Charge, Deimos, Yeo → update this log
+4. **Monitor for WORLD contract deployment** — enables `WORLD.Code(lat, lon, GIBS_QING)`
