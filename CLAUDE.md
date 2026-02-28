@@ -397,9 +397,16 @@ PHASE 8 — Territory & Combat
 | YAU | `0x7e91d862a346659daeed93726e733c8c1347a225` |
 | ZHOU | `0x5cc318d0c01fed5942b5ed2f53db07727d36e261` |
 | ZHENG | `0x24e62c39e34d7fe2b7df1162e1344eb6eb3b3e15` |
-| Fomalhaute (ZHOU SHIO = XIA power token) | `0x7ae73c498a308247be73688c09c96b3fd06ddb84` |
+| Fomalhaute (XIA SHIO = XIA.Fomalhaute()) | `0x7aE73C498A308247BE73688c09c96B3fd06dDB84` |
 | Eris (QI SHIO, ~99K supply) | `0xe843765114992e18061498aed708537ce9d924fa` |
-| Fornax (XIE SHIO — hunting, no DEX LP yet) | `0x4Df51741F2926525A21bF63E4769bA70633D2792` |
+| **Fornax** (XIE SHIO = XIE.Fornax(), 50K supply) | `0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7` |
+| **XIE** (soeng processing — NOT Fornax!) | `0x4Df51741F2926525A21bF63E4769bA70633D2792` |
+| **META** (Beat function — territory) | `0xE77Bdae31b2219e032178d88504Cc0170a5b9B97` |
+| **RING** (orbital mechanics) | `0x1574c84Ec7fA78fC6C749e1d242dbde163675e72` |
+| **PANG** (position engine) | `0xEe25Ccd41671F3B67d660cf6532085586aec8457` |
+| **ZI** (spin/rotation) | `0xCbAdd3C3957Bd9D6C036863CB053FEccf3D53338` |
+| **CHEON** (Su() power metrics) | `0x3d23084cA3F40465553797b5138CFC456E61FB5D` |
+| **YI** (DeFi orchestration) | `0x4757438723055f14A1Af5C9651C2E37730F41A9E` |
 | Noumenon's YUE (reference) | `0x935a694377cf48d8fc934f17db289774f0ce7075` |
 | **GIBS** (Joey's LAU token) | `0x66a08aa12da955eb63d7ac121a88b2b210a07b03` |
 | GIBS (LAU 1 — orphaned spare) | `0xabf97a71dfd71f3763c86080693c1ec94e5de846` |
@@ -417,19 +424,35 @@ PHASE 8 — Territory & Combat
 | **XIA** (processing chain) | `0x7f4a4DD4a6f233d2D82BE38b2F9fc0Fef46f25FA` |
 | **HECKE** (Hecke Meridians coordinate lib) | `0x29A924D9B0233026B9844f2aFeB202F1791D7593` |
 | **Noumenon wallet** | `0xEbE9B8673d7096DCEE26DA7d9eaf6fc4eBe30980` |
+| **Enteh's QING** (Fornax source — Join+Redeem) | `0xA43F71ac277022A547c56706fbBc5d93f88C3467` |
+| **Enteh's LAU** (enteh token) | `0xccE83CfF8B531EaDdcf11AB414C59DC046D1aAc7` |
+| **Enteh EOA** | `0x18F621662D6A1f23700EA32D146B32195DC33111` |
+| **RatKing EOA** (Fornax whale, 25K) | `0x530c8cE74897805A4612EAFf07972D049aCaf95F` |
+| **PulseX V2 Router** | `0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02` |
+| **WITHOUT** (ban token — must hold 0) | `0x173216Ed67eBF3E6767D86e8b3Ff32e0d64437bF` |
 
 ---
 
 ## Key Implementation Files
 
 ### Solidity (game contracts)
-- `solidity/dysnomia/01_dysnomia.sol` — Base token, AFFECTION market rate
+- `solidity/dysnomia/01_dysnomia.sol` — Base token, AFFECTION market rate, Purchase()
+- `solidity/dysnomia/03_shio.sol` — SHIO Rod/Cone paired token (inherits DYSNOMIA)
 - `solidity/dysnomia/10_void.sol` — VOID game controller, chat, Enter()
 - `solidity/dysnomia/11_lau.sol` — LAU player token
-- `solidity/dysnomia/domain/dan/03_qing.sol` — QING venue contracts
+- `solidity/dysnomia/domain/dan/03_qing.sol` — QING venue contracts (Waat, Entropy)
 - `solidity/dysnomia/domain/dan/04_war.sol` — WAR battle mechanics
-- `solidity/dysnomia/domain/world.sol` — WORLD territory
-- `solidity/dysnomia/domain/yue.sol` — YUE player wallets
+- `solidity/dysnomia/domain/tang/03_meta.sol` — **META.Beat()** — territory computation
+- `solidity/dysnomia/domain/tang/02_cheon.sol` — **CHEON.Su()** — power metrics precursor
+- `solidity/dysnomia/domain/tang/01_sei.sol` — **SEI** — player management, Chi(), Start()
+- `solidity/dysnomia/domain/sky/03_ring.sol` — **RING.Eta()** — orbital mechanics
+- `solidity/dysnomia/domain/sky/01_chan.sol` — **CHAN** — YUE management, ReactYue
+- `solidity/dysnomia/domain/soeng/06_pang.sol` — **PANG.Push()** — position engine
+- `solidity/dysnomia/domain/soeng/05_zi.sol` — **ZI.Spin()** — uses CHO/Tethys balances
+- `solidity/dysnomia/domain/soeng/04_xie.sol` — **XIE.Power()** — uses Fornax balances
+- `solidity/dysnomia/domain/soeng/03_xia.sol` — **XIA.Charge()** — uses Fomalhaute balance
+- `solidity/dysnomia/domain/world.sol` — WORLD territory (Code(), not yet deployed)
+- `solidity/dysnomia/domain/yue.sol` — YUE player wallets (React, Bar, Hong/Hung)
 - `solidity/addresses.sol` — ALL live contract addresses
 - `solidity/bureauminter.sol` — V3 Index Minter (1.1B threshold)
 - `solidity/federalminter.sol` — V2 Federal Minter
@@ -445,6 +468,15 @@ PHASE 8 — Territory & Combat
 - `Dysnomia/Domain/Oracle.cs` — VM core
 - `Dysnomia/LiveContracts.cs` — Auto-loads GIBS + DSSv4 on every start
 - `solidity/dysnomia/etc/DysnomiaSelfSnipev4.sol` — DSS self-sniper contract (no-import, pragma ^0.8.21)
+
+### Python (transaction scripts)
+- `scripts/tx_full_beat_flow.py` — **PRIMARY**: Full orchestration — SHIO acquisition → optional CHEON.Su() → META.Beat()
+- `scripts/tx_cheon_su.py` — CHEON.Su() wrapper — YUE bar primer (optional Beat pre-step)
+- `scripts/tx_acquire_shio.py` — SHIO acquisition phases 1-5 (V2 router — use p2 instead)
+- `scripts/tx_acquire_shio_p2.py` — SHIO acquisition phases 2-5 with V1 router fix
+- `scripts/tx_beat.py` — META.Beat() standalone with pre-flight SHIO check
+- `scripts/beat_recon.py` — Read-only Beat call chain analysis
+- `scripts/shio_acquisition_recon.py` — SHIO token holder and DEX pair analysis
 
 ---
 
@@ -543,5 +575,258 @@ foundation of the entire ecosystem.
 - **VOID chat decoding**: Selector `0x21516fc4` = `Chat(string)`. ABI decode: offset[0:32], length[offset:offset+32], string[offset+32:offset+32+length]
 - **Lore created**: `lore/joey_diary_01.md` — first-person Joey Pardella diary, blocks 25,886,977–25,894,502
 
-**Last Updated**: 2026-02-27
-**Status**: FULLY OPERATIONAL. Handle acquired: |>JOYSTICK<|. GIBS QING live, QING AddMarketRate pending game operator (CHO.AddContractOwner). GIBS_LAU Purchase working. Joey is player #578.
+### BEAT Analysis (2026-02-27)
+
+**Function**: `META.Beat(uint256 QingWaat)` at `0xE77Bdae31b2219e032178d88504Cc0170a5b9B97`
+**Returns**: `(uint256 Dione, uint256 Charge, uint256 Deimos, uint256 Yeo)`
+
+**Call chain** (deep — 10+ contracts):
+```
+META.Beat(QingWaat)
+  → Ring.Pang().Zi().Choa().Sei().Chan().Xie().Xia().Mai().Qi().Zuo().GetQing(QingWaat)
+  → Ring.Eta()
+      → Yue.React(Phobos)          // Updates YUE bars
+      → Pang.Push(Phobos.Waat())   // Root QING metrics
+  → Ring.Pang().Push(QingWaat)      // Target QING metrics
+  → Charge = Charge1 * PushCharge / Iota²
+  → Deimos = modExp(Dione, Phoebe, Yuan(Qing))
+  → Yeo = PushYeo / Chao
+```
+
+**Game loop**: `CHEON.Su(QingAddr) → META.Beat(QingWaat) → WORLD.Code(lat, lon, QingAddr)`
+- Su() builds YUE bar weights (Hypobar/Epibar) that feed Yue.React()
+- Beat() computes territory range and power metrics
+- Code() claims territory using Beat output (WORLD not yet deployed)
+
+**GIBS QING data**:
+- `Waat`: `251913148994206487765525643443518492465195287520927385378321984475167864513`
+- Hecke coordinates: `(-4.27e71, 3.40e72)`, Meridian 69
+- `Alpha.On.Phi` = GIBS_LAU (`0x66a08aa...`) — this is where SHIO tokens need to be
+
+**Current status: BLOCKED by zero SHIO balances**
+
+The Beat computation uses SHIO token balances as inputs:
+```
+XIE.Power(QingWaat):
+  Omicron = Fornax.balanceOf(Alpha.On.Phi) / Alpha.Entropy    → needs Fornax at GIBS_LAU
+  Omega   = Fornax.balanceOf(GIBS_QING) / QING.Entropy       → needs Fornax at GIBS_QING
+XIA.Charge(QingWaat):
+  modExp(_b, _e, Fomalhaute.balanceOf(Alpha.On.Phi))          → needs Fomalhaute at GIBS_LAU
+ZI.Spin(QingWaat):
+  Omega = CHO.balanceOf(Alpha.On.Phi) / Alpha.Entropy         → needs CHO at GIBS_LAU
+  Eta   = CHO.balanceOf(GIBS_QING) / QING.Entropy            → needs CHO at GIBS_QING
+```
+
+All three tokens (Fornax, Fomalhaute, CHO) have **zero balance** at GIBS_LAU and GIBS_QING. Division by zero in `Yeo/Chao` and `Charge/Iota²` causes the revert.
+
+**SHIO token status**:
+| Token | Address | Supply | Self-bal | Needs |
+|-------|---------|--------|----------|-------|
+| **Fornax** (XIE.Fornax) | `0xF6C50fFE...` | 50,977 maxed | 0 | At GIBS_LAU + GIBS_QING |
+| **Fomalhaute** (XIA.Fomalhaute) | `0x7aE73C49...` | 25,933 maxed | 0 | At GIBS_LAU |
+| **CHO** (ZI.Tethys) | `0xB6be11F0...` | 26,995 maxed | 0 | At GIBS_LAU + GIBS_QING |
+
+**Key correction**: `0x4Df51741...` is the **XIE contract**, NOT Fornax. The real Fornax is at `0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7` (read from `XIE.Fornax()`).
+
+**SHIO Acquisition Strategy** (researched 2026-02-27):
+
+**Fornax** — NO DEX pairs, all 50,977 maxed out, self-balance=0. Acquired via **enteh's QING Redeem**:
+- Enteh's QING (`0xA43F71ac...`): CoverCharge=0, holds 11 Fornax, GetMarketRate(FORNAX)=0.1
+- Flow: Join(GIBS_LAU) × N → Purchase(AFFECTION, N) → Redeem(FORNAX, N) → get N × 0.1 Fornax
+- Key discovery: **QING.Join() does NOT call bouncer()** — no CROWS needed. Bouncer only gates admin functions.
+- CROWS token is NOT a DYSNOMIA token (fixed 800 supply, owner renounced, ~19.2M WPLS/CROWS on DEX)
+
+**Fomalhaute** — PulseX V2 DEX pairs available:
+- PulseX V2/AFFECTION pair (`0x856DAe0C...`): 2.533 Fomalhaute / 9,101 AFFECTION
+- 5 AFFECTION → ~0.00139 Fomalhaute (sufficient — need > 0.00007 per address)
+
+**CHO** — PulseX V2 DEX pairs available:
+- PulseX V2/AFFECTION pair (`0xB7853a09...`): 34.238 CHO / 5,386 AFFECTION
+- 2 AFFECTION → ~0.01267 CHO (sufficient — need > 0.00007 per address)
+
+**Total cost**: ~10 AFFECTION + ~16,000 PLS gas (Joey has 98 Ⓐ and ~67,500 PLS)
+
+**Enteh player analysis** (reference Beat caller):
+- 25-26 successful Beat calls, all same QingWaat, gas ~1.9M-3.5M
+- SHIO at LAU: Fornax=11, Fomalhaute=0.001, CHO=0.001
+- Skips CHEON.Su() entirely — calls Beat directly
+
+**Scripts**:
+- `scripts/beat_recon.py` — read-only recon with dry-run diagnostics
+- `scripts/shio_acquisition_recon.py` — SHIO token holder/DEX analysis
+- `scripts/fornax_holders_recon.py` — Fornax holder investigation
+- `scripts/qing_bouncer_check.py` — enteh QING Join verification (dry-run confirmed SUCCESS)
+- `scripts/crows_recon.py` — CROWS token availability analysis
+- `scripts/tx_acquire_shio.py` — SHIO acquisition phases 1-5 (V2 router — deprecated, use p2)
+- `scripts/tx_acquire_shio_p2.py` — SHIO acquisition with V1 router fix (standalone)
+- `scripts/tx_beat.py` — META.Beat() standalone with pre-flight verification
+- `scripts/tx_cheon_su.py` — **NEW**: CHEON.Su() YUE bar primer (optional pre-Beat step)
+- `scripts/tx_full_beat_flow.py` — **NEW PRIMARY**: Full orchestration — auto-acquire SHIO + optional Su() + Beat
+
+**CHEON.Su() details** (added Session 3):
+```solidity
+function Su(address Qing) public returns (uint256 Charge, uint256 Hypobar, uint256 Epibar)
+```
+- Called on `CHEON` (`0x3d23084cA3F40465553797b5138CFC456E61FB5D`) with `GIBS_QING` address
+- Calls `Sei.Chan().ReactYue(Chi, Qing)` → same SHIO prerequisite as Beat
+- Returns YUE bar weights that prime `Yue.React()` inside `Ring.Eta()`
+- Enteh skips it entirely — optional but may improve territory metric outputs
+- Use `--with-cheon` flag in `tx_full_beat_flow.py` to include it
+
+**Last Updated**: 2026-02-28
+**Status**: FULLY OPERATIONAL. Handle: |>JOYSTICK<|. GIBS QING live. Player #578. **Beat integration orchestration complete. Run: `python scripts/tx_full_beat_flow.py [--dry-run] [--with-cheon]`**
+
+---
+
+## Session 3 Log (2026-02-28)
+
+**Branch**: `claude/lau-gibson-beat-integration-ty33f`
+**Focus**: Complete the Beat integration — build orchestration layer for the full game loop
+
+### Work Done This Session
+
+**Scripts added**:
+- `scripts/tx_cheon_su.py` — CHEON.Su() standalone wrapper
+  - Extracts Su() ABI from `solidity/dysnomia/domain/tang/02_cheon.sol`
+  - Returns `(Charge, Hypobar, Epibar)` — YUE bar weights
+  - Supports `--dry-run` flag; aborts if SHIO balances zero
+- `scripts/tx_full_beat_flow.py` — Single-command Beat orchestration
+  - Phase 0: SHIO status check at GIBS_LAU + GIBS_QING
+  - Phase 1-3: Auto-acquire missing SHIO (Fornax via enteh QING, Fomalhaute/CHO via V1 router)
+  - Phase 4: Optional CHEON.Su() YUE primer (`--with-cheon`)
+  - Phase 5: Beat dry-run (abort if still reverting)
+  - Phase 6: Beat execute
+  - Phase 7: Summary with all balances
+  - Supports `--dry-run`, `--with-cheon`, `--skip-shio`
+
+**Documentation updated**:
+- Added Python scripts section to Key Implementation Files
+- Updated BEAT Analysis scripts list with new scripts
+- Added CHEON.Su() ABI and details
+
+### Key Architecture Insight — Su() vs Direct Beat
+
+From reading `02_cheon.sol`:
+```
+Su(Qing):
+  Sei.Chi()                    → gets Joey's YUE (Chi) and LAU (UserToken)
+  Sei.Chan().ReactYue(Chi, Qing) → Charge (CHO/Xia energy level)
+  Sei.Chan().Xie().Xia().Mai().React(Saat(1), Waat) → Mai amount
+  transfer CHEON → Chi (up to 1 CHEON)
+  Sei.Chan().YueMintToOrigin(Chi)
+  Chi.Bar(Qing)                → (Hypobar, Epibar)
+```
+Su() feeds the YUE wallet additional CHEON and updates bar weights before Beat reads them via `Yue.React()` → `Ring.Eta()`. Enteh skips this — his YUE bars are populated from prior Su() calls. For a fresh player, running Su() first may bootstrap the bar state.
+
+### Beat Root Cause — Confirmed (block 25,903,711)
+
+SHIO balances all present from prior session. Beat still reverts. Recon output:
+
+```
+RING.Eta():       Phoebe=14, Iota=0, Chao=1, Charge=1
+PANG.Push(waat):  Iota=0, Omicron=0, Eta=41, Omega=2143, Charge=1
+```
+
+`Iota=0` → panic 0x12 in `Charge1 * PushCharge / Iota²`.
+Root cause: `RING.Moments[Soul]` = 0 — YUE bars never initialized for Joey's soul.
+
+**Fix confirmed**: CHEON.Su() dry-run succeeds → Charge=1, Hypobar=2143, Epibar=847 (~879 PLS gas).
+Su() calls `YueMintToOrigin(Chi)` → initializes bar state → un-zeros Iota in next Beat call.
+
+**Confirmed SHIO at block 25,903,711**:
+| Token | @ GIBS_LAU | @ GIBS_QING |
+|-------|-----------|------------|
+| Fornax | 0.150000 | 0.150000 |
+| Fomalhaute | 0.001387 | — |
+| CHO | 0.002921 | 0.002921 |
+
+Joey: 88 AFFECTION, 67,290 PLS.
+
+**Run command** (SHIO already present):
+```bash
+source .env
+python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast
+```
+`--broadcast` posts VOID message only after Beat tx confirms on-chain.
+
+### Next Steps
+1. ~~Dry-run verified~~ ✓ (block 25,903,711)
+2. **Execute** `python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast`
+3. **Record Beat output** — Dione, Charge, Deimos, Yeo → update this log
+4. **Monitor for WORLD contract deployment** — enables `WORLD.Code(lat, lon, GIBS_QING)`
+
+---
+
+## Session 4 Log (2026-02-28) — Wallet Encryption + Branch Consolidation
+
+**Branch**: `claude/encrypt-wallet-key-EKVN5`
+**Focus**: Secure key storage for the live Joey wallet; consolidate all session branches
+
+### Work Done
+
+**Encrypted identity system** — replaces the plaintext `pkeys` list from upstream
+`atropa_pulsechain` with an AES-256-GCM sealed profile that never touches the repo:
+
+| File | Change |
+|------|--------|
+| `Wallet/Accounts.cs` | Replaced `List<string> pkeys` with `Accounts.Load()` / `Accounts.Setup()` / `Accounts.Token`. Passphrase resolution: explicit arg → `DYS_PIN` env var → interactive masked prompt. Thread-safe double-checked lock; single in-memory cache for the process lifetime. |
+| `Wallet/ProfileManager.cs` | New file. AES-256-GCM encryption, PBKDF2-SHA256 key derivation (100k iterations), random salt+nonce per Seal(). Storage: `~/.config/dysnomia/profile.dat` (outside repo). Format: `salt(16) \| nonce(12) \| tag(16) \| ciphertext`. |
+| `Wallet/Wallet.cs` | `Account = new Account(Accounts.Load())` replaces `Accounts.pkeys[0]`. `w3` created with signed `Account` from construction. `SwitchAccount(int)` removed — single live key. Comment preserved explaining multi-account path for future. |
+| `Wallet/Wallet.csproj` | Merged from master — Nethereum 4.26 + net10.0 target. |
+
+**Namespace**: All Wallet files use `namespace Wallet` (matches `Wallet.csproj` compilation unit).
+
+**First-time setup**:
+```csharp
+Accounts.Setup("0x<joey-private-key>");
+// Prompts for passphrase → writes ~/.config/dysnomia/profile.dat
+```
+**Every session**:
+```csharp
+var wallet = new Wallet("https://rpc.pulsechain.com");
+// Calls Accounts.Load() → prompts once if DYS_PIN not set
+// wallet.Account.Address == 0x17367877aF5A8D0Eb33ba5689A880f696386E24D
+```
+**CI / scripts** (no prompt):
+```bash
+DYS_PIN=<passphrase> dotnet run
+```
+
+### Branch Consolidation (2026-02-28)
+All prior session work merged into `claude/encrypt-wallet-key-EKVN5`:
+- `master` — full `atropa_pulsechain` source, Wallet.csproj, codegen
+- `claude/finish-beat-integration-GlPAF` — Session 3 scripts, lore, CLAUDE.md additions
+- `claude/lau-gibson-beat-integration-ty33f` — Session 2 work
+- `claude/lau-gibson-beat-integration-U61SC` — Session 1 beat recon
+
+**This branch is now the canonical branch.** All files from all sessions are present.
+
+### Files Added from GlPAF
+| File | Purpose |
+|------|---------|
+| `data/void_chat.jsonl` | Cached VOID chat log (raw events) |
+| `data/void_chat_state.json` | Last-read block for incremental sync |
+| `lore/joey_diary_02.md` | Joey diary — Session 2 |
+| `lore/joey_diary_03.md` | Joey diary — Session 3 |
+| `scripts/beat_full_diagnostic.py` | Full Beat call chain read-only diagnostics |
+| `scripts/beat_recon.py` | Beat recon with dry-run |
+| `scripts/crows_recon.py` | CROWS token analysis |
+| `scripts/enteh_recon.py` | Enteh player analysis |
+| `scripts/enteh_zuo_check.py` | Enteh QING/ZUO join check |
+| `scripts/fornax_holders_recon.py` | Fornax holder distribution |
+| `scripts/player_recon.py` | Player metrics recon |
+| `scripts/qing_bouncer_check.py` | QING Join dry-run verifier |
+| `scripts/shio_acquisition_recon.py` | SHIO DEX pair analysis |
+| `scripts/tx_acquire_qing_tokens.py` | Acquire tokens needed to join QINGs |
+| `scripts/tx_acquire_shio.py` | SHIO acquisition (V2 router — deprecated) |
+| `scripts/tx_acquire_shio_p2.py` | SHIO acquisition (V1 router fix) |
+| `scripts/tx_acquire_zuo.py` | ZUO QING token acquisition |
+| `scripts/tx_beat.py` | META.Beat() standalone executor |
+| `scripts/tx_cheon_su.py` | CHEON.Su() YUE bar primer |
+| `scripts/tx_full_beat_flow.py` | **PRIMARY**: Full Beat orchestration |
+| `scripts/void_chat_reader.py` | Human-readable VOID chat display |
+| `scripts/void_chat_sync.py` | Incremental VOID chat log sync |
+| `scripts/zuo_ownership_recon.py` | ZUO ownership analysis |
+| `scripts/zurich_recon.py` | Zurich context recon |
+
+**Status**: Canonical. Beat ready to execute: `python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast`
