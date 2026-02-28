@@ -1,28 +1,53 @@
 using System;
 
-namespace Dysnomia.Wallet
+// ---------------------------------------------------------------------------
+// Wallet/Accounts.cs — Session-scoped identity manager
+//
+// HISTORY
+// -------
+// Original (atropa_pulsechain):
+//   A static `pkeys` list of 20 Hardhat test keys, with `pkeys[0]` optionally
+//   overridden by the DYSNOMIA_PRIVATE_KEY environment variable. Simple and
+//   convenient for local test networks, but unsuitable for a live wallet:
+//   env-vars are visible to other processes and easy to leak in logs/scripts.
+//
+// This version (C-Dysnomia / Joey wallet):
+//   Replaces the plaintext key list with an AES-256-GCM encrypted profile
+//   written to disk outside the repository (%APPDATA%/dysnomia/profile.dat).
+//   The private key is never stored in the repo, never exported to an env var,
+//   and never held in memory longer than the process lifetime.
+//
+// PASSPHRASE RESOLUTION ORDER (first non-null value wins)
+//   1. Explicit argument passed to Load() / Setup()
+//   2. Environment variable DYS_PIN  (useful for CI / automated sessions)
+//   3. Interactive console prompt (masked input, hidden while typing)
+//
+// TYPICAL SESSION FLOW
+//   First run  — Accounts.Setup("0x<joey-private-key>")
+//                  → prompts for a passphrase
+//                  → writes encrypted profile.dat
+//                  → caches key in memory for the rest of the session
+//
+//   Later runs — Accounts.Load()
+//                  → reads profile.dat, decrypts with passphrase
+//                  → caches key; subsequent calls return immediately
+//
+//   In code    — Accounts.Token
+//                  → returns cached key string; throws if not yet loaded
+//
+// JOEY WALLET
+//   Address : 0x17367877aF5A8D0Eb33ba5689A880f696386E24D  (PulseChain, chain 369)
+//   GIBS LAU: 0x66a08aa12da955eb63d7ac121a88b2b210a07b03
+//   The private key for this address lives solely in profile.dat and nowhere else.
+// ---------------------------------------------------------------------------
+
+namespace Wallet
 {
-    /// <summary>
-    /// Session-scoped identity manager.
-    ///
-    /// Loads the identity token once per process lifetime and caches it in
-    /// memory. The token is never written back to disk after the initial Seal.
-    ///
-    /// Passphrase resolution order (first non-null value wins):
-    ///   1. Explicit argument passed to Load() / Setup()
-    ///   2. Environment variable DYS_PIN
-    ///   3. Interactive console prompt (masked input)
-    ///
-    /// Typical session flow:
-    ///   First run  — Accounts.Setup("0xYourTokenHere")  → seals + caches
-    ///   Later runs — Accounts.Load()                    → restores from disk + caches
-    ///   In code    — Accounts.Token                     → returns cached value
-    /// </summary>
     public static class Accounts
     {
         /// <summary>
-        /// Environment variable name for non-interactive passphrase delivery.
-        /// Useful for automated or CI sessions.
+        /// Environment variable for non-interactive passphrase delivery.
+        /// Set DYS_PIN to the profile passphrase before launching to skip the prompt.
         /// </summary>
         public const string PhraseEnvVar = "DYS_PIN";
 
@@ -30,24 +55,24 @@ namespace Dysnomia.Wallet
         private static readonly object _sync = new();
         private static readonly ProfileManager _profile = new();
 
-        /// <summary>Returns true once the token has been loaded into memory.</summary>
+        /// <summary>Returns true once the private key has been loaded into memory.</summary>
         public static bool IsLoaded => _token != null;
 
         /// <summary>
-        /// Returns the active identity token, loading from disk on the first call.
+        /// Returns the active private key, decrypting from disk on the first call.
         ///
-        /// After the first successful call the value is cached; subsequent calls
-        /// return immediately without touching disk or re-prompting.
+        /// Thread-safe double-checked lock — subsequent calls return the cached
+        /// value immediately without touching disk or re-prompting.
         /// </summary>
         /// <param name="passphrase">
-        /// Optional explicit passphrase. If null, falls back to DYS_PIN env var
-        /// then interactive prompt.
+        /// Optional explicit passphrase. If null, falls back to DYS_PIN env var,
+        /// then an interactive masked console prompt.
         /// </param>
         /// <exception cref="InvalidOperationException">
         /// No profile exists on disk — run Setup() first.
         /// </exception>
         /// <exception cref="System.Security.Cryptography.CryptographicException">
-        /// Wrong passphrase or profile file is corrupted.
+        /// Wrong passphrase, or the profile file has been tampered with.
         /// </exception>
         public static string Load(string? passphrase = null)
         {
@@ -59,7 +84,7 @@ namespace Dysnomia.Wallet
 
                 if (!_profile.HasProfile)
                     throw new InvalidOperationException(
-                        "No profile found. Run Accounts.Setup() to initialize.");
+                        "No profile found. Run Accounts.Setup(\"0x<private-key>\") to initialize.");
 
                 passphrase ??= Environment.GetEnvironmentVariable(PhraseEnvVar);
                 passphrase ??= ReadPassphrase("Unlock profile: ");
@@ -70,15 +95,16 @@ namespace Dysnomia.Wallet
         }
 
         /// <summary>
-        /// First-time setup: seals the provided identity token and caches it for
-        /// the current session.
+        /// First-time setup: encrypts the private key and writes profile.dat to disk.
+        /// Also caches the key for the current session so Load() is not needed afterward.
         ///
-        /// Safe to call again to rotate the passphrase on an existing profile.
+        /// Safe to call again to rotate the passphrase on an existing profile —
+        /// ProfileManager always generates a fresh salt and nonce on each Seal().
         /// </summary>
-        /// <param name="token">The raw identity token to protect.</param>
+        /// <param name="token">The raw private key to protect (e.g. "0xabc123...").</param>
         /// <param name="passphrase">
-        /// Optional explicit passphrase. If null, falls back to DYS_PIN env var
-        /// then interactive prompt.
+        /// Optional explicit passphrase. If null, falls back to DYS_PIN env var,
+        /// then an interactive masked console prompt.
         /// </param>
         public static void Setup(string token, string? passphrase = null)
         {
@@ -92,7 +118,7 @@ namespace Dysnomia.Wallet
         }
 
         /// <summary>
-        /// The active identity token.
+        /// The active private key.
         /// Throws if not yet loaded — call Load() or Setup() first.
         /// </summary>
         public static string Token =>
@@ -100,8 +126,8 @@ namespace Dysnomia.Wallet
                 "Profile is locked. Call Accounts.Load() first.");
 
         /// <summary>
-        /// Clears the in-memory token without touching disk.
-        /// Call when the session ends or on error paths that require re-auth.
+        /// Clears the in-memory key without touching disk.
+        /// Call at session end or on error paths that require re-authentication.
         /// </summary>
         public static void Lock()
         {

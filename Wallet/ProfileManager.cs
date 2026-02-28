@@ -3,24 +3,50 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Dysnomia.Wallet
+// ---------------------------------------------------------------------------
+// Wallet/ProfileManager.cs — Encrypted private-key storage
+//
+// Handles the low-level encrypt/decrypt of the identity profile that
+// Accounts.cs exposes at a higher level. Nothing in this file is specific
+// to Dysnomia game logic — it is a general-purpose AES-256-GCM sealed store.
+//
+// STORAGE FORMAT  (binary, fields concatenated, no headers or framing)
+//   salt       16 bytes   — random per Seal(); input to PBKDF2 key derivation
+//   nonce      12 bytes   — random per Seal(); required by AES-GCM
+//   tag        16 bytes   — AES-GCM authentication tag; verifies integrity
+//   ciphertext variable   — UTF-8 encoded private key, encrypted
+//
+//   Total overhead: 44 bytes.  A typical 66-char hex private key ("0x" + 64)
+//   produces a 110-byte profile.dat file.
+//
+// KEY DERIVATION
+//   Algorithm : PBKDF2-SHA256
+//   Iterations: 100,000  (NIST SP 800-132 minimum for interactive logins)
+//   Output    : 256 bits → AES-256 key
+//
+// INTEGRITY
+//   AES-GCM provides authenticated encryption.  Any wrong passphrase or
+//   byte-level file tampering causes AesGcm.Decrypt to throw
+//   CryptographicException before any plaintext is returned.
+//
+// DEFAULT PROFILE PATH
+//   Windows : %APPDATA%\dysnomia\profile.dat
+//   Linux   : ~/.config/dysnomia/profile.dat   (ApplicationData on Linux)
+//   macOS   : ~/Library/Application Support/dysnomia/profile.dat
+//
+//   The directory is created automatically on first Seal().
+//   The path can be overridden via the ProfileManager(string) constructor
+//   (useful for integration tests or alternate accounts).
+// ---------------------------------------------------------------------------
+
+namespace Wallet
 {
-    /// <summary>
-    /// Manages persistent identity profiles across sessions.
-    ///
-    /// Storage format (binary, all fields concatenated):
-    ///   salt(16) | nonce(12) | tag(16) | ciphertext(variable)
-    ///
-    /// Algorithm: AES-256-GCM with PBKDF2-SHA256 key derivation.
-    /// The authentication tag ensures both confidentiality and integrity —
-    /// any wrong passphrase or tampered file raises CryptographicException.
-    /// </summary>
     public sealed class ProfileManager
     {
-        private const int SaltSize  = 16;
-        private const int NonceSize = 12;
-        private const int TagSize   = 16;
-        private const int KeySize   = 32;  // AES-256
+        private const int SaltSize   = 16;
+        private const int NonceSize  = 12;
+        private const int TagSize    = 16;
+        private const int KeySize    = 32;       // AES-256
         private const int Iterations = 100_000;
 
         private static readonly string DefaultProfileDir = Path.Combine(
@@ -31,9 +57,8 @@ namespace Dysnomia.Wallet
         private readonly string _profilePath;
 
         /// <param name="profilePath">
-        /// Full path to the profile file. Defaults to
-        /// %APPDATA%/dysnomia/profile.dat  (Windows) or
-        /// ~/.config/dysnomia/profile.dat  (Linux/macOS via ApplicationData).
+        /// Full path to the profile file.  If null, uses the platform default
+        /// (%APPDATA%/dysnomia/profile.dat on Windows; see class header).
         /// </param>
         public ProfileManager(string? profilePath = null)
         {
@@ -52,12 +77,13 @@ namespace Dysnomia.Wallet
         public bool HasProfile => File.Exists(_profilePath);
 
         /// <summary>
-        /// Seals an identity token with the given passphrase and writes it to disk.
-        /// Safe to call again to rotate the passphrase — always generates fresh
-        /// random salt and nonce.
+        /// Encrypts <paramref name="token"/> with <paramref name="passphrase"/>
+        /// and writes the sealed profile to disk.
+        ///
+        /// Generates fresh random salt and nonce on every call, so repeated
+        /// calls with the same passphrase produce different ciphertext —
+        /// safe for passphrase rotation.
         /// </summary>
-        /// <param name="passphrase">The passphrase used to derive the encryption key.</param>
-        /// <param name="token">The raw identity token to protect.</param>
         public void Seal(string passphrase, string token)
         {
             byte[] salt  = RandomNumberGenerator.GetBytes(SaltSize);
@@ -71,11 +97,12 @@ namespace Dysnomia.Wallet
             using (var aes = new AesGcm(key, TagSize))
                 aes.Encrypt(nonce, plaintext, ciphertext, tag);
 
-            // Ensure parent directory exists
+            // Ensure parent directory exists before writing
             string? dir = Path.GetDirectoryName(_profilePath);
             if (dir is { Length: > 0 })
                 Directory.CreateDirectory(dir);
 
+            // Write salt | nonce | tag | ciphertext  (no framing — fixed offsets)
             using var ms = new MemoryStream(SaltSize + NonceSize + TagSize + ciphertext.Length);
             ms.Write(salt);
             ms.Write(nonce);
@@ -86,10 +113,11 @@ namespace Dysnomia.Wallet
         }
 
         /// <summary>
-        /// Restores the identity token from disk using the given passphrase.
+        /// Decrypts the profile from disk using <paramref name="passphrase"/>.
+        /// Returns the original plaintext token (private key string).
         /// </summary>
         /// <exception cref="FileNotFoundException">No profile file exists.</exception>
-        /// <exception cref="InvalidDataException">Profile data is malformed.</exception>
+        /// <exception cref="InvalidDataException">Profile data is malformed (too short).</exception>
         /// <exception cref="CryptographicException">
         /// Wrong passphrase or the file has been tampered with.
         /// </exception>
@@ -99,13 +127,14 @@ namespace Dysnomia.Wallet
                 throw new FileNotFoundException(
                     "No profile found. Call Seal() to create one.", _profilePath);
 
-            byte[] data = File.ReadAllBytes(_profilePath);
-            int minLen  = SaltSize + NonceSize + TagSize + 1;
+            byte[] data   = File.ReadAllBytes(_profilePath);
+            int    minLen = SaltSize + NonceSize + TagSize + 1;
 
             if (data.Length < minLen)
                 throw new InvalidDataException(
-                    $"Profile data is too short ({data.Length} bytes; expected at least {minLen}).");
+                    $"Profile data is too short ({data.Length} bytes; expected ≥ {minLen}).");
 
+            // Unpack fixed-offset fields
             byte[] salt       = data[0..SaltSize];
             byte[] nonce      = data[SaltSize..(SaltSize + NonceSize)];
             byte[] tag        = data[(SaltSize + NonceSize)..(SaltSize + NonceSize + TagSize)];
@@ -114,14 +143,14 @@ namespace Dysnomia.Wallet
             byte[] key       = DeriveKey(passphrase, salt);
             byte[] plaintext = new byte[ciphertext.Length];
 
-            // AesGcm.Decrypt throws CryptographicException on auth failure
+            // Throws CryptographicException if passphrase is wrong or data is tampered
             using (var aes = new AesGcm(key, TagSize))
                 aes.Decrypt(nonce, ciphertext, tag, plaintext);
 
             return Encoding.UTF8.GetString(plaintext);
         }
 
-        // PBKDF2-SHA256, 100k iterations, 256-bit output
+        // PBKDF2-SHA256, 100k iterations, 256-bit output — no external dependencies.
         private static byte[] DeriveKey(string passphrase, byte[] salt) =>
             Rfc2898DeriveBytes.Pbkdf2(
                 Encoding.UTF8.GetBytes(passphrase),
