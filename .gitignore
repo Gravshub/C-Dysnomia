@@ -1,6 +1,14 @@
-# .NET build artifacts
+# Environment — contains private key, never commit
+.env
+.env.local
+*.env
+
+# Build artifacts
 bin/
 obj/
+Wallet/bin/Contracts/
+
+# .NET build output
 *.user
 *.suo
 .vs/
@@ -11,14 +19,9 @@ packages/
 *.nupkg
 
 # Local session data
-# profile.dat lives in %APPDATA%/dysnomia/ by default (outside this repo)
+# profile.dat lives in %APPDATA%/dysnomia/ by default (outside this repo).
 # If you override the path to somewhere inside the project, add it here:
 # config/profile.dat
-
-# Environment / local config — never commit these
-.env
-.env.local
-*.env
 
 # macOS
 .DS_Store
