@@ -477,6 +477,84 @@ PHASE 8 — Territory & Combat
 - `scripts/tx_beat.py` — META.Beat() standalone with pre-flight SHIO check
 - `scripts/beat_recon.py` — Read-only Beat call chain analysis
 - `scripts/shio_acquisition_recon.py` — SHIO token holder and DEX pair analysis
+- **`scripts/scan_lau_arb.py`** — **PLS GENERATION**: Scan all DYSNOMIA tokens (272 QINGs via MAP + Atropa tokens) for Purchase→DEX arb
+- **`scripts/tx_lau_arb.py`** — **PLS GENERATION**: Execute arb: approve → Purchase(token) → swap on PulseX → PLS
+- **`agent/wm_minter.py`** — TGSv5 WM batch-mint agent with live price oracle (WM→AFFECTION→WPLS)
+
+### Solidity (on-chain execution)
+- **`contracts/TGSv5.sol`** — WM batch minter: `mintWM(N)` calls `WM.RHO()` N times (max 100). Self-contained, no OZ imports. pragma ^0.8.21.
+
+---
+
+## PLS Generation — Active Strategies
+
+### Atropa Ecosystem Tokens (source: affection.gitbook.io)
+These are standalone DYSNOMIA tokens outside the LAU system. All support Purchase() mechanic.
+
+| Token | Address | Payment | Notes |
+|-------|---------|---------|-------|
+| **pINDEPENDENCE** (ⓟ) | `0xA2262D7728C689526693aE893D0fD8a352C7073C` | pDAI | arbitrage route documented |
+| **GIMME FIVE** (⑤) | `0x2fc636E7fDF9f3E8d61033103052079781a6e7D2` | pDAI | arbitrage route documented |
+| **MATH v1.1** (libAtropaMath) | `0xB680F0cc810317933F234f67EB6A9E923407f05D` | pDAI or pUSDC | also known as "Math lib" |
+| **RNG** | `0xa96BcbeD7F01de6CEEd14fC86d90F21a36dE2143` | pDAI | random number generator token |
+| **MATH v1.0** | `0x5EF3011243B03f817223A19f277638397048A0DC` | — | older version |
+| **pDAI** (DAI from ETH) | `0xefD766cCb38EaF1dfd701853BFCe31359239F305` | — | payment token for Atropa routes |
+| **pUSDC** | `0x15D38573d2feeb82e7ad5187aB8c1D52810B880` | — | alternative payment for MATH |
+
+Reference: [affection.gitbook.io/docs/arbitrage-and-routes](https://affection.gitbook.io/docs/arbitrage-and-routes) — "5% to 250% per trade"
+
+### Strategy A: Purchase→DEX Arbitrage (Noumenon's method)
+> Proven: 100 AFF → 33,594 AFF across 8 trades
+
+**Mechanism**: DYSNOMIA tokens have a fixed `GetMarketRate(paymentToken)`. If the DEX price
+exceeds this fixed rate, you can buy cheap from the contract and sell on PulseX at profit.
+
+**AFFECTION routes** (LAU tokens):
+- All 272 QING venues have an `Asset` LAU token
+- Each LAU has `GetMarketRate(AFFECTION) = 1e18` (1:1 AFFECTION per token)
+- Buy from LAU at 1 AFFECTION/token → sell on DEX if DEX price > 1 AFFECTION equiv.
+
+**pDAI routes** (Atropa tokens from affection.gitbook.io):
+- pINDEPENDENCE, GIMME FIVE, MATH v1.1, RNG accept pDAI at their market rate
+- Same loop: pDAI → Purchase → DEX swap → more pDAI → buy PLS
+
+**Run**:
+```bash
+# Step 1: Scan all tokens (reads chain + Blockscout, no tx, ~5-10 min)
+python scripts/scan_lau_arb.py
+
+# Step 2: Dry-run top opportunity
+python scripts/tx_lau_arb.py --token TOKEN_ADDR --payment PAYMENT_ADDR --dry-run
+
+# Step 3: Execute
+python scripts/tx_lau_arb.py --token TOKEN_ADDR --payment PAYMENT_ADDR
+```
+
+### Strategy B: WM Batch Minting (TGSv5)
+- **TGSv5** (`contracts/TGSv5.sol`) — deploy once, then call `mintWM(N)` to batch-mint WM
+- Each RHO() call on WM contract mints 1 WM to `tx.origin` (Joey's EOA)
+- WM is required to deploy new V2/V4 tokens (1:1 collateral)
+- New tokens start at 1 AFFECTION = 1 token → early mint → sell at DEX premium
+
+```bash
+# Price check (no TGSv5 needed)
+python agent/wm_minter.py --price-check
+
+# After TGSv5 deployed:
+TGSV5_ADDRESS=0x... python agent/wm_minter.py --count 10 --force
+```
+
+### Strategy C: Yuan Amplification (Beat optimization)
+From `CHOA.Yuan(Currency)`:
+```
+balanceOf(EOA) × 1  +  balanceOf(GIBS_LAU) × 10  +  balanceOf(YUE) × 40
+```
+Beat uses `Yuan(GIBS_QING)` as cryptographic modulus — larger = better territory metrics.
+
+**To maximize Yuan(GIBS_QING)**:
+- Transfer GIBS_QING tokens (`0x1B8774C0...`) to GIBS_LAU (`0x66a08aa...`) → 10x weight
+- Transfer GIBS_QING tokens to YUE (`0x8e666227...`) → 40x weight
+- Standard ERC20 `transfer()` — no special function needed
 
 ---
 
