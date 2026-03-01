@@ -411,6 +411,7 @@ PHASE 8 — Territory & Combat
 | **GIBS** (Joey's LAU token) | `0x66a08aa12da955eb63d7ac121a88b2b210a07b03` |
 | GIBS (LAU 1 — orphaned spare) | `0xabf97a71dfd71f3763c86080693c1ec94e5de846` |
 | **DysnomiaSelfSnipev4** (DSS) | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` |
+| **TGSv5** (WM batch minter) | `0xeeB330d3419193b4E42507fA07CcF2fC681a6127` |
 | **Joey's YUE wallet** | `0x8e666227B0C5A42075a4f9bdf5d2176f287a9cf0` |
 | **GIBS QING venue** | `0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35` |
 | **SEI** (player management) | `0x3dC54d46e030C42979f33C9992348a990acb6067` |
@@ -537,11 +538,11 @@ python scripts/tx_lau_arb.py --token TOKEN_ADDR --payment PAYMENT_ADDR
 - New tokens start at 1 AFFECTION = 1 token → early mint → sell at DEX premium
 
 ```bash
-# Price check (no TGSv5 needed)
+# Price check
 python agent/wm_minter.py --price-check
 
-# After TGSv5 deployed:
-TGSV5_ADDRESS=0x... python agent/wm_minter.py --count 10 --force
+# Batch mint WM (TGSv5 deployed):
+TGSV5_ADDRESS=0xeeB330d3419193b4E42507fA07CcF2fC681a6127 python agent/wm_minter.py --count 10 --force
 ```
 
 ### Strategy C: Yuan Amplification (Beat optimization)
@@ -908,3 +909,56 @@ All prior session work merged into `claude/encrypt-wallet-key-EKVN5`:
 | `scripts/zurich_recon.py` | Zurich context recon |
 
 **Status**: Canonical. Beat ready to execute: `python scripts/tx_full_beat_flow.py --skip-shio --with-cheon --broadcast`
+
+---
+
+## Session 5 Log (2026-03-01) — Joystick Bot + TGSv5 Deployment
+
+**Branch**: `claude/optimize-pls-generation-OlVDG`
+**Focus**: Build self-regulating modular arbitrage bot; deploy TGSv5 WM batch minter
+
+### Work Done This Session
+
+**Joystick Bot** (`scripts/Joystick/`) — 23 files, modular 4-engine arbitrage bot:
+- `core/` — config, chain (Multicall3), wallet (nonce tracker), executor (eth_call sim), gas_guard, simulator
+- `oracle/` — price oracle, QING scanner (TTL cache), profitability (Uniswap v2 impact formula)
+- `engines/` — base ABC + Engine 1 (Arb), Engine 2 (DSS), Engine 3 (WM/TGSv5), Engine 4 (Beat)
+- `loops/` — base ABC + terraform loop (drop-in template)
+- `bot.py` — priority scheduler, ROI-ranked engine selection, profit compounder (75% → AFFECTION)
+
+**TGSv5 Deployed** — block 25,911,970:
+- Script: `scripts/tx_deploy_tgsv5.py` (solcx compile + deploy + verify + .env update)
+- Address: `0xeeB330d3419193b4E42507fA07CcF2fC681a6127`
+- TX: `0x0fd1e6f4e3ca37cd81f634f093753991b590fb2ee1f834ba5b112748a4e5546b`
+- Gas used: 822,742 / Cost: 816.4 PLS
+- Verified: `owner()=Joey`, `authorized(Joey)=True`, `paused()=False`, `MAX_MINT_COUNT=100`
+- Engine 3 (WM batch minting) now active — `TGSV5_ADDRESS` written to `.env`
+
+### Joystick Bot Architecture
+
+| Engine | Trigger | Output |
+|--------|---------|--------|
+| **Engine 1 — Arb** | AFFECTION ≥ 1 | Purchase→DEX arb → PLS |
+| **Engine 2 — DSS** | GIBS/WPLS pair + price > 21.5 PLS | chatAndClaim×18 → PLS (needs pair creation) |
+| **Engine 3 — WM** | TGSV5_ADDRESS set + not paused | WM batch mint → V4 token creation |
+| **Engine 4 — Beat** | SHIO balances > 0 at GIBS_LAU | CHEON.Su + META.Beat → VITUS → PLS |
+
+**Run bot**:
+```bash
+source .env
+python scripts/Joystick/bot.py --status     # check engine readiness
+python scripts/Joystick/bot.py --dry-run    # simulate one cycle, no TX
+python scripts/Joystick/bot.py              # live (all engines)
+python scripts/Joystick/bot.py --beat-only  # Beat engine only
+```
+
+### Key Techniques
+- **Multicall3** (`0xcA11bde...`) — 1 RPC call for all balances per cycle
+- **eth_call simulation** — every TX simulated for free before sending
+- **Local nonce tracking** — no re-fetch between TXs in same cycle
+- **Gas price ceiling** — skip cycle if gas > 500 Gwei (configurable)
+- **Circuit breaker** — engine auto-disables after 3 consecutive failures
+- **TTL QING cache** — `/tmp/joystick_qing_cache.json`, 1hr TTL, scans 272 QINGs once
+
+### PLS Balance at End of Session
+~54,170 PLS (spent 816 PLS on TGSv5 deploy from ~54,986 PLS opening balance)
