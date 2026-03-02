@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Environment — contains private key, never commit
 .env
 .env.local
@@ -28,3 +29,64 @@ packages/
 
 # JetBrains / Rider
 .idea/
+=======
+################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/viewclient/bin/Debug/net8.0-windows
+/viewclient/obj/Debug/net8.0-windows/ref
+/viewclient/obj
+/viewclient/Pulse.csproj.user
+/.vs
+/viewclient/.vs
+/viewclient/viewclient_clang
+/viewclient/x64/Debug/viewclient_clang.dll
+/viewclient/x64/Debug/viewclient_clang.lib
+/viewclient/x64/Debug/viewclient_clang.pdb
+/AtropaAndroid/bin/Debug/net8.0-android
+/AtropaAndroid/obj
+/AtropaAndroid
+/Dysnomia/bin/Debug/net8.0-windows
+/Dysnomia/obj
+/Apparition/obj/Debug/net8.0-windows
+/Apparition/obj
+/Apparition/bin/Debug/net8.0-windows10.0.18362.0
+/viewclient/bin/Debug/net8.0-windows10.0.18362.0
+/Dysnomia/bin/Debug/net8.0
+/.deps
+/.states
+/artifacts
+/solidity/artifacts
+/solidity/wallet/artifacts
+/solidity/dysnomia/artifacts
+/solidity/dysnomia/domain/artifacts
+/solidity/dysnomia/domain/interfaces/artifacts
+/solidity/dysnomia/domain/old/artifacts
+/solidity/dysnomia/domain/assets/artifacts
+/solidity/dysnomia/domain/assets/interfaces/artifacts
+/solidity/dysnomia/domain/dan/artifacts
+/solidity/dysnomia/domain/dan/interfaces/artifacts
+/solidity/dysnomia/domain/soeng/artifacts
+/solidity/dysnomia/domain/soeng/interfaces/artifacts
+/solidity/dysnomia/domain/tang/artifacts
+/solidity/dysnomia/domain/tang/interfaces/artifacts
+/solidity/dysnomia/domain/sky/artifacts
+/solidity/dysnomia/domain/sky/interfaces/artifacts
+/solidity/dysnomia/include/artifacts
+/solidity/dysnomia/interfaces/artifacts
+/solidity/dysnomia/lib/artifacts
+/solidity/old/artifacts
+/viewclient/bin/Debug/net9.0-windows10.0.18362.0
+/Wallet/bin/Debug
+/Wallet/obj
+/Apparition/bin/Debug/net9.0-windows10.0.18362.0
+/Dysnomia/bin/Debug/net9.0
+/solidity/openzeppelin/contracts
+/solidity/last_compile
+/Wallet/bin/Contracts
+/solidity/bin/dysnomia
+/solidity/nethereum-gen.settings
+*.swp
+/þ
+>>>>>>> upstream/main

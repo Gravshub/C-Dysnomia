@@ -64,7 +64,6 @@ namespace Wallet
     {
         // Sentinel used by the upstream alias system (Aliases.cs); preserved for compatibility.
         static public string _base = "þ";
-
         public string ConnectionString;
         public Web3 w3;
         public IEthApiContractService eth;
@@ -98,6 +97,7 @@ namespace Wallet
 
             // Subscribe to TransferEvents from the current block onward so Contracts.cs
             // can track incoming/outgoing token transfers during the session.
+
             Task<HexBigInteger> _b = w3.Eth.Blocks.GetBlockNumber.SendRequestAsync();
             _b.Wait();
             HexBigInteger latestBlock = new HexBigInteger(_b.Result.ToUlong() + 1);

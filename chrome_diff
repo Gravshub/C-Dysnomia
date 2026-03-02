@@ -1,0 +1,1305 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 6c30a84bff..a594823c78 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -71,7 +71,7 @@ declare_args() {
+ if (is_official_build) {
+   # An official (maximally optimized!) component (optimized for build times)
+   # build doesn't make sense and usually doesn't work.
+-  assert(!is_component_build)
++  #assert(!is_component_build)
+ }
+ 
+ # The `gn_all` target is used to list all of the main targets in the build, so
+diff --git a/DEPS b/DEPS
+index cd53845544..8e3f92eb3b 100644
+--- a/DEPS
++++ b/DEPS
+@@ -454,10 +454,6 @@ vars = {
+   # and whatever else without interference from each other.
+   'jetstream_2.2_revision': '2145cedef4ca2777b792cb0059d3400ee2a6153c',
+   # Three lines of non-changing comments so that
+-  # the commit queue can handle CLs rolling wuffs
+-  # and whatever else without interference from each other.
+-  'wuffs_revision': 'e3f919ccfe3ef542cfc983a82146070258fb57f8',
+-  # Three lines of non-changing comments so that
+   # the commit queue can handle CLs rolling crabbyavif
+   # and whatever else without interference from each other.
+   'crabbyavif_revision': '640d2758f8d2e59d1a55ae0933673f0f65de68c4',
+@@ -2991,17 +2987,6 @@ deps = {
+   'src/third_party/webrtc':
+     Var('webrtc_git') + '/src.git' + '@' + 'd20f1291010c2355c411c4d68a28927df1acc3da',
+ 
+-  # Wuffs' canonical repository is at github.com/google/wuffs, but we use
+-  # Skia's mirror of Wuffs, the same as in upstream Skia's DEPS file.
+-  #
+-  # The local directory is called "third_party/wuffs" (matching upstream Skia
+-  # and other non-Chromium, Skia-using projects) even though the git repo we
+-  # clone is called "wuffs-mirror-release-c". The reasons for using w-m-r-c are
+-  # listed in the https://crrev.com/c/3086053 commit message. One reason is
+-  # that the w-m-r-c subset is much smaller and changes much less frequently.
+-  'src/third_party/wuffs/src':
+-    Var('skia_git') + '/external/github.com/google/wuffs-mirror-release-c.git' + '@' +  Var('wuffs_revision'),
+-
+   'src/third_party/weston/src': {
+       'url': Var('chromium_git') + '/external/anongit.freedesktop.org/git/wayland/weston.git' + '@' + 'bdba2f9adaca673fd58339d8140bc04727ee279d',
+       'condition': 'checkout_linux',
+diff --git a/OWNERS b/OWNERS
+index c4b16e7f63..4f3cc3f604 100644
+--- a/OWNERS
++++ b/OWNERS
+@@ -232,7 +232,6 @@ per-file third_party/widevine/cdm/win=*
+ per-file third_party/widevine/scripts=*
+ per-file third_party/widevine/test/license_server=*
+ per-file third_party/wix=*
+-per-file third_party/wuffs/src=*
+ per-file third_party/xdg-utils=*
+ per-file third_party/xnnpack/src=*
+ per-file third_party/zstd/src=*
+diff --git a/base/debug/proc_maps_linux.cc b/base/debug/proc_maps_linux.cc
+index f8b43188f5..8b448b133c 100644
+--- a/base/debug/proc_maps_linux.cc
++++ b/base/debug/proc_maps_linux.cc
+@@ -19,6 +19,7 @@
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/strings/string_split.h"
+ #include "build/build_config.h"
++#include "base/debug/stack_trace.h" 
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+ #include <inttypes.h>
+@@ -219,31 +220,8 @@ std::optional<SmapsRollup> ParseSmapsRollup(const std::string& buffer) {
+ }
+ 
+ std::optional<SmapsRollup> ReadAndParseSmapsRollup() {
+-  const size_t read_size = base::GetPageSize();
+-
+-  base::ScopedFD fd(HANDLE_EINTR(open("/proc/self/smaps_rollup", O_RDONLY)));
+-  if (!fd.is_valid()) {
+-    DPLOG(ERROR) << "Couldn't open /proc/self/smaps_rollup";
+-    return std::nullopt;
+-  }
+-
+-  std::string buffer;
+-  buffer.resize(read_size);
+-
+-  ssize_t bytes_read = HANDLE_EINTR(
+-      read(fd.get(), static_cast<void*>(buffer.data()), read_size));
+-  if (bytes_read < 0) {
+-    DPLOG(ERROR) << "Couldn't read /proc/self/smaps_rollup";
+-    return std::nullopt;
+-  }
+-
+-  // We expect to read a few hundred bytes, which should be significantly less
+-  // the page size.
+-  DCHECK(static_cast<size_t>(bytes_read) < read_size);
+-
+-  buffer.resize(static_cast<size_t>(bytes_read));
+-
+-  return ParseSmapsRollup(buffer);
++  LOG(ERROR) << base::debug::StackTrace();
++  return std::nullopt;
+ }
+ 
+ std::optional<SmapsRollup> ParseSmapsRollupForTesting(
+diff --git a/base/threading/platform_thread_linux.cc b/base/threading/platform_thread_linux.cc
+index aa56aae31e..26c17d5aca 100644
+--- a/base/threading/platform_thread_linux.cc
++++ b/base/threading/platform_thread_linux.cc
+@@ -263,15 +263,6 @@ void SetThreadTypeLinux(ProcessId process_id,
+     syscall_tid = kInvalidThreadId;
+   }
+ 
+-  if (thread_type == ThreadType::kRealtimeAudio) {
+-    if (sched_setscheduler(syscall_tid.raw(), SCHED_RR,
+-                           &PlatformThreadLinux::kRealTimeAudioPrio) == 0) {
+-      return;
+-    }
+-    // If failed to set to RT, fallback to setpriority to set nice value.
+-    DPLOG(ERROR) << "Failed to set realtime priority for thread " << thread_id;
+-  }
+-
+   SetThreadNiceFromType(thread_id, thread_type);
+ }
+ 
+diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
+index 0aee283905..4b147b6feb 100644
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -1465,8 +1465,8 @@ void ChromeMainDelegate::PreSandboxStartup() {
+     }
+ #else
+     crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+-    crash_reporter::SetFirstChanceExceptionHandler(
+-        v8::TryHandleWebAssemblyTrapPosix);
++//    crash_reporter::SetFirstChanceExceptionHandler(
++//        v8::TryHandleWebAssemblyTrapPosix);
+ #endif  // BUILDFLAG(IS_ANDROID)
+   }
+ #endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+@@ -1590,8 +1590,8 @@ void ChromeMainDelegate::ZygoteForked() {
+   std::string process_type =
+       command_line->GetSwitchValueASCII(switches::kProcessType);
+   crash_reporter::InitializeCrashpad(false, process_type);
+-  crash_reporter::SetFirstChanceExceptionHandler(
+-      v8::TryHandleWebAssemblyTrapPosix);
++//  crash_reporter::SetFirstChanceExceptionHandler(
++//      v8::TryHandleWebAssemblyTrapPosix);
+ 
+   // Reset the command line for the newly spawned process.
+   crash_keys::SetCrashKeysFromCommandLine(*command_line);
+diff --git a/chrome/browser/about_flags.cc b/chrome/browser/about_flags.cc
+index 87ae513327..3aff12dee3 100644
+--- a/chrome/browser/about_flags.cc
++++ b/chrome/browser/about_flags.cc
+@@ -12094,20 +12094,6 @@ const FeatureEntry kFeatureEntries[] = {
+      FEATURE_VALUE_TYPE(
+          autofill::features::kAutofillEnableNewFopDisplayDesktop)},
+ 
+-#if BUILDFLAG(IS_CHROMEOS)
+-    {"enable-printing-margins-and-scale",
+-     flag_descriptions::kEnablePrintingMarginsAndScale,
+-     flag_descriptions::kEnablePrintingMarginsAndScaleDescription, kOsCrOS,
+-     FEATURE_VALUE_TYPE(printing::features::kApiPrintingMarginsAndScale)},
+-#endif  // BUILDFLAG(IS_CHROMEOS)
+-
+-    {"align-pdf-default-print-settings-with-html",
+-     flag_descriptions::kAlignPdfDefaultPrintSettingsWithHTMLName,
+-     flag_descriptions::kAlignPdfDefaultPrintSettingsWithHTMLDescription,
+-     kOsAll,
+-     FEATURE_VALUE_TYPE(
+-         printing::features::kAlignPdfDefaultPrintSettingsWithHTML)},
+-
+     {"supervised-user-block-interstitial-v3",
+      flag_descriptions::kSupervisedUserBlockInterstitialV3Name,
+      flag_descriptions::kSupervisedUserBlockInterstitialV3Description, kOsAll,
+diff --git a/chrome/browser/chrome_browser_interface_binders.cc b/chrome/browser/chrome_browser_interface_binders.cc
+index 658a23ae07..e1402fcbfd 100644
+--- a/chrome/browser/chrome_browser_interface_binders.cc
++++ b/chrome/browser/chrome_browser_interface_binders.cc
+@@ -293,21 +293,7 @@ void BindNetworkHintsHandler(
+ void BindSpeechRecognitionContextHandler(
+     content::RenderFrameHost* frame_host,
+     mojo::PendingReceiver<media::mojom::SpeechRecognitionContext> receiver) {
+-  if (!captions::IsLiveCaptionFeatureSupported()) {
+     return;
+-  }
+-
+-  // Bind via the appropriate factory.
+-  Profile* profile = Profile::FromBrowserContext(
+-      frame_host->GetProcess()->GetBrowserContext());
+-#if BUILDFLAG(ENABLE_BROWSER_SPEECH_SERVICE)
+-  auto* factory = SpeechRecognitionServiceFactory::GetForProfile(profile);
+-#elif BUILDFLAG(IS_CHROMEOS)
+-  auto* factory = CrosSpeechRecognitionServiceFactory::GetForProfile(profile);
+-#else
+-#error "No speech recognition service factory on this platform."
+-#endif
+-  factory->BindSpeechRecognitionContext(std::move(receiver));
+ }
+ 
+ void BindSpeechRecognitionClientBrowserInterfaceHandler(
+diff --git a/chrome/browser/chrome_browser_main_linux.cc b/chrome/browser/chrome_browser_main_linux.cc
+index 2e680ec2eb..bd777a0944 100644
+--- a/chrome/browser/chrome_browser_main_linux.cc
++++ b/chrome/browser/chrome_browser_main_linux.cc
+@@ -65,8 +65,6 @@ void ChromeBrowserMainPartsLinux::PostCreateMainMessageLoop() {
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+ #if !BUILDFLAG(IS_CHROMEOS)
+-  bluez::BluezDBusManager::Initialize(
+-      dbus_thread_linux::GetSharedSystemBus().get());
+ 
+   // Set up crypt config. This needs to be done before anything starts the
+   // network service, as the raw encryption key needs to be shared with the
+@@ -130,11 +128,5 @@ void ChromeBrowserMainPartsLinux::PostBrowserStart() {
+ #endif  // BUILDFLAG(USE_DBUS) && !BUILDFLAG(IS_CHROMEOS)
+ 
+ void ChromeBrowserMainPartsLinux::PostDestroyThreads() {
+-#if BUILDFLAG(IS_CHROMEOS)
+-  // No-op; per PostBrowserStart() comment, this is done elsewhere.
+-#else
+-  bluez::BluezDBusManager::Shutdown();
+-#endif  // BUILDFLAG(IS_CHROMEOS)
+-
+   ChromeBrowserMainPartsPosix::PostDestroyThreads();
+ }
+diff --git a/chrome/browser/compose/compose_enabling.h b/chrome/browser/compose/compose_enabling.h
+index 65e2659aa2..710b585c97 100644
+--- a/chrome/browser/compose/compose_enabling.h
++++ b/chrome/browser/compose/compose_enabling.h
+@@ -10,7 +10,6 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/types/expected.h"
+-#include "chrome/browser/compose/proto/compose_optimization_guide.pb.h"
+ #include "components/autofill/core/common/aliases.h"
+ #include "components/compose/core/browser/compose_metrics.h"
+ #include "components/signin/public/identity_manager/identity_manager.h"
+@@ -95,9 +94,6 @@ class ComposeEnabling {
+                                 content::RenderFrameHost* rfh,
+                                 content::ContextMenuParams& params);
+ 
+-  compose::ComposeHintDecision GetOptimizationGuidanceForUrl(const GURL& url,
+-                                                             Profile* profile);
+-
+   // Checks if the page assessed language is supported by Compose.
+   bool IsPageLanguageSupported(translate::TranslateManager* translate_manager);
+ 
+diff --git a/chrome/browser/external_protocol/external_protocol_handler.cc b/chrome/browser/external_protocol/external_protocol_handler.cc
+index 51f344626c..306e3c308d 100644
+--- a/chrome/browser/external_protocol/external_protocol_handler.cc
++++ b/chrome/browser/external_protocol/external_protocol_handler.cc
+@@ -243,17 +243,6 @@ void OnDefaultSchemeClientWorkerFinished(
+   bool chrome_is_default_handler = state == shell_integration::IS_DEFAULT;
+ 
+   // On ChromeOS, Click to Call is integrated into the external protocol dialog.
+-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+-  if (web_contents && ShouldOfferClickToCallForURL(
+-                          web_contents->GetBrowserContext(), escaped_url)) {
+-    // Handle tel links by opening the Click to Call dialog. This will call back
+-    // into LaunchUrlWithoutSecurityCheck if the user selects a system handler.
+-    ClickToCallUiController::ShowDialog(
+-        web_contents, initiating_origin, std::move(initiator_document),
+-        escaped_url, chrome_is_default_handler, program_name);
+-    return;
+-  }
+-#endif
+ 
+   if (chrome_is_default_handler) {
+     if (delegate)
+diff --git a/chrome/browser/media/cast_mirroring_service_host.cc b/chrome/browser/media/cast_mirroring_service_host.cc
+index b3f55217a0..74c635c7ef 100644
+--- a/chrome/browser/media/cast_mirroring_service_host.cc
++++ b/chrome/browser/media/cast_mirroring_service_host.cc
+@@ -486,15 +486,7 @@ void CastMirroringServiceHost::CreateAudioStreamForDesktop(
+ 
+ void CastMirroringServiceHost::ConnectToRemotingSource(
+     mojo::PendingRemote<media::mojom::Remoter> remoter,
+-    mojo::PendingReceiver<media::mojom::RemotingSource> receiver) {
+-  if (source_media_id_.type == content::DesktopMediaID::TYPE_WEB_CONTENTS) {
+-    content::WebContents* source_contents = web_contents();
+-    if (source_contents) {
+-      CastRemotingConnector::Get(source_contents)
+-          ->ConnectWithMediaRemoter(std::move(remoter), std::move(receiver));
+-    }
+-  }
+-}
++    mojo::PendingReceiver<media::mojom::RemotingSource> receiver) { return; }
+ 
+ void CastMirroringServiceHost::WebContentsDestroyed() {
+   mirroring_service_.reset();
+diff --git a/chrome/browser/media/router/mojo/media_router_desktop.cc b/chrome/browser/media/router/mojo/media_router_desktop.cc
+index 2b4f6e0f9b..509f438f6d 100644
+--- a/chrome/browser/media/router/mojo/media_router_desktop.cc
++++ b/chrome/browser/media/router/mojo/media_router_desktop.cc
+@@ -173,14 +173,6 @@ void MediaRouterDesktop::CreateRoute(const MediaSource::Id& source_id,
+   }
+ 
+   const MediaSource source(source_id);
+-  if (source.IsTabMirroringSource()) {
+-    // Ensure the CastRemotingConnector is created before mirroring starts.
+-    CastRemotingConnector* const connector =
+-        CastRemotingConnector::Get(web_contents);
+-    connector->ResetRemotingPermission();
+-
+-    MediaRouterMojoMetrics::RecordTabMirroringMetrics(web_contents);
+-  }
+ 
+   if (IsSiteInitiatedMirroringSource(source_id)) {
+     MediaRouterMojoMetrics::RecordSiteInitiatedMirroringStarted(web_contents,
+diff --git a/chrome/browser/metrics/bluetooth_metrics_provider.cc b/chrome/browser/metrics/bluetooth_metrics_provider.cc
+index 5def5490f7..2c305a12e2 100644
+--- a/chrome/browser/metrics/bluetooth_metrics_provider.cc
++++ b/chrome/browser/metrics/bluetooth_metrics_provider.cc
+@@ -15,11 +15,7 @@ BluetoothMetricsProvider::BluetoothMetricsProvider() = default;
+ BluetoothMetricsProvider::~BluetoothMetricsProvider() = default;
+ 
+ bool BluetoothMetricsProvider::ProvideHistograms() {
+-  base::UmaHistogramEnumeration("Bluetooth.StackName",
+-                                floss::features::IsFlossEnabled()
+-                                    ? BluetoothStackName::kFloss
+-                                    : BluetoothStackName::kBlueZ);
+-  return true;
++  return false;
+ }
+ 
+ }  // namespace metrics
+diff --git a/chrome/browser/page_content_annotations/multi_source_page_context_fetcher.cc b/chrome/browser/page_content_annotations/multi_source_page_context_fetcher.cc
+index 4c3d0180a1..610009ddcd 100644
+--- a/chrome/browser/page_content_annotations/multi_source_page_context_fetcher.cc
++++ b/chrome/browser/page_content_annotations/multi_source_page_context_fetcher.cc
+@@ -194,20 +194,6 @@ enum class PdfRequestStates {
+   kMaxValue = kNonPdfMainDoc_PdfNotFound,
+ };
+ 
+-#if !BUILDFLAG(IS_ANDROID)
+-void RecordPdfRequestState(bool is_pdf_document, bool pdf_found) {
+-  PdfRequestStates state;
+-  if (is_pdf_document) {
+-    state = pdf_found ? PdfRequestStates::kPdfMainDoc_PdfFound
+-                      : PdfRequestStates::kPdfMainDoc_PdfNotFound;
+-  } else {
+-    state = pdf_found ? PdfRequestStates::kNonPdfMainDoc_PdfFound
+-                      : PdfRequestStates::kNonPdfMainDoc_PdfNotFound;
+-  }
+-  UMA_HISTOGRAM_ENUMERATION("Glic.TabContext.PdfContentsRequested", state);
+-}
+-#endif
+-
+ // Coordinates fetching multiple types of page context.
+ class PageContextFetcher : public content::WebContentsObserver {
+  public:
+@@ -249,27 +235,6 @@ class PageContextFetcher : public content::WebContentsObserver {
+     }
+ 
+     pdf_done_ = true;  // Will not fetch PDF contents by default.
+-#if !BUILDFLAG(IS_ANDROID)
+-    if (options.pdf_size_limit > 0) {
+-      bool is_pdf_document =
+-          web_contents()->GetContentsMimeType() == pdf::kPDFMimeType;
+-      pdf::PDFDocumentHelper* pdf_helper =
+-          pdf::PDFDocumentHelper::MaybeGetForWebContents(web_contents());
+-      RecordPdfRequestState(is_pdf_document,
+-                            /*pdf_found=*/pdf_helper != nullptr);
+-      // GetPdfBytes() is not safe before IsDocumentLoadComplete() = true.
+-      if (is_pdf_document && pdf_helper &&
+-          pdf_helper->IsDocumentLoadComplete()) {
+-        const url::Origin& pdf_origin =
+-            pdf_helper->render_frame_host().GetLastCommittedOrigin();
+-        pdf_helper->GetPdfBytes(
+-            options.pdf_size_limit,
+-            base::BindOnce(&PageContextFetcher::ReceivedPdfBytes, GetWeakPtr(),
+-                           pdf_origin, options.pdf_size_limit));
+-        pdf_done_ = false;  // Will fetch PDF contents.
+-      }
+-    }
+-#endif
+ 
+     if (options.annotated_page_content_options) {
+       blink::mojom::AIPageContentOptionsPtr ai_page_content_options =
+@@ -292,32 +257,6 @@ class PageContextFetcher : public content::WebContentsObserver {
+     RunCallbackIfComplete();
+   }
+ 
+-  // TODO: Enable pdf fetching for Android.
+-#if !BUILDFLAG(IS_ANDROID)
+-  void ReceivedPdfBytes(const url::Origin& pdf_origin,
+-                        uint32_t pdf_size_limit,
+-                        pdf::mojom::PdfListener::GetPdfBytesStatus status,
+-                        const std::vector<uint8_t>& pdf_bytes,
+-                        uint32_t page_count) {
+-    pdf_done_ = true;
+-
+-    // Warning!: `pdf_bytes_` can be larger than pdf_size_limit.
+-    // `pdf_size_limit` applies to the original PDF size, but the PDF is
+-    // re-serialized and returned, so it is not identical to the original.
+-    bool size_limit_exceeded =
+-        status ==
+-            pdf::mojom::PdfListener_GetPdfBytesStatus::kSizeLimitExceeded ||
+-        pdf_bytes.size() > pdf_size_limit;
+-
+-    if (size_limit_exceeded) {
+-      pending_result_->pdf_result.emplace(pdf_origin);
+-    } else {
+-      pending_result_->pdf_result.emplace(pdf_origin, pdf_bytes);
+-    }
+-    RunCallbackIfComplete();
+-  }
+-#endif
+-
+   void GetTabScreenshot(content::WebContents& web_contents,
+                         const ScreenshotOptions& screenshot_options) {
+     auto* view = web_contents.GetRenderWidgetHostView();
+diff --git a/chrome/browser/policy/configuration_policy_handler_list_factory.cc b/chrome/browser/policy/configuration_policy_handler_list_factory.cc
+index 85cc80d1ff..2dd4189a98 100644
+--- a/chrome/browser/policy/configuration_policy_handler_list_factory.cc
++++ b/chrome/browser/policy/configuration_policy_handler_list_factory.cc
+@@ -712,12 +712,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
+   { key::kIsolateOrigins,
+     prefs::kIsolateOrigins,
+     base::Value::Type::STRING },
+-  { key::kLensDesktopNTPSearchEnabled,
+-    prefs::kLensDesktopNTPSearchEnabled,
+-    base::Value::Type::BOOLEAN },
+-  { key::kLensRegionSearchEnabled,
+-    prefs::kLensRegionSearchEnabled,
+-    base::Value::Type::BOOLEAN },
+   { key::kLocalFontsAllowedForUrls,
+     prefs::kManagedLocalFontsAllowedForUrls,
+     base::Value::Type::LIST },
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+index 5a2d21a6d4..6be272ee5e 100644
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -2051,8 +2051,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
+ 
+   registry->RegisterIntegerPref(prefs::kChromeDataRegionSetting, 0);
+ 
+-  registry->RegisterIntegerPref(prefs::kLensOverlayStartCount, 0);
+-
+   registry->RegisterDictionaryPref(prefs::kReportingEndpoints);
+ 
+   registry->RegisterBooleanPref(prefs::kViewSourceLineWrappingEnabled, false);
+diff --git a/chrome/browser/printing/print_preview_dialog_controller.h b/chrome/browser/printing/print_preview_dialog_controller.h
+index 77fea0a881..e0d894d69a 100644
+--- a/chrome/browser/printing/print_preview_dialog_controller.h
++++ b/chrome/browser/printing/print_preview_dialog_controller.h
+@@ -11,7 +11,7 @@
+ #include "base/check.h"
+ #include "base/functional/callback.h"
+ #include "chrome/browser/tab_contents/web_contents_collection.h"
+-#include "components/printing/common/print.mojom.h"
++//#include "components/printing/common/print.mojom.h"
+ #include "components/tabs/public/tab_interface.h"
+ 
+ class GURL;
+@@ -24,168 +24,4 @@ namespace ui {
+ class WebDialogDelegate;
+ }
+ 
+-namespace printing {
+-
+-// For print preview, the WebContents that initiates the printing operation is
+-// the initiator, and the constrained dialog that shows the print preview is the
+-// print preview dialog.
+-// This class manages print preview dialog creation and destruction, and keeps
+-// track of the 1:1 relationship between initiator tabs and print preview
+-// dialogs.
+-class PrintPreviewDialogController : public WebContentsCollection::Observer {
+- public:
+-  // Should only be used by `BrowserProcess`-like classes. Call `GetInstance()`
+-  // to get the active instance.
+-  PrintPreviewDialogController();
+-
+-  PrintPreviewDialogController(const PrintPreviewDialogController&) = delete;
+-  PrintPreviewDialogController& operator=(const PrintPreviewDialogController&) =
+-      delete;
+-
+-  ~PrintPreviewDialogController() override;
+-
+-  // Returns the existing instance in the global `BrowserProcess`.
+-  static PrintPreviewDialogController* GetInstance();
+-
+-  // Returns true if `url` is a Print Preview dialog URL (has `chrome://print`
+-  // origin).
+-  static bool IsPrintPreviewURL(const GURL& url);
+-
+-  // Returns true if `url` is a Print Preview content URL (has
+-  // `chrome-untrusted://print` origin).
+-  static bool IsPrintPreviewContentURL(const GURL& url);
+-
+-  // Initiates print preview for `initiator`.
+-  void PrintPreview(content::WebContents* initiator,
+-                    const mojom::RequestPrintPreviewParams& params);
+-
+-  // Returns the preview dialog for `contents`.
+-  // Returns `contents` if `contents` is a preview dialog.
+-  // Returns nullptr if no preview dialog exists for `contents`.
+-  content::WebContents* GetPrintPreviewForContents(
+-      content::WebContents* contents) const;
+-
+-  // Returns the initiator for `preview_dialog`.
+-  // Returns nullptr if no initiator exists for `preview_dialog`.
+-  content::WebContents* GetInitiator(content::WebContents* preview_dialog);
+-
+-  // Returns the request data associated with `preview_dialog`.
+-  // Returns nullptr if no data exists for `preview_dialog`.
+-  const mojom::RequestPrintPreviewParams* GetRequestParams(
+-      content::WebContents* preview_dialog) const;
+-
+-  // Runs `callback` on the dialog of each active print preview operation.
+-  void ForEachPreviewDialog(
+-      base::RepeatingCallback<void(content::WebContents*)> callback);
+-
+-  // Erases the initiator info associated with `preview_dialog`.
+-  void EraseInitiatorInfo(content::WebContents* preview_dialog);
+-
+-  static std::unique_ptr<ui::WebDialogDelegate>
+-  CreatePrintPreviewDialogDelegateForTesting(content::WebContents* initiator);
+-
+-  // Exposes GetOrCreatePreviewDialog() for testing.
+-  content::WebContents* GetOrCreatePreviewDialogForTesting(
+-      content::WebContents* initiator);
+-
+-#if defined(UNIT_TEST)
+-  // Exposes a way for tests to manually specify the initiator to preview_dialog
+-  // relationship. For use in tests that create their own preview dialogs.
+-  void AssociateWebContentsesForTesting(content::WebContents* initiator,
+-                                        content::WebContents* preview_dialog) {
+-    CHECK(initiator);
+-    CHECK(preview_dialog);
+-    mojom::RequestPrintPreviewParams params;
+-    params.is_modifiable = true;
+-    InitiatorData data(initiator, params, /*scoper=*/nullptr);
+-    preview_dialog_map_.emplace(preview_dialog, std::move(data));
+-  }
+-  void DisassociateWebContentsesForTesting(
+-      content::WebContents* preview_dialog) {
+-    CHECK(preview_dialog);
+-    size_t erased_count = preview_dialog_map_.erase(preview_dialog);
+-    CHECK(erased_count);
+-  }
+-#endif
+-
+-  bool is_creating_print_preview_dialog() const {
+-    return is_creating_print_preview_dialog_;
+-  }
+-
+- private:
+-  // Tracks the initiator, as well as some of its Print Preview properties.
+-  struct InitiatorData {
+-    InitiatorData(content::WebContents* initiator,
+-                  const mojom::RequestPrintPreviewParams& request_params,
+-                  std::unique_ptr<tabs::ScopedTabModalUI> scoper);
+-    InitiatorData(InitiatorData&&) noexcept;
+-    InitiatorData& operator=(InitiatorData&&) noexcept;
+-    ~InitiatorData();
+-
+-    raw_ptr<content::WebContents> initiator;
+-    mojom::RequestPrintPreviewParams request_params;
+-
+-    // Prevents other tab-modal UIs from showing.
+-    std::unique_ptr<tabs::ScopedTabModalUI> scoper;
+-  };
+-
+-  // 1:1 relationship between a print preview dialog and its initiator data.
+-  // Key: Print preview dialog.
+-  // Value: Initiator data.
+-  using PrintPreviewDialogMap = std::map<content::WebContents*, InitiatorData>;
+-
+-  // WebContentsCollection::Observer:
+-  // Handles the closing of the RenderProcessHost. This is observed when the
+-  // initiator renderer crashes.
+-  void RenderProcessGone(content::WebContents* contents,
+-                         base::TerminationStatus status) override;
+-
+-  // Handles the destruction of `contents`. This is observed when either
+-  // the initiator or preview WebContents is closed.
+-  void WebContentsDestroyed(content::WebContents* contents) override;
+-
+-  // Handles the commit of a navigation for `contents`. This is observed when
+-  // the renderer for either WebContents is navigated to a different page.
+-  void DidFinishNavigation(
+-      content::WebContents* contents,
+-      content::NavigationHandle* navigation_handle) override;
+-
+-  // Helpers for DidFinishNavigation().
+-  void OnInitiatorNavigated(content::WebContents* initiator,
+-                            content::NavigationHandle* navigation_handle);
+-  void OnPreviewDialogNavigated(content::WebContents* preview_dialog,
+-                                content::NavigationHandle* navigation_handle);
+-
+-  // Gets/Creates the print preview dialog for `initiator`.
+-  content::WebContents* GetOrCreatePreviewDialog(
+-      content::WebContents* initiator,
+-      const mojom::RequestPrintPreviewParams& params);
+-
+-  // Creates a new print preview dialog if GetOrCreatePreviewDialog() cannot
+-  // find a print preview dialog for `initiator`.
+-  content::WebContents* CreatePrintPreviewDialog(
+-      tabs::TabInterface* tab,
+-      content::WebContents* initiator,
+-      const mojom::RequestPrintPreviewParams& params);
+-
+-  // Helper function to store the title of the initiator associated with
+-  // `preview_dialog` in `preview_dialog`'s PrintPreviewUI.
+-  void SaveInitiatorTitle(content::WebContents* preview_dialog);
+-
+-  // Removes WebContents when they close/crash/navigate.
+-  void RemoveInitiator(content::WebContents* initiator);
+-  void RemovePreviewDialog(content::WebContents* preview_dialog);
+-
+-  // Mapping between print preview dialog and the corresponding initiator.
+-  PrintPreviewDialogMap preview_dialog_map_;
+-
+-  WebContentsCollection web_contents_collection_;
+-
+-  // Whether the PrintPreviewDialogController is in the middle of creating a
+-  // print preview dialog.
+-  bool is_creating_print_preview_dialog_ = false;
+-};
+-
+-}  // namespace printing
+-
+ #endif  // CHROME_BROWSER_PRINTING_PRINT_PREVIEW_DIALOG_CONTROLLER_H_
+diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+index e6f3691486..c32d007a50 100644
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -2375,14 +2375,6 @@ void RenderViewContextMenu::AppendLinkToTextItems() {
+ }
+ 
+ void RenderViewContextMenu::AppendPrintItem() {
+-#if BUILDFLAG(ENABLE_PRINTING)
+-  if (GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
+-      (params_.media_type == ContextMenuDataMediaType::kNone ||
+-       params_.media_flags & ContextMenuData::kMediaCanPrint) &&
+-      params_.misspelled_word.empty()) {
+-    menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
+-  }
+-#endif  // BUILDFLAG(ENABLE_PRINTING)
+ }
+ 
+ void RenderViewContextMenu::AppendPartialTranslateItem() {
+@@ -2763,31 +2755,6 @@ void RenderViewContextMenu::AppendSharingItems() {
+ }
+ 
+ void RenderViewContextMenu::AppendClickToCallItem() {
+-  SharingClickToCallEntryPoint entry_point;
+-  std::optional<std::string> phone_number;
+-  std::string selection_text;
+-  if (ShouldOfferClickToCallForURL(browser_context_, params_.link_url)) {
+-    entry_point = SharingClickToCallEntryPoint::kRightClickLink;
+-    phone_number = params_.link_url.GetContent();
+-  } else if (!params_.selection_text.empty()) {
+-    entry_point = SharingClickToCallEntryPoint::kRightClickSelection;
+-    selection_text = base::UTF16ToUTF8(params_.selection_text);
+-    phone_number =
+-        ExtractPhoneNumberForClickToCall(browser_context_, selection_text);
+-  }
+-
+-  if (!phone_number || phone_number->empty()) {
+-    return;
+-  }
+-
+-  if (!click_to_call_context_menu_observer_) {
+-    click_to_call_context_menu_observer_ =
+-        std::make_unique<ClickToCallContextMenuObserver>(this);
+-    observers_.AddObserver(click_to_call_context_menu_observer_.get());
+-  }
+-
+-  click_to_call_context_menu_observer_->BuildMenu(*phone_number, selection_text,
+-                                                  entry_point);
+ }
+ 
+ void RenderViewContextMenu::AppendRegionSearchItem() {
+@@ -4014,15 +3981,6 @@ bool RenderViewContextMenu::IsPasteAndMatchStyleEnabled() const {
+ }
+ 
+ bool RenderViewContextMenu::IsPrintPreviewEnabled() const {
+-#if BUILDFLAG(ENABLE_GLIC)
+-  if (IsGlicWindow(this, browser_context_) &&
+-      base::FeatureList::IsEnabled(features::kGlicPrintMenuItem) &&
+-      glic::GlicEnabling::IsMultiInstanceEnabled()) {
+-    return GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
+-           (source_web_contents_ && !source_web_contents_->IsCrashed());
+-  }
+-#endif  // BUILDFLAG(ENABLE_GLIC)
+-
+   if (params_.media_type != ContextMenuDataMediaType::kNone &&
+       !(params_.media_flags & ContextMenuData::kMediaCanPrint)) {
+     return false;
+diff --git a/chrome/browser/speech/chrome_speech_recognition_manager_delegate.cc b/chrome/browser/speech/chrome_speech_recognition_manager_delegate.cc
+index 1d521ff0b5..a5c21b946b 100644
+--- a/chrome/browser/speech/chrome_speech_recognition_manager_delegate.cc
++++ b/chrome/browser/speech/chrome_speech_recognition_manager_delegate.cc
+@@ -127,36 +127,6 @@ void ChromeSpeechRecognitionManagerDelegate::BindSpeechRecognitionContext(
+     mojo::PendingReceiver<media::mojom::SpeechRecognitionContext>
+         recognition_receiver,
+     const std::string& language) {
+-#if BUILDFLAG(ENABLE_SPEECH_SERVICE)
+-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+-  content::GetUIThreadTaskRunner({})->PostTask(
+-      FROM_HERE,
+-      base::BindOnce(
+-          [](const std::string& language,
+-             mojo::PendingReceiver<media::mojom::SpeechRecognitionContext>
+-                 receiver) {
+-#if BUILDFLAG(ENABLE_BROWSER_SPEECH_SERVICE)
+-            auto* profile = ProfileManager::GetLastUsedProfileIfLoaded();
+-            auto* factory =
+-                SpeechRecognitionServiceFactory::GetForProfile(profile);
+-#elif BUILDFLAG(IS_CHROMEOS)
+-            auto* profile = ProfileManager::GetPrimaryUserProfile();
+-            auto* factory =
+-                CrosSpeechRecognitionServiceFactory::GetForProfile(profile);
+-#else
+-#error "No speech recognition service factory on this platform."
+-#endif  // BUILDFLAG(ENABLE_BROWSER_SPEECH_SERVICE)
+-            if (factory) {
+-              factory->BindSpeechRecognitionContext(std::move(receiver));
+-            }
+-            // Reset the SODA uninstall timer when used by the Web Speech API.
+-            if (profile) {
+-              SodaInstaller::GetInstance()->SetUninstallTimer(
+-                  g_browser_process->local_state(), language);
+-            }
+-          },
+-          language, std::move(recognition_receiver)));
+-#endif  // BUILDFLAG(ENABLE_SPEECH_SERVICE)
+ }
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+diff --git a/chrome/browser/startup/startup_launch_manager.cc b/chrome/browser/startup/startup_launch_manager.cc
+index c0831d0220..d3fa0c9aa5 100644
+--- a/chrome/browser/startup/startup_launch_manager.cc
++++ b/chrome/browser/startup/startup_launch_manager.cc
+@@ -81,8 +81,8 @@ StartupLaunchManager* StartupLaunchManager::From(
+ 
+ void StartupLaunchManager::UpdateLaunchOnStartup(
+     std::optional<StartupLaunchMode> startup_launch_mode) {
+-#if BUILDFLAG(IS_WIN)
+   // This functionality is only defined for default profile, currently.
++/*
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kUserDataDir)) {
+     return;
+@@ -92,9 +92,5 @@ void StartupLaunchManager::UpdateLaunchOnStartup(
+                      ? base::BindOnce(auto_launch_util::EnableStartAtLogin,
+                                       *startup_launch_mode)
+                      : base::BindOnce(auto_launch_util::DisableStartAtLogin));
+-#elif BUILDFLAG(IS_MAC)
+-// Mac does not support forcing launch on startup.
+-#else
+-  NOTIMPLEMENTED();
+-#endif  // BUILDFLAG(IS_WIN)
++*/
+ }
+diff --git a/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc b/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
+index 55bed78d81..608acac69d 100644
+--- a/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
++++ b/chrome/browser/sync/prefs/chrome_syncable_prefs_database.cc
+@@ -548,10 +548,6 @@ constexpr auto kChromeSyncablePrefsAllowlist = base::MakeFixedFlatMap<
+      {syncable_prefs_ids::kAccessibilityReadAnythingOmniboxChipIgnoredCount,
+       syncer::PREFERENCES, sync_preferences::PrefSensitivity::kNone,
+       sync_preferences::MergeBehavior::kNone}},
+-    {prefs::kLensRegionSearchEnabled,
+-     {syncable_prefs_ids::kLensRegionSearchEnabled, syncer::PREFERENCES,
+-      sync_preferences::PrefSensitivity::kNone,
+-      sync_preferences::MergeBehavior::kNone}},
+     {prefs::kHatsSurveyMetadata,
+      {syncable_prefs_ids::kHatsSurveyMetadata, syncer::PREFERENCES,
+       sync_preferences::PrefSensitivity::kNone,
+diff --git a/chrome/browser/ui/lens/lens_overlay_controller.cc b/chrome/browser/ui/lens/lens_overlay_controller.cc
+index 663d64a93d..1b74734ed8 100644
+--- a/chrome/browser/ui/lens/lens_overlay_controller.cc
++++ b/chrome/browser/ui/lens/lens_overlay_controller.cc
+@@ -950,13 +950,6 @@ void LensOverlayController::ShowUI(
+   // are considered follow ups that should be fulfilled by AIM.
+   use_aim_for_visual_search_ = IsResultsSidePanelShowing();
+ 
+-  // Increment the counter for the number of times the Lens Overlay has been
+-  // started.
+-  int lens_overlay_start_count =
+-      pref_service_->GetInteger(prefs::kLensOverlayStartCount);
+-  pref_service_->SetInteger(prefs::kLensOverlayStartCount,
+-                            lens_overlay_start_count + 1);
+-
+   // Store reference for later use.
+   invocation_source_ = invocation_source;
+ 
+diff --git a/chrome/browser/ui/lens/lens_overlay_untrusted_ui.cc b/chrome/browser/ui/lens/lens_overlay_untrusted_ui.cc
+index c1fabc8021..12270e6540 100644
+--- a/chrome/browser/ui/lens/lens_overlay_untrusted_ui.cc
++++ b/chrome/browser/ui/lens/lens_overlay_untrusted_ui.cc
+@@ -33,8 +33,6 @@
+ 
+ namespace lens {
+ 
+-// The number of times to show cursor tooltips.
+-constexpr int kNumTimesToShowCursorTooltips = 5;
+ // Time to wait for Lens text response before displaying the selected region
+ // context menu, in milliseconds.
+ constexpr int kTextReceivedTimeoutMs = 2000;
+@@ -351,20 +349,6 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
+   html_source->AddBoolean("expandedComposeboxShowVoiceSearch", false);
+   html_source->AddBoolean("expandedSearchboxShowVoiceSearch", false);
+   html_source->AddBoolean("composeboxContextDragAndDropEnabled", false);
+-
+-  // Determine if the cursor tooltip should appear.
+-  Profile* profile = Profile::FromWebUI(web_ui);
+-  int lens_overlay_start_count =
+-      profile->GetPrefs()->GetInteger(::prefs::kLensOverlayStartCount);
+-  html_source->AddBoolean(
+-      "canShowTooltipFromPrefs",
+-      lens_overlay_start_count <= kNumTimesToShowCursorTooltips);
+-
+-  html_source->AddBoolean(
+-      "enablePrivacyNotice",
+-      lens::features::IsLensOverlayNonBlockingPrivacyNoticeEnabled() &&
+-          !MaybeIncrementPrivacyNoticeShownCountAndGrantPermissions(
+-              profile->GetPrefs()));
+ }
+ 
+ void LensOverlayUntrustedUI::BindInterface(
+diff --git a/chrome/browser/ui/views/user_education/browser_user_education_service.cc b/chrome/browser/ui/views/user_education/browser_user_education_service.cc
+index 0438968ff7..069c7631d6 100644
+--- a/chrome/browser/ui/views/user_education/browser_user_education_service.cc
++++ b/chrome/browser/ui/views/user_education/browser_user_education_service.cc
+@@ -839,21 +839,6 @@ void MaybeRegisterChromeFeaturePromos(
+                 if (elements.empty()) {
+                   return nullptr;
+                 }
+-                // Ensure a searchified PDF is visible before showing the IPH.
+-                auto* const browser_view =
+-                    views::ElementTrackerViews::GetInstance()
+-                        ->GetFirstMatchingViewAs<BrowserView>(
+-                            kBrowserViewElementId, elements[0]->context());
+-                std::vector<ContentsWebView*> contents_web_views =
+-                    browser_view->GetAllVisibleContentsWebViews();
+-                for (auto* contents_web_view : contents_web_views) {
+-                  auto* pdf_doc_helper =
+-                      pdf::PDFDocumentHelper::MaybeGetForWebContents(
+-                          contents_web_view->GetWebContents());
+-                  if (pdf_doc_helper && pdf_doc_helper->SearchifyStarted()) {
+-                    return elements[0];
+-                  }
+-                }
+                 return nullptr;
+               }))));
+ 
+diff --git a/chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.cc b/chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.cc
+index d3a1189142..122f807f66 100644
+--- a/chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.cc
++++ b/chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.cc
+@@ -700,12 +700,6 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
+   source->AddInteger("browserPromoCompletedLimit",
+                      browser_completed_promo_limit);
+ 
+-  SearchboxHandler::SetupWebUIDataSource(
+-      source, profile,
+-      /*enable_voice_search=*/true,
+-      /*enable_lens_search=*/
+-      profile->GetPrefs()->GetBoolean(prefs::kLensDesktopNTPSearchEnabled));
+-
+   webui::SetupWebUIDataSource(source, kNewTabPageResources,
+                               IDR_NEW_TAB_PAGE_NEW_TAB_PAGE_HTML);
+ 
+diff --git a/chrome/browser/ui/webui/settings/settings_ui.cc b/chrome/browser/ui/webui/settings/settings_ui.cc
+index 7e19fb996d..f33a90bbc4 100644
+--- a/chrome/browser/ui/webui/settings/settings_ui.cc
++++ b/chrome/browser/ui/webui/settings/settings_ui.cc
+@@ -356,13 +356,8 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
+       "enableKeyboardLockPrompt",
+       base::FeatureList::IsEnabled(permissions::features::kKeyboardLockPrompt));
+ 
+-#if BUILDFLAG(ENABLE_COMPOSE)
+-  const bool compose_enabled = ComposeEnabling::IsEnabledForProfile(profile);
+-  const bool compose_visible = ComposeEnabling::IsSettingVisible(profile);
+-#else
+   const bool compose_enabled = false;
+   const bool compose_visible = false;
+-#endif  // BUILDFLAG(ENABLE_COMPOSE)
+ 
+   html_source->AddBoolean(
+       "enableComposeProactiveNudge",
+diff --git a/chrome/common/pref_names.h b/chrome/common/pref_names.h
+index edd63ae5c3..7b45c2f6c3 100644
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -4028,14 +4028,6 @@ inline constexpr char kDesktopSharingHubEnabled[] =
+ // the same major version, the browser should not attempt to auto-open
+ // the page again.
+ inline constexpr char kLastWhatsNewVersion[] = "browser.last_whats_new_version";
+-// A boolean indicating whether the Lens Region search feature should be enabled
+-// if supported.
+-inline constexpr char kLensRegionSearchEnabled[] =
+-    "policy.lens_region_search_enabled";
+-// A boolean indicating whether the Lens NTP searchbox feature should be enabled
+-// if supported.
+-inline constexpr char kLensDesktopNTPSearchEnabled[] =
+-    "policy.lens_desktop_ntp_search_enabled";
+ #endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+@@ -4050,10 +4042,6 @@ inline constexpr char kWhatsNewFirstEnabledOrder[] =
+ inline constexpr char kWhatsNewVersionUsed[] = "browser.whats_new.version_used";
+ #endif
+ 
+-// An integer indicating the number of times the Lens Overlay was started.
+-inline constexpr char kLensOverlayStartCount[] =
+-    "lens.lens_overlay_start_count";
+-
+ // A boolean indicating whether the Privacy guide feature has been viewed. This
+ // is set to true if the user has done any of the following: (1) opened the
+ // privacy guide, (2) dismissed the privacy guide promo, (3) seen the privacy
+diff --git a/components/paint_preview/common/serial_utils.cc b/components/paint_preview/common/serial_utils.cc
+index b68f76c5f8..087cf9ddef 100644
+--- a/components/paint_preview/common/serial_utils.cc
++++ b/components/paint_preview/common/serial_utils.cc
+@@ -134,7 +134,6 @@ static sk_sp<SkTypeface> DeserializeTypeface(const void* data,
+ static bool is_supported_codec(sk_sp<const SkData> data) {
+   CHECK(data);
+   return SkBmpDecoder::IsBmp(data->data(), data->size()) ||
+-         SkGifDecoder::IsGif(data->data(), data->size()) ||
+          SkPngRustDecoder::IsPng(data->data(), data->size()) ||
+          SkJpegDecoder::IsJpeg(data->data(), data->size()) ||
+          SkWebpDecoder::IsWebp(data->data(), data->size());
+@@ -209,9 +208,6 @@ sk_sp<SkImage> DeserializeImage(const void* bytes, size_t length, void*) {
+   if (SkBmpDecoder::IsBmp(bytes, length)) {
+     return get_image(SkBmpDecoder::Decode(data, nullptr));
+   }
+-  if (SkGifDecoder::IsGif(bytes, length)) {
+-    return get_image(SkGifDecoder::Decode(data, nullptr));
+-  }
+   if (SkJpegDecoder::IsJpeg(bytes, length)) {
+     return get_image(SkJpegDecoder::Decode(data, nullptr));
+   }
+diff --git a/components/policy/test/data/pref_mapping/LensDesktopNTPSearchEnabled.json b/components/policy/test/data/pref_mapping/LensDesktopNTPSearchEnabled.json
+index 34e3d104d2..f2a0d15c93 100644
+--- a/components/policy/test/data/pref_mapping/LensDesktopNTPSearchEnabled.json
++++ b/components/policy/test/data/pref_mapping/LensDesktopNTPSearchEnabled.json
+@@ -1,34 +1,7 @@
+ [
+   {
+     "os": [
+-      "win",
+-      "linux",
+-      "mac",
+-      "chromeos",
+       "fuchsia"
+-    ],
+-    "policy_pref_mapping_tests": [
+-      {
+-        "policies": {
+-          "LensDesktopNTPSearchEnabled": true
+-        },
+-        "prefs": {
+-          "policy.lens_desktop_ntp_search_enabled": {
+-            "location": "user_profile",
+-            "value": true
+-          }
+-        }
+-      },
+-      {
+-        "note": "Check default values (no policies set)",
+-        "policies": {},
+-        "prefs": {
+-          "policy.lens_desktop_ntp_search_enabled": {
+-            "default_value": true,
+-            "location": "user_profile"
+-          }
+-        }
+-      }
+     ]
+   }
+ ]
+diff --git a/content/shell/renderer/shell_content_renderer_client.cc b/content/shell/renderer/shell_content_renderer_client.cc
+index 71ce909443..3503311823 100644
+--- a/content/shell/renderer/shell_content_renderer_client.cc
++++ b/content/shell/renderer/shell_content_renderer_client.cc
+@@ -266,7 +266,7 @@ void ShellContentRendererClient::SetUpWebAssemblyTrapHandler() {
+     return;
+   }
+ 
+-#if defined(ENABLE_WEB_ASSEMBLY_TRAP_HANDLER_LINUX)
++//#if defined(ENABLE_WEB_ASSEMBLY_TRAP_HANDLER_LINUX)
+   if (base::debug::SetStackDumpFirstChanceCallback(
+           v8::TryHandleWebAssemblyTrapPosix)) {
+     // Crashpad and Breakpad are disabled, but the in-process stack dump
+@@ -277,7 +277,7 @@ void ShellContentRendererClient::SetUpWebAssemblyTrapHandler() {
+ 
+   // As the registration of the callback failed, we don't enable trap
+   // handlers.
+-#endif  // defined(ENABLE_WEB_ASSEMBLY_TRAP_HANDLER_LINUX)
++//#endif  // defined(ENABLE_WEB_ASSEMBLY_TRAP_HANDLER_LINUX)
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+ }
+ 
+diff --git a/extensions/renderer/native_extension_bindings_system.cc b/extensions/renderer/native_extension_bindings_system.cc
+index 314d4e5d18..b730f8b9bc 100644
+--- a/extensions/renderer/native_extension_bindings_system.cc
++++ b/extensions/renderer/native_extension_bindings_system.cc
+@@ -655,18 +655,6 @@ void NativeExtensionBindingsSystem::UpdateBindingsForContext(
+       }
+     }
+ 
+-    // The chrome.test API has a special case for web page contexts, where it is
+-    // available if the "--ExtensionTestApiOnWebPages" command line flag has
+-    // been used.
+-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+-            switches::kExtensionTestApiOnWebPages) &&
+-        context->GetAvailability("test").is_available()) {
+-      is_any_feature_available_to_page = true;
+-      if (!set_accessor("test")) {
+-        LOG(ERROR) << "Failed to create API on Chrome object.";
+-      }
+-    }
+-
+     // Runtime is special and needs to be provided in two cases:
+     //  - If any extensions have specified themselves as externally connectable
+     //  from this web page's URL.
+diff --git a/google_apis/gcm/engine/registration_request.cc b/google_apis/gcm/engine/registration_request.cc
+index 488faff9f7..b3110c95ba 100644
+--- a/google_apis/gcm/engine/registration_request.cc
++++ b/google_apis/gcm/engine/registration_request.cc
+@@ -28,6 +28,7 @@
+ #include "services/network/public/cpp/simple_url_loader.h"
+ #include "services/network/public/mojom/url_response_head.mojom.h"
+ #include "url/gurl.h"
++#include "base/debug/stack_trace.h"
+ 
+ namespace gcm {
+ 
+diff --git a/gpu/command_buffer/service/shared_image/shared_image_manager.cc b/gpu/command_buffer/service/shared_image/shared_image_manager.cc
+index f51e274434..eeb4d51147 100644
+--- a/gpu/command_buffer/service/shared_image/shared_image_manager.cc
++++ b/gpu/command_buffer/service/shared_image/shared_image_manager.cc
+@@ -394,8 +394,6 @@ std::unique_ptr<SkiaImageRepresentation> SharedImageManager::ProduceSkia(
+   AutoLock autolock(this);
+   auto* backing = GetBacking(mailbox);
+   if (!backing) {
+-    LOG(ERROR) << "SharedImageManager::ProduceSkia: Trying to Produce a "
+-                  "Skia representation from a non-existent mailbox.";
+     return nullptr;
+   }
+ 
+diff --git a/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_linux.cc b/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_linux.cc
+index 2133e81357..3186e99ab1 100644
+--- a/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_linux.cc
++++ b/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_linux.cc
+@@ -311,14 +311,9 @@ uint32_t CountMappings(base::ProcessId pid) {
+ 
+ // Get values from smaps_rollup for the current process.
+ void GetSmapsRollup(base::ByteCount* pss, base::ByteCount* swap_pss) {
+-  auto value = base::debug::ReadAndParseSmapsRollup();
+-  if (!value) {
+-    *pss = base::ByteCount(0);
+-    *swap_pss = base::ByteCount(0);
+-    return;
+-  }
+-  *pss = value->pss;
+-  *swap_pss = value->swap_pss;
++  *pss = base::ByteCount(0);
++  *swap_pss = base::ByteCount(0);
++  return;
+ }
+ 
+ }  // namespace
+diff --git a/skia/BUILD.gn b/skia/BUILD.gn
+index 4a67478115..df29a76ceb 100644
+--- a/skia/BUILD.gn
++++ b/skia/BUILD.gn
+@@ -85,7 +85,6 @@ config("skia_config") {
+       "SK_CODEC_DECODES_JPEG",
+       "SK_CODEC_ENCODES_JPEG",
+     ]
+-    include_dirs += [ "//third_party/wuffs/src/release/c" ]
+   }
+ 
+   if (is_component_build) {
+@@ -376,9 +375,8 @@ component("skia") {
+       "//third_party/skia/src/codec/SkJpegSourceMgr.cpp",
+       "//third_party/skia/src/codec/SkJpegUtility.cpp",
+       "//third_party/skia/src/codec/SkWebpCodec.cpp",
+-      "//third_party/skia/src/codec/SkWuffsCodec.cpp",
++#      "//third_party/skia/src/codec/SkWuffsCodec.cpp",
+     ]
+-    deps += [ "//third_party/wuffs" ]
+   } else {
+     sources += skia_no_encode_jpeg_srcs
+   }
+diff --git a/third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.cc b/third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.cc
+index 81a319afa9..e0e5396e6c 100644
+--- a/third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.cc
++++ b/third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.cc
+@@ -27,7 +27,7 @@
+ 
+ #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+ #include "third_party/skia/include/codec/SkEncodedImageFormat.h"
+-#include "third_party/skia/include/codec/SkGifDecoder.h"
++#include "third_party/skia/include/codec/SkJpegDecoder.h"
+ #include "third_party/skia/include/core/SkStream.h"
+ 
+ namespace blink {
+@@ -47,9 +47,9 @@ std::unique_ptr<SkCodec> GIFImageDecoder::OnCreateSkCodec(
+     std::unique_ptr<SkStream> stream,
+     SkCodec::Result* result) {
+   std::unique_ptr<SkCodec> codec =
+-      SkGifDecoder::Decode(std::move(stream), result);
++      SkJpegDecoder::Decode(std::move(stream), result);
+   if (codec) {
+-    CHECK_EQ(codec->getEncodedFormat(), SkEncodedImageFormat::kGIF);
++    CHECK_EQ(codec->getEncodedFormat(), SkEncodedImageFormat::kJPEG);
+   }
+   return codec;
+ }
+diff --git a/third_party/wuffs/BUILD.gn b/third_party/wuffs/BUILD.gn
+deleted file mode 100644
+index cab4c28518..0000000000
+--- a/third_party/wuffs/BUILD.gn
++++ /dev/null
+@@ -1,98 +0,0 @@
+-# Copyright 2019 The Chromium Authors
+-# Use of this source code is governed by a BSD-style license that can be
+-# found in the LICENSE file.
+-
+-# Most third_party/foobar dependencies are libraries that do one thing: e.g. a
+-# particular codec, regular expressions, a SQL database, etc. Wuffs is unusual
+-# in two respects:
+-#
+-# - The Wuffs project is both a programming language, and a standard library
+-#   written in that programming language (and then transpiled to C). As of
+-#   November 2019, Chromium uses only Wuffs-the-library.
+-#
+-# - That standard library speaks many codecs. As of November 2019, compression
+-#   and images, but in the future, this may grow in scope.
+-#
+-# Third_party/foobar dependencies need to be reviewed before they are added:
+-# https://chromium.googlesource.com/chromium/src.git/+/master/docs/adding_to_third_party.md#Get-a-review
+-#
+-# Normally, this review is a one-off process: once third_party/foobar is
+-# accepted, it doesn't need additional review for e.g. version upgrades.
+-# Because Wuffs is many things, substantial changes (newer versions or newer
+-# configurations) deserve additional review just as if they were a new
+-# third_party dependency. This is especially so for Wuffs-the-language, as
+-# adding a new programming language to Chromium has a very high bar.
+-#
+-# In summary, non-trivial changes to how Chromium uses third_party/wuffs (i.e.
+-# this BUILD.gn file), both adding new build targets or changing existing build
+-# targets' configuration or visibility, require consulting ATL_OWNERS,
+-# as per the "adding_to_third_party.md" link above.
+-
+-import("//third_party/wuffs/config.gni")
+-
+-static_library("wuffs") {
+-  defines = [
+-    # Copy/pasting from "src/release/c/wuffs-*.c":
+-    #
+-    # ----
+-    #
+-    # Wuffs ships as a "single file C library" or "header file library" as per
+-    # https://github.com/nothings/stb/blob/master/docs/stb_howto.txt
+-    #
+-    # To use that single file as a "foo.c"-like implementation, instead of a
+-    # "foo.h"-like header, #define WUFFS_IMPLEMENTATION before #include'ing or
+-    # compiling it.
+-    #
+-    # ----
+-    "WUFFS_IMPLEMENTATION",
+-
+-    # Continuing to copy/paste:
+-    #
+-    # ----
+-    #
+-    # Defining the WUFFS_CONFIG__MODULE* macros are optional, but it lets users
+-    # of Wuffs' .c file whitelist which parts of Wuffs to build. That file
+-    # contains the entire Wuffs standard library, implementing a variety of
+-    # codecs and file formats. Without this macro definition, an optimizing
+-    # compiler or linker may very well discard Wuffs code for unused codecs,
+-    # but listing the Wuffs modules we use makes that process explicit.
+-    # Preprocessing means that such code simply isn't compiled.
+-    #
+-    # ----
+-    #
+-    # For Chromium, we're only interested in particular image codes (e.g. GIF)
+-    # and their dependencies (e.g. BASE, LZW).
+-    #
+-    # Do not modify this list without considering the "consult
+-    # ENG_REVIEW_OWNERS" comment at the top of this file.
+-    "WUFFS_CONFIG__MODULES",
+-    "WUFFS_CONFIG__MODULE__BASE__CORE",
+-  ]
+-
+-  if (use_wuffs_gif_parser) {
+-    defines += [
+-      "WUFFS_CONFIG__MODULE__BASE__INTERFACES",
+-      "WUFFS_CONFIG__MODULE__BASE__PIXCONV",
+-      "WUFFS_CONFIG__MODULE__GIF",
+-      "WUFFS_CONFIG__MODULE__LZW",
+-    ]
+-  }
+-
+-  # Do not modify this list without considering the "consult ENG_REVIEW_OWNERS"
+-  # comment at the top of this file.
+-  visibility = [ "//skia" ]
+-
+-  sources = [ "src/release/c/wuffs-v0.3.c" ]
+-
+-  # Wuffs is said to be memory-safe. Its array bounds safety checks are
+-  # proved entirely at-compile-time (when compiling either Wuffs itself
+-  # or `*.wuffs` source code to `*.c` generated code). There should be
+-  # no need to add the extra instrumentation of `-fsanitize=array-bounds`.
+-  #
+-  # TODO(crbug.com/455614314): consider building a fix directly into
+-  # Wuffs to pacify the compiler.
+-  configs -= [ "//build/config/compiler:sanitize_c_array_bounds" ]
+-}
+-# Do not add build targets, or change their configuration or visibility,
+-# without considering the "consult ENG_REVIEW_OWNERS" comment at the top of
+-# this file.
+diff --git a/third_party/wuffs/DIR_METADATA b/third_party/wuffs/DIR_METADATA
+deleted file mode 100644
+index 73860afb4e..0000000000
+--- a/third_party/wuffs/DIR_METADATA
++++ /dev/null
+@@ -1,6 +0,0 @@
+-monorail: {
+-  component: "Internals>Skia"
+-}
+-buganizer_public: {
+-  component_id: 1457031
+-}
+diff --git a/third_party/wuffs/OWNERS b/third_party/wuffs/OWNERS
+deleted file mode 100644
+index 74a49767cd..0000000000
+--- a/third_party/wuffs/OWNERS
++++ /dev/null
+@@ -1,5 +0,0 @@
+-nigeltao@chromium.org
+-cblume@chromium.org
+-
+-# See the comment at the top of the BUILD.gn file for the rationale.
+-per-file BUILD.gn=file://ATL_OWNERS
+diff --git a/third_party/wuffs/README.chromium b/third_party/wuffs/README.chromium
+deleted file mode 100644
+index fb39856176..0000000000
+--- a/third_party/wuffs/README.chromium
++++ /dev/null
+@@ -1,22 +0,0 @@
+-Name: Wuffs (Wrangling Untrusted File Formats Safely)
+-Short name: Wuffs
+-URL: https://github.com/google/wuffs-mirror-release-c
+-Version: 0.3.3
+-Revision: e3f919ccfe3ef542cfc983a82146070258fb57f8
+-Update Mechanism: Manual
+-Security critical: yes
+-License: Apache-2.0
+-License File: src/LICENSE
+-Shipped: yes
+-
+-Description:
+-Codecs (compression, images, etc.) written in a custom memory-safe programming
+-language, transpiled to C.
+-
+-To map from a https://github.com/google/wuffs-mirror-release-c commit hash
+-(e.g. 600cd96c) to a https://github.com/google/wuffs commit hash (e.g.
+-1b9a6cb8), look for the "Sibling directory" line in
+-https://github.com/google/wuffs-mirror-release-c/blob/600cd96c/sync.txt
+-
+-Local Modifications:
+-None.
+diff --git a/third_party/wuffs/config.gni b/third_party/wuffs/config.gni
+deleted file mode 100644
+index f3a0676bc6..0000000000
+--- a/third_party/wuffs/config.gni
++++ /dev/null
+@@ -1,7 +0,0 @@
+-# Copyright 2020 The Chromium Authors
+-# Use of this source code is governed by a BSD-style license that can be
+-# found in the LICENSE file.
+-
+-declare_args() {
+-  use_wuffs_gif_parser = true
+-}
+diff --git a/third_party/wuffs/src b/third_party/wuffs/src
+deleted file mode 160000
+index e3f919ccfe..0000000000
+--- a/third_party/wuffs/src
++++ /dev/null
+@@ -1 +0,0 @@
+-Subproject commit e3f919ccfe3ef542cfc983a82146070258fb57f8
+diff --git a/ui/ozone/platform/wayland/host/wayland_wp_color_manager.cc b/ui/ozone/platform/wayland/host/wayland_wp_color_manager.cc
+index c47b9b67b9..cda47a2efe 100644
+--- a/ui/ozone/platform/wayland/host/wayland_wp_color_manager.cc
++++ b/ui/ozone/platform/wayland/host/wayland_wp_color_manager.cc
+@@ -192,8 +192,6 @@ void WaylandWpColorManager::GetImageDescription(
+     return;
+   }
+   if (!PopulateDescriptionCreator(creator.get(), color_space, hdr_metadata)) {
+-    LOG(ERROR) << "Failed to populate image description for color space "
+-               << color_space.ToString();
+     cleanup();
+     return;
+   }
