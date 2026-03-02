@@ -1,35 +1,3 @@
-<<<<<<< HEAD
-# Environment — contains private key, never commit
-.env
-.env.local
-*.env
-
-# Build artifacts
-bin/
-obj/
-Wallet/bin/Contracts/
-
-# .NET build output
-*.user
-*.suo
-.vs/
-*.DotSettings.user
-
-# NuGet
-packages/
-*.nupkg
-
-# Local session data
-# profile.dat lives in %APPDATA%/dysnomia/ by default (outside this repo).
-# If you override the path to somewhere inside the project, add it here:
-# config/profile.dat
-
-# macOS
-.DS_Store
-
-# JetBrains / Rider
-.idea/
-=======
 ################################################################################
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
@@ -89,4 +57,34 @@ packages/
 /solidity/nethereum-gen.settings
 *.swp
 /þ
->>>>>>> upstream/main
+
+# Environment — contains private key, never commit
+.env
+.env.local
+*.env
+
+# Build artifacts
+bin/
+obj/
+Wallet/bin/Contracts/
+
+# .NET build output
+*.user
+*.suo
+.vs/
+*.DotSettings.user
+
+# NuGet
+packages/
+*.nupkg
+
+# Local session data
+# profile.dat lives in %APPDATA%/dysnomia/ by default (outside this repo).
+# If you override the path to somewhere inside the project, add it here:
+# config/profile.dat
+
+# macOS
+.DS_Store
+
+# JetBrains / Rider
+.idea/
