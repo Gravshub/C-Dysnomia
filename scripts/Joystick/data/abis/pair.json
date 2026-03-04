@@ -1,0 +1,8 @@
+[
+  {"inputs": [], "name": "getReserves",
+   "outputs": [{"name": "_reserve0", "type": "uint112"}, {"name": "_reserve1", "type": "uint112"},
+               {"name": "_blockTimestampLast", "type": "uint32"}],
+   "stateMutability": "view", "type": "function"},
+  {"inputs": [], "name": "token0", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
+  {"inputs": [], "name": "token1", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"}
+]

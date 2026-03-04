@@ -73,6 +73,16 @@ MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA1
 # TGSv5 address — set after deployment
 TGSV5 = os.getenv("TGSV5_ADDRESS", "")
 
+# TGSv7 address — Token Factory substrate
+TGSV7 = os.getenv("TGSV7_ADDRESS", "")
+
+# V4/V3 Personal/Index minters
+V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
+V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC")
+
+# PulseX V2 Router
+PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
+
 # ── Thresholds (all env-overridable) ─────────────────────────────────────────
 # PLS buffer — never operate below this
 PLS_GAS_FLOOR  = int(os.getenv("PLS_GAS_FLOOR",  "100000")) * 10**18
