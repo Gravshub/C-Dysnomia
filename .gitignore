@@ -83,6 +83,10 @@ packages/
 # If you override the path to somewhere inside the project, add it here:
 # config/profile.dat
 
+# Python
+__pycache__/
+*.pyc
+
 # macOS
 .DS_Store
 

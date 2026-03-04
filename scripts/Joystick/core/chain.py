@@ -1,12 +1,15 @@
 """
-chain.py — Dual-RPC connections, all shared ABIs, contract factories, Multicall3 helper.
+chain.py — Dual-RPC connections, ABI loader, contract factories, Multicall3 helper.
 
+ABIs are stored as JSON in data/abis/ and loaded via load_abi().
 Patterns established here match the existing scripts exactly:
   - w3_read  → pulsechainstats.com (less congested for queries)
   - w3_submit → pulsechain.com     (reliable for TX submission)
   - safe()   → error-tolerant view call (returns None on failure)
   - multicall() → batch N reads into ONE RPC round-trip via Multicall3
 """
+import json
+import os
 import logging
 from typing import Any
 from web3 import Web3
@@ -21,7 +24,18 @@ from .config import (
 
 log = logging.getLogger(__name__)
 
-# ── RPC connections ───────────────────────────────────────────────────────────
+# ── ABI loader ─────────────────────────────────────────────────────────────
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+
+
+def load_abi(name: str) -> list:
+    """Load ABI from data/abis/{name}.json"""
+    path = os.path.join(_DATA_DIR, "abis", f"{name}.json")
+    with open(path) as f:
+        return json.load(f)
+
+
+# ── RPC connections ───────────────────────────────────────────────────────
 w3_submit = Web3(Web3.HTTPProvider(SUBMIT_RPC, request_kwargs={"timeout": 60}))
 w3_read   = Web3(Web3.HTTPProvider(READ_RPC,   request_kwargs={"timeout": 30}))
 
@@ -29,118 +43,21 @@ if not w3_read.is_connected():
     log.warning("Read RPC unavailable — falling back to submit RPC for reads")
     w3_read = w3_submit
 
-# ── ABIs ─────────────────────────────────────────────────────────────────────
-ERC20_ABI = [
-    {"inputs": [{"name": "account", "type": "address"}], "name": "balanceOf",
-     "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
-     "name": "approve", "outputs": [{"type": "bool"}], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "owner", "type": "address"}, {"name": "spender", "type": "address"}],
-     "name": "allowance", "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "to", "type": "address"}, {"name": "amount", "type": "uint256"}],
-     "name": "transfer", "outputs": [{"type": "bool"}], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [], "name": "name",        "outputs": [{"type": "string"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "symbol",      "outputs": [{"type": "string"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "decimals",    "outputs": [{"type": "uint8"}],  "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "totalSupply", "outputs": [{"type": "uint256"}],"stateMutability": "view", "type": "function"},
-]
+# ── ABIs (loaded from JSON) ──────────────────────────────────────────────
+ERC20_ABI     = load_abi("erc20")
+PURCHASE_ABI  = ERC20_ABI + load_abi("purchase")
+QING_ABI      = PURCHASE_ABI + load_abi("qing")
+ROUTER_ABI    = load_abi("router")
+FACTORY_ABI   = load_abi("factory")
+PAIR_ABI      = load_abi("pair")
+META_ABI      = load_abi("meta")
+CHEON_ABI     = load_abi("cheon")
+DSS_ABI       = load_abi("dss")
+MULTICALL3_ABI = load_abi("multicall3")
+TGSV7_ABI     = load_abi("tgsv7")
+TGSV5_ABI     = load_abi("tgsv5")
 
-# Extends ERC20 with Dysnomia Purchase mechanics
-PURCHASE_ABI = ERC20_ABI + [
-    {"inputs": [{"name": "_t", "type": "address"}, {"name": "_a", "type": "uint256"}],
-     "name": "Purchase", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "_a", "type": "address"}], "name": "GetMarketRate",
-     "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
-]
-
-QING_ABI = PURCHASE_ABI + [
-    {"inputs": [{"name": "UserToken", "type": "address"}], "name": "Join",
-     "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "_t", "type": "address"}, {"name": "_a", "type": "uint256"}],
-     "name": "Redeem", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [], "name": "Waat",    "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "Entropy", "outputs": [{"type": "uint64"}],  "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "Asset",   "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
-]
-
-ROUTER_ABI = [
-    {"inputs": [{"name": "amountIn", "type": "uint256"}, {"name": "path", "type": "address[]"}],
-     "name": "getAmountsOut", "outputs": [{"name": "amounts", "type": "uint256[]"}],
-     "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "amountIn", "type": "uint256"}, {"name": "amountOutMin", "type": "uint256"},
-                {"name": "path", "type": "address[]"}, {"name": "to", "type": "address"},
-                {"name": "deadline", "type": "uint256"}],
-     "name": "swapExactTokensForTokens", "outputs": [{"name": "amounts", "type": "uint256[]"}],
-     "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "amountIn", "type": "uint256"}, {"name": "amountOutMin", "type": "uint256"},
-                {"name": "path", "type": "address[]"}, {"name": "to", "type": "address"},
-                {"name": "deadline", "type": "uint256"}],
-     "name": "swapExactTokensForETH", "outputs": [{"name": "amounts", "type": "uint256[]"}],
-     "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "amountOutMin", "type": "uint256"}, {"name": "path", "type": "address[]"},
-                {"name": "to", "type": "address"}, {"name": "deadline", "type": "uint256"}],
-     "name": "swapExactETHForTokens", "outputs": [{"name": "amounts", "type": "uint256[]"}],
-     "stateMutability": "payable", "type": "function"},
-    {"inputs": [{"name": "factory", "type": "address"}, {"name": "tokenA", "type": "address"},
-                {"name": "tokenB", "type": "address"}],
-     "name": "addLiquidity", "outputs": [{"name": "amountA", "type": "uint256"},
-                                         {"name": "amountB", "type": "uint256"},
-                                         {"name": "liquidity", "type": "uint256"}],
-     "stateMutability": "nonpayable", "type": "function"},
-]
-
-FACTORY_ABI = [
-    {"inputs": [{"name": "tokenA", "type": "address"}, {"name": "tokenB", "type": "address"}],
-     "name": "getPair", "outputs": [{"name": "pair", "type": "address"}],
-     "stateMutability": "view", "type": "function"},
-    {"inputs": [{"name": "tokenA", "type": "address"}, {"name": "tokenB", "type": "address"}],
-     "name": "createPair", "outputs": [{"name": "pair", "type": "address"}],
-     "stateMutability": "nonpayable", "type": "function"},
-]
-
-PAIR_ABI = [
-    {"inputs": [], "name": "getReserves",
-     "outputs": [{"name": "_reserve0", "type": "uint112"}, {"name": "_reserve1", "type": "uint112"},
-                 {"name": "_blockTimestampLast", "type": "uint32"}],
-     "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "token0", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "token1", "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
-]
-
-META_ABI = [
-    {"inputs": [{"name": "QingWaat", "type": "uint256"}], "name": "Beat",
-     "outputs": [{"name": "Dione", "type": "uint256"}, {"name": "Charge", "type": "uint256"},
-                 {"name": "Deimos", "type": "uint256"}, {"name": "Yeo", "type": "uint256"}],
-     "stateMutability": "nonpayable", "type": "function"},
-]
-
-CHEON_ABI = [
-    {"inputs": [{"name": "Qing", "type": "address"}], "name": "Su",
-     "outputs": [{"name": "Charge", "type": "uint256"}, {"name": "Hypobar", "type": "uint256"},
-                 {"name": "Epibar", "type": "uint256"}],
-     "stateMutability": "nonpayable", "type": "function"},
-]
-
-DSS_ABI = [
-    {"inputs": [{"name": "_text", "type": "string"}], "name": "chatAndClaimWithMultiplier",
-     "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [], "name": "multiplier",
-     "outputs": [{"type": "uint64"}], "stateMutability": "view", "type": "function"},
-]
-
-MULTICALL3_ABI = [
-    {"inputs": [{"components": [{"name": "target", "type": "address"},
-                                {"name": "allowFailure", "type": "bool"},
-                                {"name": "callData", "type": "bytes"}],
-                 "name": "calls", "type": "tuple[]"}],
-     "name": "aggregate3",
-     "outputs": [{"components": [{"name": "success", "type": "bool"},
-                                 {"name": "returnData", "type": "bytes"}],
-                  "name": "returnData", "type": "tuple[]"}],
-     "stateMutability": "view", "type": "function"},
-]
-
-# ── Contract factory helpers ──────────────────────────────────────────────────
+# ── Contract factory helpers ──────────────────────────────────────────────
 def erc20(address: str) -> Any:
     return w3_read.eth.contract(address=Web3.to_checksum_address(address), abi=ERC20_ABI)
 
@@ -160,7 +77,21 @@ def factory_contract(address: str) -> Any:
 def pair_contract(address: str) -> Any:
     return w3_read.eth.contract(address=Web3.to_checksum_address(address), abi=PAIR_ABI)
 
-# ── safe() — error-tolerant view call ────────────────────────────────────────
+def tgsv7_contract(w3=None) -> Any:
+    from .config import TGSV7
+    if not TGSV7:
+        raise EnvironmentError("TGSV7_ADDRESS not set in .env")
+    w3 = w3 or w3_read
+    return w3.eth.contract(address=Web3.to_checksum_address(TGSV7), abi=TGSV7_ABI)
+
+def tgsv5_contract(w3=None) -> Any:
+    from .config import TGSV5
+    if not TGSV5:
+        raise EnvironmentError("TGSV5_ADDRESS not set in .env")
+    w3 = w3 or w3_read
+    return w3.eth.contract(address=Web3.to_checksum_address(TGSV5), abi=TGSV5_ABI)
+
+# ── safe() — error-tolerant view call ────────────────────────────────────
 def safe(contract, fn: str, *args) -> Any | None:
     """Call a view function; return None on any error (no raise)."""
     try:
@@ -168,7 +99,7 @@ def safe(contract, fn: str, *args) -> Any | None:
     except Exception:
         return None
 
-# ── Multicall3 batch reads ────────────────────────────────────────────────────
+# ── Multicall3 batch reads ────────────────────────────────────────────────
 def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
     """
     Batch multiple view calls into one RPC round-trip via Multicall3.
@@ -214,7 +145,7 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
             decoded.append(None)
     return decoded
 
-# ── Balance snapshot (Multicall3 powered) ─────────────────────────────────────
+# ── Balance snapshot (Multicall3 powered) ─────────────────────────────────
 def snapshot_balances() -> dict:
     """
     Read all key balances in ONE RPC call.

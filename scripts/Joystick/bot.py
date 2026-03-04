@@ -52,6 +52,7 @@ from .engines.arb   import ArbEngine
 from .engines.dss   import DSSEngine
 from .engines.wm    import WMEngine
 from .engines.beat  import BeatEngine
+from .engines.token_factory import TokenFactoryEngine
 from .loops.terraform import TerraformLoop
 
 log = logging.getLogger("joystick")
@@ -78,6 +79,7 @@ class DysnomiaBot:
             DSSEngine(),
             WMEngine(),
             BeatEngine(with_cheon=True),
+            TokenFactoryEngine(),
         ]
 
         # Gameplay loops run after engines (lower priority, positional)
