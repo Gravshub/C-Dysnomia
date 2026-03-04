@@ -1,0 +1,10 @@
+[
+  {"inputs": [{"name": "count", "type": "uint256"}], "name": "mintWM",
+   "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+  {"inputs": [], "name": "owner",
+   "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"},
+  {"inputs": [{"name": "addr", "type": "address"}], "name": "authorized",
+   "outputs": [{"type": "bool"}], "stateMutability": "view", "type": "function"},
+  {"inputs": [], "name": "paused",
+   "outputs": [{"type": "bool"}], "stateMutability": "view", "type": "function"}
+]

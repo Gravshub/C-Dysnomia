@@ -1,0 +1,9 @@
+[
+  {"inputs": [{"name": "UserToken", "type": "address"}], "name": "Join",
+   "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+  {"inputs": [{"name": "_t", "type": "address"}, {"name": "_a", "type": "uint256"}],
+   "name": "Redeem", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+  {"inputs": [], "name": "Waat",    "outputs": [{"type": "uint256"}], "stateMutability": "view", "type": "function"},
+  {"inputs": [], "name": "Entropy", "outputs": [{"type": "uint64"}],  "stateMutability": "view", "type": "function"},
+  {"inputs": [], "name": "Asset",   "outputs": [{"type": "address"}], "stateMutability": "view", "type": "function"}
+]

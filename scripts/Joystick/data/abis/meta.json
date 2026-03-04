@@ -1,0 +1,6 @@
+[
+  {"inputs": [{"name": "QingWaat", "type": "uint256"}], "name": "Beat",
+   "outputs": [{"name": "Dione", "type": "uint256"}, {"name": "Charge", "type": "uint256"},
+               {"name": "Deimos", "type": "uint256"}, {"name": "Yeo", "type": "uint256"}],
+   "stateMutability": "nonpayable", "type": "function"}
+]
