@@ -470,13 +470,15 @@ def main():
         print("\n[FAIL] Single create failed — aborting")
         sys.exit(1)
 
-    # Step 2: Query new token (only if we have an address)
+    # Step 2: Query new token (only if we have an actual on-chain address)
     token_addr = single_result.get("token_address")
-    if token_addr and token_addr != ZERO:
+    if token_addr and token_addr != ZERO and not dry_run:
         query_new_token(token_addr)
 
         # Step 3: Test mintTokens
         mint_result = test_mint_tokens(token_addr, dry_run)
+    elif dry_run:
+        print(f"\n  [dry-run] Skipping Steps 2-3 — token not deployed on-chain")
 
     # Step 4: Batch create (only in --full mode)
     if args.full:

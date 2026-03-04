@@ -181,8 +181,9 @@ def run_recon():
 
     gas_price = w3_read.eth.gas_price
     print(f"  Current: {gas_price / 1e9:.2f} Gwei")
-    gas_ok = gas_price < 500 * 1e9
-    print(f"  {tag(gas_ok)} Below 500 Gwei ceiling")
+    from Joystick.core.config import GAS_PRICE_CEIL
+    gas_ok = gas_price < GAS_PRICE_CEIL
+    print(f"  {tag(gas_ok)} Below {GAS_PRICE_CEIL / 1e9:.0f} Gwei ceiling")
 
     # ── Summary ───────────────────────────────────────────────────────────
     all_pass = all([
