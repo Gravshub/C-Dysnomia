@@ -1,0 +1,17 @@
+{
+  "timestamp": 1772666005,
+  "gas_price_gwei": 700184.642666785,
+  "single_create": {
+    "name": "Joystick Alpha",
+    "symbol": "JALPHA",
+    "initial_mint": 1,
+    "gas_estimate": 3188458,
+    "gas_cost_pls": 2902.2621230044674,
+    "token_address": "0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30"
+  },
+  "mint_tokens": null,
+  "batch_create": [],
+  "created_tokens": [
+    "0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "timestamp": 1772665581,
+  "tgsv7_address": "0x82E8B7e24bD9f0b389e94ddB8714B001a58e387d",
+  "owner": "0x17367877aF5A8D0Eb33ba5689A880f696386E24D",
+  "authorized": true,
+  "paused": false,
+  "refs": {
+    "minterV4": "0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7",
+    "minterV3": "0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC",
+    "mv": "0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29",
+    "routerV1": "0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02",
+    "routerV2": "0x165C3410fC91EF562C50559f7d2289fEbed552d9"
+  },
+  "joey_balances": {
+    "pls": "48197694588470433856239",
+    "affection": "0",
+    "wm": "0",
+    "gibs": "0"
+  },
+  "tgsv7_native_bal": "0",
+  "registry_len": 0,
+  "gas_price_gwei": 726870.080985538,
+  "all_pass": true
+}

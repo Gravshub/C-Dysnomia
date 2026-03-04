@@ -8,7 +8,7 @@ from web3 import Web3
 
 # ── RPC ──────────────────────────────────────────────────────────────────────
 SUBMIT_RPC = os.getenv("PULSECHAIN_RPC", "https://rpc.pulsechain.com")
-READ_RPC   = "https://rpc.pulsechainstats.com"
+READ_RPC   = os.getenv("PULSECHAIN_READ_RPC", "https://rpc-pulsechain.g4mm4.io")
 CHAIN_ID   = 369
 
 # ── Player ────────────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ AFFECTION  = Web3.to_checksum_address("0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151
 WM         = Web3.to_checksum_address("0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29")
 WPLS       = Web3.to_checksum_address("0xA1077a294dDE1B09bB078844df40758a5D0f9a27")
 PDAI       = Web3.to_checksum_address("0xefD766cCb38EaF1dfd701853BFCe31359239F305")
-PUSDC      = Web3.to_checksum_address("0x15D38573d2feeb82e7ad5187aB8c1D52810B880")
+PUSDC      = Web3.to_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 
 # ── Joey's contracts ──────────────────────────────────────────────────────────
 GIBS_LAU   = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
@@ -73,6 +73,16 @@ MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA1
 # TGSv5 address — set after deployment
 TGSV5 = os.getenv("TGSV5_ADDRESS", "")
 
+# TGSv7 address — Token Factory substrate
+TGSV7 = os.getenv("TGSV7_ADDRESS", "")
+
+# V4/V3 Personal/Index minters
+V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
+V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC")
+
+# PulseX V2 Router
+PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
+
 # ── Thresholds (all env-overridable) ─────────────────────────────────────────
 # PLS buffer — never operate below this
 PLS_GAS_FLOOR  = int(os.getenv("PLS_GAS_FLOOR",  "100000")) * 10**18
@@ -81,7 +91,8 @@ PLS_REPLENISH  = int(os.getenv("PLS_REPLENISH",  "200000")) * 10**18
 # Fraction of profit kept as PLS (gas reserve + validator fund)
 PROFIT_SPLIT   = float(os.getenv("PROFIT_SPLIT",  "0.25"))
 # Gas price ceiling in Gwei — skip cycle if exceeded
-GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "500")) * 10**9
+# PulseChain gas is typically 500K-1M Gwei (PLS is very cheap ~$0.00001)
+GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "2000000")) * 10**9
 # DEX slippage tolerance
 MAX_SLIPPAGE   = float(os.getenv("MAX_SLIPPAGE",  "0.02"))
 # Gas estimate multiplier (safety buffer)
