@@ -279,17 +279,21 @@ def simulate_option(option: str, state: dict):
     print(f"{'=' * 60}")
 
     if option == "A":
-        # GIBS/WPLS — compute WPLS amount from implied price
-        gibs_implied_pls = 21.5  # DSS break-even
+        # GIBS/WPLS — use strategic pricing: 50 PLS/GIBS
+        # (above DSS break-even of 21.56, near AFFECTION parity of ~52.27 PLS)
+        gibs_implied_pls = 50.0  # Strategic price — NOT break-even
         wpls_amount = int(gibs_for_lp * gibs_implied_pls)
-        if wpls_amount > pls_bal // 10:  # Don't use more than 10% of PLS
-            wpls_amount = pls_bal // 10
+        if wpls_amount > pls_bal // 5:  # Don't use more than 20% of PLS
+            wpls_amount = pls_bal // 5
             gibs_for_lp = int(wpls_amount / gibs_implied_pls)
 
         steps = option_a_steps(gibs_for_lp, wpls_amount)
         print(f"  GIBS in LP:     {gibs_for_lp / 1e18:.4f}")
         print(f"  WPLS in LP:     {wpls_amount / 1e18:.4f}")
         print(f"  Implied price:  {gibs_implied_pls:.1f} PLS/GIBS")
+        print(f"  DSS revenue/call: {18 * gibs_implied_pls:.0f} PLS (18 GIBS * {gibs_implied_pls} PLS)")
+        print(f"  DSS gas/call:     ~388 PLS")
+        print(f"  DSS net/call:     +{18 * gibs_implied_pls - 388:.0f} PLS")
         print(f"  Engine 2 DSS:   UNLOCKED after pair creation")
 
     elif option == "B":

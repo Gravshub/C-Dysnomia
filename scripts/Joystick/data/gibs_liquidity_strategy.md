@@ -1,14 +1,14 @@
 # GIBS Liquidity Strategy
 
-Generated: 2026-03-05 by Claude Code (pre-query baseline — run `python scripts/gibs_pair_creator.py --query` for live data)
+Generated: 2026-03-05 by gibs_pair_creator.py
 
-## On-Chain State (from session logs)
+## On-Chain State at Query Time
 
-- GIBS totalSupply: ~3,361
-- GIBS Joey holds: ~3,359
-- AFFECTION Joey: ~88
-- PLS balance: ~41,248
-- 1 AFFECTION price: TBD (run --query for live rate)
+- GIBS totalSupply: 3,396.0000
+- GIBS Joey holds: 3,395.0000
+- AFFECTION Joey: 88.0000
+- PLS balance: 40,269.6
+- 1 AFFECTION = 52.247446 PLS
 
 ## Existing GIBS Pairs
 
@@ -18,6 +18,10 @@ Generated: 2026-03-05 by Claude Code (pre-query baseline — run `python scripts
 - GIBS/AFFECTION_V2: NONE
 - GIBS/ATROPA_V1: NONE
 - GIBS/ATROPA_V2: NONE
+- GIBS/TBILL_V1: NONE
+- GIBS/TBILL_V2: NONE
+- GIBS/HAR_V1: NONE
+- GIBS/HAR_V2: NONE
 
 ## Option A — GIBS / WPLS (PulseX V1)
 
@@ -34,29 +38,30 @@ Intra-ecosystem pair. Prices GIBS in game tokens.
 
 - Pro: Value cycling within Dysnomia economy
 - Pro: TGSv8.atomicArb() can exploit two-leg spread
-- Con: Joey only has 88 AFFECTION — locking in LP means less arb capital
+- Con: Joey only has 88.0 AFFECTION — locking in LP means less arb capital
 - Con: Does NOT unlock Engine 2 DSS directly
+- Computed ratio: 0.4115 GIBS per AFFECTION
 
 ## Option C — GIBS / Atropa Tokens
 
 Broadest play — connects GIBS into the maria token web.
 
-- ATROPA: TBD (run --query)
-- TBILL: TBD (run --query)
-- HAR: TBD (run --query)
+- ATROPA: 1 token = 2666.319390 PLS
+- TBILL: 1 token = 7.749674 PLS
+- HAR: 1 token = 6210068.135366 PLS
 - Pro: GIBS becomes a node in the Atropa tree
 - Con: Varying liquidity depth — higher pool impact risk
 
 ## RECOMMENDATION
 
 Given:
-- Joey PLS balance: ~41,248 (BELOW 100K buffer target)
-- GIBS balance: ~3,359
+- Joey PLS balance: ~40,270 (BELOW 100K buffer target)
+- GIBS balance: ~3,395
 - AFFECTION balance: ~88 (primary arb fuel for Engine 1)
 - Engine 2 DSS blocked: YES
 
 Recommended pair: **Option A (GIBS/WPLS)** — but **WAIT**
-Reason: PLS balance (41,248) is below the 100K gas buffer floor.
+Reason: PLS balance (40,270) is below the 100K gas buffer floor.
   Creating LP now would further reduce PLS reserves below safe operating level.
   Wait until PLS > 100K, then create GIBS/WPLS to unlock DSS immediately.
 Timing: WAIT until 100K PLS buffer restored
