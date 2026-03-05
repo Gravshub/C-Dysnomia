@@ -1,11 +1,13 @@
 """
 bot.py — Joystick: Dysnomia Self-Regulating Arbitrage Bot
 
-Orchestrates all four income engines with a priority scheduler:
+Orchestrates all income engines with a priority scheduler:
   Engine 1 — Arb:  Purchase → DEX arb (AFFECTION/pDAI routes)
   Engine 2 — DSS:  chatAndClaimWithMultiplier → GIBS → PLS
   Engine 3 — WM:   TGSv5 batch WM minting
   Engine 4 — Beat: META.Beat() territory metrics
+  Engine 5 — TokenFactory: TGSV7 token creation & swap
+  Engine 6 — LAU:  ABUPRU Faung advancement + EmitSniper
 
 Per-cycle flow:
   0. Multicall balance snapshot (1 RPC call)
@@ -53,6 +55,7 @@ from .engines.dss   import DSSEngine
 from .engines.wm    import WMEngine
 from .engines.beat  import BeatEngine
 from .engines.token_factory import TokenFactoryEngine
+from .engines.lau import LAUEngine
 from .loops.terraform import TerraformLoop
 
 log = logging.getLogger("joystick")
@@ -80,6 +83,7 @@ class DysnomiaBot:
             WMEngine(),
             BeatEngine(with_cheon=True),
             TokenFactoryEngine(),
+            LAUEngine(),
         ]
 
         # Gameplay loops run after engines (lower priority, positional)
@@ -156,8 +160,8 @@ class DysnomiaBot:
                 log.debug("%s simulate: %s", engine.name, exc)
                 continue
 
-            if profit <= gas and engine.name != "Beat":
-                # Beat is allowed to run even at 0 profit (strategic)
+            if profit <= gas and engine.name not in ("Beat", "LAU"):
+                # Beat and LAU are allowed to run even at 0 profit (strategic)
                 log.info("%s: unprofitable (%.4f vs %.4f PLS) — skip",
                          engine.name, profit / 1e18, gas / 1e18)
                 continue
@@ -271,7 +275,7 @@ def main() -> None:
         return
 
     if args.beat_only:
-        engine = bot.engines[-1]  # BeatEngine is last
+        engine = next(e for e in bot.engines if e.name == "Beat")
         print(f"Beat ready: {engine.is_ready()}")
         result = engine.execute(dry_run=args.dry_run)
         print(f"Beat result: {result}")
