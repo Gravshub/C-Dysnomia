@@ -34,7 +34,7 @@ CANONICAL SEQUENCE  (from AFFECTION constructor source)
                                pure state mix — cannot revert
                                mints 1 token   ~30K gas
 
-  Full canonical round: ~500K gas  ~ 450-600 PLS
+  Full canonical round: ~520K gas  ~ 450-600 PLS (measured: 471 PLS @ ~900 Gwei)
 
 ORDERING RISK ANALYSIS
 
@@ -126,12 +126,14 @@ LAU_MIN_PLS: int = int(os.environ.get("LAU_MIN_PLS", "5000")) * 10**18
 FULL_ROUND_GAS_EST: int = 600_000
 
 # Block jitter between steps within one round
-STEP_BLOCKS_MIN = 4
-STEP_BLOCKS_MAX = 11
+# PulseChain block time = ~10s, so 2-6 blocks = 20-60s between steps
+STEP_BLOCKS_MIN = 2
+STEP_BLOCKS_MAX = 6
 
 # Block jitter between full rounds — human pacing
-ROUND_BLOCKS_MIN = 80
-ROUND_BLOCKS_MAX = 320
+# 40-160 blocks @ 10s = ~7-27 min between rounds
+ROUND_BLOCKS_MIN = 40
+ROUND_BLOCKS_MAX = 160
 
 # Probability (0.0-1.0) of shuffling the middle 4 steps each round
 SHUFFLE_PROBABILITY = 0.30
@@ -212,10 +214,10 @@ DYNAMIC_ABI = [
                     # Cone VMFa (18 fields)
                     + [{"name": f"c{i}", "type": "uint64"} for i in range(17)]
                     + [{"name": "cNu", "type": "uint8"}]
-                    # Globals
+                    # Globals (11 uint64 + 1 uint8 = 12 fields)
                     + [{"name": n, "type": "uint64"}
                        for n in ["Phi", "Eta", "Xi", "Sigma", "Rho", "Upsilon",
-                                 "Ohm", "Pi", "Omicron", "Omega"]]
+                                 "Ohm", "Pi", "Omicron", "Omega", "Tau"]]
                     + [{"name": "Chi", "type": "uint8"}]
                 ),
             }
@@ -532,8 +534,8 @@ class LAUEngine(EngineBase):
                                     "total_aff_spent": state.total_affection_spent / 1e18,
                                 })
 
-            # Inter-step block pause (skip after final step)
-            if i < len(sequence) - 1:
+            # Inter-step block pause (skip in dry-run and after final step)
+            if not dry_run and i < len(sequence) - 1:
                 self._wait_blocks(
                     random.randint(STEP_BLOCKS_MIN, STEP_BLOCKS_MAX),
                     label, step_name,
@@ -625,7 +627,7 @@ class LAUEngine(EngineBase):
         Faung tuple layout (flat, 0-indexed):
           Rod[0..16] = uint64 fields, Rod[17] = uint8 Nu
           Cone[18..35]
-          Globals start at [36]: Phi Eta Xi Sigma Rho Upsilon Ohm Pi Omicron Omega Chi
+          Globals start at [36]: Phi Eta Xi Sigma Rho Upsilon Ohm Pi Omicron Omega Tau Chi
           So Rod.Signal = [2], Mu.Upsilon = [41]
         """
         try:
@@ -642,10 +644,10 @@ class LAUEngine(EngineBase):
 
     def _wait_blocks(self, n: int, label: str, after: str) -> None:
         target = w3_read.eth.block_number + n
-        log.debug("LAUEngine [%s] waiting %d blocks after %s", label, n, after)
+        log.info("LAUEngine [%s] waiting %d blocks (~%ds) after %s", label, n, n * 10, after)
         while w3_read.eth.block_number < target:
-            time.sleep(random.uniform(1.8, 3.8))
-        time.sleep(random.uniform(1.0, 7.0))  # human jitter on top
+            time.sleep(random.uniform(4.0, 8.0))  # PulseChain blocks ~10s
+        time.sleep(random.uniform(1.0, 5.0))  # human jitter on top
 
     def _schedule_next_round(self) -> None:
         gap = random.randint(ROUND_BLOCKS_MIN, ROUND_BLOCKS_MAX)
