@@ -962,3 +962,70 @@ python scripts/Joystick/bot.py --beat-only  # Beat engine only
 
 ### PLS Balance at End of Session
 ~54,170 PLS (spent 816 PLS on TGSv5 deploy from ~54,986 PLS opening balance)
+
+---
+
+## Session 7 Log (2026-03-04) — Branch Consolidation + Workflow + TGSv8 Confirmed
+
+**Branch**: `claude/Joystick-Engines-Lj9Kp`
+**Focus**: Audit all session work in MEZKh, establish canonical branch and merge workflow
+
+### Branch Audit — All Sessions Confirmed in MEZKh (HEAD)
+
+| Session | Branch | Content |
+|---------|--------|---------|
+| 1 | `claude/lau-implementation-planning-Z7QDr` | LAU recon, beat analysis |
+| 2 | `claude/lau-gibson-beat-integration-U61SC` | Beat integration S1 |
+| 3 | `claude/lau-gibson-beat-integration-ty33f` | Beat orchestration scripts |
+| 4 | `claude/encrypt-wallet-key-EKVN5` | Wallet encryption + consolidation |
+| 5 | `claude/optimize-pls-generation-OlVDG` | Joystick bot + TGSv5 deploy |
+| 5b | `claude/token-factory-tgsv7-mint-aoZ7G` | TGSv8 contract + Token Factory Engine (merged via PRs #1+#2) |
+| 6 | `claude/joystick-lau-engine-Zq7i5` | Engine 6 LAU-ABUPRU + EmitSniper (merged via PR #3) |
+
+### Deployed Contracts (Canonical)
+
+| Contract | Address | TX | Block |
+|----------|---------|-----|-------|
+| TGSv5 | `0xeeB330d3419193b4E42507fA07CcF2fC681a6127` | `0x0fd1e6f4...` | 25,911,970 |
+| TGSv7 | `0x82E8B7e24bD9f0b389e94ddB8714B001a58e387d` | `351d464f...` | 25,938,174 |
+| TGSv8 | `0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32` | `0x498b52a0ef812d91ba13f19287e95c10a4e9a0899ff28d64b731e7cb0cc56b05` | 25,943,194 |
+| JV8A (test LAU via TGSv8.createV4) | see receipt | `0x1073f06aeefd0ebcbe9c8691a43420da3bf80277b433877fd7e4981add1d4f65` | 25,943,266 |
+
+TGSv8 verification (from `data/tgsv8_recon.json`): all_pass=true, owner=Joey, authorized=true, paused=false
+TGSv8 mintWM tests (from `data/tgsv8_mint_wm_baseline.json`): mintWM(1) ✓ 129K gas / mintWM(6) ✓ 211K gas
+
+### Current Engine Inventory (`scripts/Joystick/engines/`)
+
+| File | Engine | Status | Blocker |
+|------|--------|--------|---------|
+| `arb.py` | Engine 1 — AFFECTION→DEX arb | ✅ Ready | — |
+| `dss.py` | Engine 2 — chatAndClaim | 🔴 Blocked | GIBS/WPLS pair needed |
+| `wm.py` | Engine 3 — WM batch mint | 🟡 Needs rewire | Still pointed at TGSV5 — update to TGSV8 |
+| `beat.py` | Engine 4 — META.Beat() | ✅ Running | Dione=41, WORLD not deployed |
+| `token_factory.py` | Engine 5 — Token Factory | 🟡 Needs rewire | Still pointed at TGSV7 — update to TGSV8 |
+| `lau.py` | Engine 6 — LAU ABUPRU + EmitSniper | 🟡 PLS gate | PLS < 150K threshold |
+
+### Branch Convention Going Forward
+
+**Canonical branch**: `claude/Joystick-Engines-Lj9Kp`
+
+Every new Claude session pushes to `claude/Joystick-Engines-<newSessionID>`.
+Merge into canonical after each session:
+
+```bash
+./merge-session.sh <newSessionID>
+```
+
+Set GitHub default branch: Settings → Branches → Default branch → `claude/Joystick-Engines-Lj9Kp`
+
+### State Snapshot (2026-03-04)
+
+```
+PLS:           ~41,514  (after TGSv8 deploy ~5.5K + JV8A test ~2.1K)
+AFFECTION:     ~88
+GIBS:          ~3,359
+TGSV5:         0xeeB330d3419193b4E42507fA07CcF2fC681a6127  (legacy)
+TGSV7:         0x82E8B7e24bD9f0b389e94ddB8714B001a58e387d  (legacy)
+TGSV8:         0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32  (ACTIVE)
+Beat:          Dione=41 ✓  WORLD not deployed — monitoring
+```
