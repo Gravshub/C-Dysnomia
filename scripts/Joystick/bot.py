@@ -36,9 +36,11 @@ Env:
 """
 import argparse
 import logging
+import logging.handlers
 import os
 import time
 import sys
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -189,6 +191,27 @@ class DysnomiaBot:
                 log.error("✗ %s failed: %s", engine.name, result.notes)
                 cycle_success = False
 
+            # Structured cycle log line (TASK 5)
+            now = datetime.now()
+            ts_str = now.strftime("%H:%M:%S")
+            dt_str = now.strftime("%m/%d/%Y")
+            tx_short = result.tx_hashes[0][:10] + "..." if result.tx_hashes else "none"
+            if result.success:
+                log.info(
+                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [SUCCESS] "
+                    "profit=+%.2f PLS | gas=%.1f PLS | net=+%.2f PLS | roi=%.2fx | tx=%s",
+                    self.cycle, ts_str, dt_str, engine.name,
+                    result.profit_pls, result.gas_pls, result.net_pls,
+                    rec.roi, tx_short,
+                )
+            else:
+                log.info(
+                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [FAILED]  "
+                    "profit=0 PLS | gas=0 PLS | reason=%s",
+                    self.cycle, ts_str, dt_str, engine.name,
+                    result.notes[:100],
+                )
+
             engine_ran = engine.name
             result_notes = result.notes
 
@@ -254,9 +277,9 @@ class DysnomiaBot:
     def print_status(self) -> None:
         """Print engine, strategist, and wallet status without running anything."""
         snap = snapshot_balances()
-        print(f"\n{'━'*50}")
+        print(f"\n{'━'*60}")
         print(f"  Joystick Status — {JOEY_WALLET}")
-        print(f"{'━'*50}")
+        print(f"{'━'*60}")
         print(f"  PLS:        {fmt_pls(snap['pls'])}")
         print(f"  AFFECTION:  {snap['affection'] / 1e18:.4f}")
         print(f"  GIBS:       {snap['gibs'] / 1e18:.4f}")
@@ -267,20 +290,45 @@ class DysnomiaBot:
         print()
         for e in self.engines:
             print(f"  {e.status_line()}")
-        for l in self.loops:
-            print(f"  {l.status_line()}")
+        for lp in self.loops:
+            print(f"  {lp.status_line()}")
         print()
-        self.strategist.print_status()
-        print(f"{'━'*50}\n")
+        # P&L summary table from Strategist
+        print(self.strategist.summary())
+        print()
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
+def _setup_logging() -> None:
+    """Configure console + rotating file handler for bot_run.log."""
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Console handler
+    console = logging.StreamHandler(sys.stdout)
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter(
+        "%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
         datefmt="%H:%M:%S",
+    ))
+    root.addHandler(console)
+
+    # Rotating file handler — 10MB, keep 3 backups
+    log_dir = os.path.join(os.path.dirname(__file__), "data")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "bot_run.log")
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path, maxBytes=10 * 1024 * 1024, backupCount=3,
     )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(message)s",
+    ))
+    root.addHandler(file_handler)
+
+
+def main() -> None:
+    _setup_logging()
 
     parser = argparse.ArgumentParser(
         description="Joystick — Dysnomia self-regulating arbitrage bot"
