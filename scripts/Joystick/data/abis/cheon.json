@@ -1,0 +1,6 @@
+[
+  {"inputs": [{"name": "Qing", "type": "address"}], "name": "Su",
+   "outputs": [{"name": "Charge", "type": "uint256"}, {"name": "Hypobar", "type": "uint256"},
+               {"name": "Epibar", "type": "uint256"}],
+   "stateMutability": "nonpayable", "type": "function"}
+]
