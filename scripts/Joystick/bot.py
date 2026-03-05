@@ -50,6 +50,7 @@ from .core.wallet import reset_nonce, fmt_pls, pls_balance
 from .core.executor import send_tx
 from .core.gas_guard import GasGuard
 from .core.simulator import SimulationFailed, GasTooHigh
+from .core.event_logger import events as _events
 from .engines.arb   import ArbEngine
 from .engines.dss   import DSSEngine
 from .engines.wm    import WMEngine
@@ -96,11 +97,18 @@ class DysnomiaBot:
     def run_forever(self) -> None:
         """Main loop. Ctrl-C to stop gracefully."""
         log.info("Joystick starting. Wallet: %s  Dry-run: %s", JOEY_WALLET, self.dry_run)
+        _events.log("bot.start", data={
+            "wallet": JOEY_WALLET,
+            "dry_run": self.dry_run,
+            "engines": [e.name for e in self.engines],
+            "loops": [l.name for l in self.loops],
+        })
         while True:
             try:
                 self.run_cycle()
             except KeyboardInterrupt:
                 log.info("Interrupted — stopping.")
+                _events.log("bot.stop", notes="KeyboardInterrupt")
                 break
             except GasTooHigh as exc:
                 log.warning("Gas too high: %s — sleeping %ds", exc, CYCLE_DELAY * 2)
@@ -124,12 +132,15 @@ class DysnomiaBot:
             snap["pls"] / 1e18, snap["affection"] / 1e18,
             snap["gibs"] / 1e18, snap["wm"] / 1e18, snap["fornax"] / 1e18,
         )
+        _events.log_balance_snapshot(snap)
 
         # 1. Gas guard
         if not self.gas_guard.check():
+            _events.log("bot.gas_guard.low", success=False, data={"pls_wei": snap["pls"]})
             if not self.dry_run:
                 if not self.gas_guard.emergency_refill():
                     log.error("Emergency refill failed — skipping cycle")
+                    _events.log_error("bot.gas_guard.refill_failed", "Emergency refill failed")
                     return
             else:
                 log.warning("[dry-run] Gas below floor — would trigger emergency refill")
@@ -151,13 +162,23 @@ class DysnomiaBot:
             log.info("Engine ranking: %s",
                      " > ".join(f"{e.name}({e.roi():.2f}x)" for e in ranked))
 
+        engines_status = [e.status_line() for e in self.engines]
+
         # 4. Execute top profitable engine (one per cycle)
-        engine_ran = False
+        engine_ran = ""
+        result_notes = ""
+        cycle_success = True
         for engine in ranked:
             try:
                 profit, gas = engine.simulate()
             except SimulationFailed as exc:
                 log.debug("%s simulate: %s", engine.name, exc)
+                _events.log(
+                    f"engine.{engine.name.lower()}.sim_skip",
+                    engine=engine.name,
+                    success=False,
+                    notes=str(exc),
+                )
                 continue
 
             if profit <= gas and engine.name not in ("Beat", "LAU"):
@@ -170,6 +191,7 @@ class DysnomiaBot:
                      engine.name, profit / 1e18, gas / 1e18)
 
             result = engine.execute(dry_run=self.dry_run)
+            _events.log_engine_result(engine.name, result, cycle_num=self.cycle)
 
             if result.success:
                 engine.record_success()
@@ -180,8 +202,10 @@ class DysnomiaBot:
             else:
                 engine.record_failure()
                 log.error("✗ %s failed: %s", engine.name, result.notes)
+                cycle_success = False
 
-            engine_ran = True
+            engine_ran = engine.name
+            result_notes = result.notes
             break  # One engine per cycle — avoid nonce issues
 
         if not engine_ran:
@@ -196,8 +220,28 @@ class DysnomiaBot:
                 result = loop.run(dry_run=self.dry_run)
                 if result.success:
                     log.info("✓ %s: %s", loop.name, result.notes)
+                    _events.log(
+                        f"loop.{loop.name.lower()}.success",
+                        data={"tx_hashes": result.tx_hashes},
+                        notes=result.notes,
+                    )
                 else:
                     log.warning("✗ %s: %s", loop.name, result.notes)
+                    _events.log(
+                        f"loop.{loop.name.lower()}.failure",
+                        success=False,
+                        notes=result.notes,
+                    )
+
+        # 6. Cycle summary event
+        _events.log_cycle(
+            cycle_num=self.cycle,
+            balances=snap,
+            engines_status=engines_status,
+            engine_ran=engine_ran,
+            result_notes=result_notes,
+            success=cycle_success,
+        )
 
     def compound(self, profit_pls_wei: int) -> None:
         """
@@ -266,9 +310,35 @@ def main() -> None:
                         help="Print engine/wallet status and exit")
     parser.add_argument("--beat-only", action="store_true",
                         help="Run only the Beat engine (diagnostics)")
+    parser.add_argument("--lau-only", action="store_true",
+                        help="Run only the LAU engine (ABUPRU sequence)")
+    parser.add_argument("--log-status", action="store_true",
+                        help="Print event log statistics and recent events")
     args = parser.parse_args()
 
     bot = DysnomiaBot(dry_run=args.dry_run)
+
+    if args.log_status:
+        from .core.event_logger import EventLogger
+        print(f"\n{'━'*50}")
+        print(f"  Joystick Event Log Status")
+        print(f"{'━'*50}")
+        for name in ["joystick_events", "cycles", "engine_lau", "engine_arb",
+                      "engine_beat", "engine_wm", "engine_dss", "engine_tokenfactory"]:
+            count = EventLogger.event_count(name)
+            if count > 0:
+                print(f"  {name}.jsonl: {count} events")
+        print()
+        print("  Last 5 events:")
+        for evt in EventLogger.read_events("joystick_events", last_n=5):
+            ts = evt.get("ts", "?")[:19]
+            ev = evt.get("event", "?")
+            eng = evt.get("engine", "")
+            ok = "OK" if evt.get("success", True) else "FAIL"
+            notes = evt.get("notes", "")[:60]
+            print(f"    {ts}  {ev:<35} {eng:<6} {ok:<5} {notes}")
+        print(f"{'━'*50}\n")
+        return
 
     if args.status:
         bot.print_status()
@@ -279,6 +349,28 @@ def main() -> None:
         print(f"Beat ready: {engine.is_ready()}")
         result = engine.execute(dry_run=args.dry_run)
         print(f"Beat result: {result}")
+        _events.log_engine_result("Beat", result)
+        return
+
+    if args.lau_only:
+        engine = next(e for e in bot.engines if e.name == "LAU")
+        _events.log("bot.lau_only_start", engine="LAU",
+                    data={"dry_run": args.dry_run})
+        print(f"LAU ready: {engine.is_ready()}")
+        if not engine.is_ready():
+            # Try running anyway for diagnostics
+            print("LAU not ready — attempting simulate for diagnostics...")
+            try:
+                profit, gas = engine.simulate()
+                print(f"  Simulate OK: profit={profit/1e18:.4f} PLS, gas={gas/1e18:.4f} PLS")
+            except Exception as e:
+                print(f"  Simulate failed: {e}")
+                _events.log_error("engine.lau.sim_failed", str(e), engine="LAU")
+                return
+        result = engine.execute(dry_run=args.dry_run)
+        _events.log_engine_result("LAU", result)
+        print(f"LAU result: success={result.success} gas={result.gas_pls:.4f} PLS "
+              f"txs={len(result.tx_hashes)} notes={result.notes}")
         return
 
     if args.once:
