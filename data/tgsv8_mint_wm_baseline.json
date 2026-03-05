@@ -1,0 +1,29 @@
+{
+  "timestamp": 1772669917,
+  "tgsv8_address": "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32",
+  "gas_price_gwei": 777974.323140596,
+  "mint_wm_1": {
+    "count": 1,
+    "gas_estimate": 160893,
+    "gas_cost_pls": 157.89068130469093,
+    "gas_used": 129089,
+    "actual_cost_pls": 100.13910254454449,
+    "block": 25943220,
+    "tx_hash": "0x95e4286c17502bd5fdaddc252f0c3fe1dc1905365b2b65d652ff9764b4ebd344",
+    "per_rho_gas": 129089,
+    "wm_joey_delta": 0,
+    "wm_tgsv8_delta": 1000000000000000000
+  },
+  "mint_wm_batch": {
+    "count": 6,
+    "gas_estimate": 259323,
+    "gas_cost_pls": 258.09541848914387,
+    "gas_used": 211114,
+    "actual_cost_pls": 166.03053045494596,
+    "block": 25943222,
+    "tx_hash": "0x833d0f2a2a10a582d0a42f5e5a5c7501341b69821d28ac19c2bcca414deb3dff",
+    "per_rho_gas": 35185,
+    "wm_joey_delta": 0,
+    "wm_tgsv8_delta": 6000000000000000000
+  }
+}

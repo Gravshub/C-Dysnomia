@@ -1,0 +1,28 @@
+{
+  "timestamp": 1772669867,
+  "tgsv8_address": "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32",
+  "owner": "0x17367877aF5A8D0Eb33ba5689A880f696386E24D",
+  "authorized": true,
+  "paused": false,
+  "refs": {
+    "minterV4": "0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7",
+    "minterV3": "0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC",
+    "mv": "0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29",
+    "wpls": "0xA1077a294dDE1B09bB078844df40758a5D0f9a27",
+    "routerV1": "0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02",
+    "routerV2": "0x165C3410fC91EF562C50559f7d2289fEbed552d9",
+    "factoryV1": "0x1715a3E4A142d8b698131108995174F37aEBA10D",
+    "factoryV2": "0x29eA7545DEf87022BAdc76323F373EA1e707C523"
+  },
+  "joey_balances": {
+    "pls": "43670924829805737196047",
+    "affection": "0",
+    "wm": "0",
+    "gibs": "0"
+  },
+  "tgsv8_native_bal": "0",
+  "registry_len": 0,
+  "op_nonce": 0,
+  "gas_price_gwei": 712213.6768363,
+  "all_pass": true
+}

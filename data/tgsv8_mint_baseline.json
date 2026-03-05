@@ -1,0 +1,18 @@
+{
+  "timestamp": 1772670386,
+  "tgsv8_address": "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32",
+  "gas_price_gwei": 783382.254080465,
+  "single_create": {
+    "name": "Joystick V8 Alpha",
+    "symbol": "JV8A",
+    "initial_mint": 1,
+    "gas_estimate": 3167979,
+    "gas_cost_pls": 3234.786597454152,
+    "token_address": null,
+    "gas_used": 2635063,
+    "block": 25943266,
+    "tx_hash": "0x1073f06aeefd0ebcbe9c8691a43420da3bf80277b433877fd7e4981add1d4f65",
+    "actual_cost_pls": 2156.235019919155
+  },
+  "mint_tokens": null
+}

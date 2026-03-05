@@ -56,6 +56,7 @@ DSS_ABI       = load_abi("dss")
 MULTICALL3_ABI = load_abi("multicall3")
 TGSV7_ABI     = load_abi("tgsv7")
 TGSV5_ABI     = load_abi("tgsv5")
+TGSV8_ABI     = load_abi("tgsv8")
 
 # ── Contract factory helpers ──────────────────────────────────────────────
 def erc20(address: str) -> Any:
@@ -90,6 +91,13 @@ def tgsv5_contract(w3=None) -> Any:
         raise EnvironmentError("TGSV5_ADDRESS not set in .env")
     w3 = w3 or w3_read
     return w3.eth.contract(address=Web3.to_checksum_address(TGSV5), abi=TGSV5_ABI)
+
+def tgsv8_contract(w3=None) -> Any:
+    from .config import TGSV8
+    if not TGSV8:
+        raise EnvironmentError("TGSV8_ADDRESS not set in .env")
+    w3 = w3 or w3_read
+    return w3.eth.contract(address=Web3.to_checksum_address(TGSV8), abi=TGSV8_ABI)
 
 # ── safe() — error-tolerant view call ────────────────────────────────────
 def safe(contract, fn: str, *args) -> Any | None:
