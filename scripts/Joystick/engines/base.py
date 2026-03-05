@@ -18,6 +18,8 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from ..core.event_logger import events as _events
+
 log = logging.getLogger(__name__)
 
 
@@ -115,16 +117,32 @@ class EngineBase(ABC):
     def record_success(self) -> None:
         """Reset failure counter after a successful execute()."""
         self.failure_count = 0
+        _events.log(
+            f"engine.{self.name.lower()}.success",
+            engine=self.name,
+            data={"failures_reset": True},
+        )
 
     def record_failure(self) -> None:
         """Increment failure counter; trip circuit breaker if at limit."""
         self.failure_count += 1
-        if self.failure_count >= self.MAX_FAILURES:
+        tripped = self.failure_count >= self.MAX_FAILURES
+        if tripped:
             self._disabled_at = time.time()
             log.warning(
                 "%s: circuit breaker TRIPPED (%d/%d failures) — disabled for %ds",
                 self.name, self.failure_count, self.MAX_FAILURES, self.DISABLE_SECS,
             )
+        _events.log(
+            f"engine.{self.name.lower()}.failure",
+            engine=self.name,
+            success=False,
+            data={
+                "failure_count": self.failure_count,
+                "max_failures": self.MAX_FAILURES,
+                "circuit_breaker_tripped": tripped,
+            },
+        )
 
     def status_line(self) -> str:
         """One-line engine status for logging."""
