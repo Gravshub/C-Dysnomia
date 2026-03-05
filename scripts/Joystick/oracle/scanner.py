@@ -30,7 +30,8 @@ from ..core.chain import (
 
 log = logging.getLogger(__name__)
 
-CACHE_FILE  = "/tmp/joystick_qing_cache.json"
+_JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CACHE_FILE  = os.path.join(_JOYSTICK_DIR, "data", "arb_routes.json")
 BLOCKSCOUT  = "https://scan.pulsechain.com/api"
 FACTORIES   = [
     ("PulseX V1", PULSEX_V1_FACTORY),
