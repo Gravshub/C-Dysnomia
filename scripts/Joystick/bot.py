@@ -1,29 +1,31 @@
 """
 bot.py — Joystick: Dysnomia Self-Regulating Arbitrage Bot
 
-Orchestrates all income engines with a priority scheduler:
-  Engine 1 — Arb:  Purchase → DEX arb (AFFECTION/pDAI routes)
-  Engine 2 — DSS:  chatAndClaimWithMultiplier → GIBS → PLS
-  Engine 3 — WM:   TGSv5 batch WM minting
-  Engine 4 — Beat: META.Beat() territory metrics
-  Engine 5 — TokenFactory: TGSV7 token creation & swap
-  Engine 6 — LAU:  ABUPRU Faung advancement + EmitSniper
+Orchestrates all income engines with an active-intelligence Strategist:
+  Engine 1 — Arb:          Purchase → DEX arb (AFFECTION/pDAI routes)
+  Engine 2 — DSS:          chatAndClaimWithMultiplier → GIBS → PLS
+  Engine 3 — Beat:         META.Beat() territory metrics
+  Engine 4 — TokenFactory: TGSV8 token creation & swap
+  Engine 5 — LAU:          ABUPRU Faung advancement + EmitSniper
 
 Per-cycle flow:
   0. Multicall balance snapshot (1 RPC call)
   1. Gas guard — abort if PLS < 100K floor, emergency-sell to refill
   2. Nonce reset — fresh nonce from chain
-  3. Rank ready engines by simulated ROI
-  4. Execute top profitable engine (one per cycle to avoid nonce contention)
-  5. Compound profits: 25% stays as PLS, 75% → AFFECTION for next arb
-  6. Run eligible gameplay loops (Terraform, etc.)
+  3. Strategist.evaluate() — scores all engines, returns Recommendation
+  4. Interactive: ask operator for approval | Auto: approve if confidence >= MEDIUM
+  5. Execute approved engine (one per cycle to avoid nonce contention)
+  6. Strategist.record() — persist P&L and engine stats
+  7. Compound profits: 25% stays as PLS, 75% → AFFECTION for next arb
+  8. Run eligible gameplay loops (Terraform, etc.)
 
 Usage:
-  python -m scripts.Joystick.bot               # live mode
-  python -m scripts.Joystick.bot --dry-run     # simulate only, no TXs
-  python -m scripts.Joystick.bot --once        # run one cycle and exit
-  python -m scripts.Joystick.bot --status      # print engine status and exit
-  python -m scripts.Joystick.bot --beat-only   # run Beat engine only (debugging)
+  python -m scripts.Joystick.bot                    # auto mode
+  python -m scripts.Joystick.bot --interactive      # ask before each action
+  python -m scripts.Joystick.bot --dry-run          # simulate only, no TXs
+  python -m scripts.Joystick.bot --once             # run one cycle and exit
+  python -m scripts.Joystick.bot --status           # print engine/strategist status and exit
+  python -m scripts.Joystick.bot --beat-only        # run Beat engine only (debugging)
 
 Env:
   DYSNOMIA_PRIVATE_KEY   Joey's wallet key
@@ -51,9 +53,9 @@ from .core.executor import send_tx
 from .core.gas_guard import GasGuard
 from .core.simulator import SimulationFailed, GasTooHigh
 from .core.event_logger import events as _events
+from .core.strategist import Strategist
 from .engines.arb   import ArbEngine
 from .engines.dss   import DSSEngine
-from .engines.wm    import WMEngine
 from .engines.beat  import BeatEngine
 from .engines.token_factory import TokenFactoryEngine
 from .engines.lau import LAUEngine
@@ -68,24 +70,26 @@ class DysnomiaBot:
 
     Adding a new engine:   self.engines.append(NewEngine())
     Adding a new loop:     self.loops.append(NewLoop())
-    No other changes required.
+    No other changes required — Strategist picks the best engine each cycle.
     """
 
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, interactive: bool = False):
         self.dry_run   = dry_run
         self.cycle     = 0
         self.gas_guard = GasGuard()
 
-        # Engine priority is determined dynamically by ROI each cycle.
-        # List order only matters as a tiebreaker.
+        # Engine priority is determined by Strategist scoring each cycle.
+        # List order only matters as a tiebreaker within equal scores.
         self.engines = [
             ArbEngine(),
             DSSEngine(),
-            WMEngine(),
             BeatEngine(with_cheon=True),
             TokenFactoryEngine(),
             LAUEngine(),
         ]
+
+        # Active intelligence layer — evaluates, recommends, tracks P&L
+        self.strategist = Strategist(self.engines, interactive=interactive)
 
         # Gameplay loops run after engines (lower priority, positional)
         self.loops = [
@@ -96,9 +100,12 @@ class DysnomiaBot:
 
     def run_forever(self) -> None:
         """Main loop. Ctrl-C to stop gracefully."""
-        log.info("Joystick starting. Wallet: %s  Dry-run: %s", JOEY_WALLET, self.dry_run)
+        mode = "interactive" if self.strategist.interactive else "auto"
+        log.info("Joystick starting. Wallet: %s  Mode: %s  Dry-run: %s",
+                 JOEY_WALLET, mode, self.dry_run)
         _events.log("bot.start", data={
             "wallet": JOEY_WALLET,
+            "mode": mode,
             "dry_run": self.dry_run,
             "engines": [e.name for e in self.engines],
             "loops": [l.name for l in self.loops],
@@ -149,49 +156,27 @@ class DysnomiaBot:
         # 2. Reset nonce for fresh cycle
         reset_nonce()
 
-        # 3. Rank engines by ROI (all read-only, no TXs)
-        ready = [
-            e for e in self.engines
-            if not e.is_disabled() and e.is_ready()
-        ]
-        ranked = sorted(ready, key=lambda e: e.roi(), reverse=True)
-
-        if not ranked:
-            log.info("No engines ready this cycle")
-        else:
-            log.info("Engine ranking: %s",
-                     " > ".join(f"{e.name}({e.roi():.2f}x)" for e in ranked))
-
         engines_status = [e.status_line() for e in self.engines]
 
-        # 4. Execute top profitable engine (one per cycle)
+        # 3. Strategist evaluates all engines and returns a recommendation
+        rec = self.strategist.evaluate(snap)
         engine_ran = ""
         result_notes = ""
         cycle_success = True
-        for engine in ranked:
-            try:
-                profit, gas = engine.simulate()
-            except SimulationFailed as exc:
-                log.debug("%s simulate: %s", engine.name, exc)
-                _events.log(
-                    f"engine.{engine.name.lower()}.sim_skip",
-                    engine=engine.name,
-                    success=False,
-                    notes=str(exc),
-                )
-                continue
 
-            if profit <= gas and engine.name not in ("Beat", "LAU"):
-                # Beat and LAU are allowed to run even at 0 profit (strategic)
-                log.info("%s: unprofitable (%.4f vs %.4f PLS) — skip",
-                         engine.name, profit / 1e18, gas / 1e18)
-                continue
-
-            log.info("▶ %s: expected profit %.4f PLS (gas %.4f PLS)",
-                     engine.name, profit / 1e18, gas / 1e18)
+        if rec.engine is None or not rec.approved:
+            reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
+            log.info("Strategist: %s", reason)
+        else:
+            engine = rec.engine
+            log.info("▶ %s [%s]: est profit %.4f PLS (gas %.4f PLS, ROI %.2fx)",
+                     engine.name, rec.confidence, rec.profit_est, rec.gas_est, rec.roi)
 
             result = engine.execute(dry_run=self.dry_run)
             _events.log_engine_result(engine.name, result, cycle_num=self.cycle)
+
+            # Record into both engine circuit breaker AND strategist P&L
+            self.strategist.record(engine.name, result)
 
             if result.success:
                 engine.record_success()
@@ -206,10 +191,6 @@ class DysnomiaBot:
 
             engine_ran = engine.name
             result_notes = result.notes
-            break  # One engine per cycle — avoid nonce issues
-
-        if not engine_ran:
-            log.info("No engine executed this cycle")
 
         # 5. Gameplay loops (after engine — lower priority)
         for loop in self.loops:
@@ -271,7 +252,7 @@ class DysnomiaBot:
     # ── Status / diagnostics ──────────────────────────────────────────────────
 
     def print_status(self) -> None:
-        """Print engine and wallet status without running anything."""
+        """Print engine, strategist, and wallet status without running anything."""
         snap = snapshot_balances()
         print(f"\n{'━'*50}")
         print(f"  Joystick Status — {JOEY_WALLET}")
@@ -288,6 +269,8 @@ class DysnomiaBot:
             print(f"  {e.status_line()}")
         for l in self.loops:
             print(f"  {l.status_line()}")
+        print()
+        self.strategist.print_status()
         print(f"{'━'*50}\n")
 
 
@@ -304,10 +287,12 @@ def main() -> None:
     )
     parser.add_argument("--dry-run",   action="store_true",
                         help="Simulate all operations — no TXs sent")
+    parser.add_argument("--interactive", action="store_true",
+                        help="Ask for approval before each engine execution")
     parser.add_argument("--once",      action="store_true",
                         help="Run exactly one cycle then exit")
     parser.add_argument("--status",    action="store_true",
-                        help="Print engine/wallet status and exit")
+                        help="Print engine/strategist/wallet status and exit")
     parser.add_argument("--beat-only", action="store_true",
                         help="Run only the Beat engine (diagnostics)")
     parser.add_argument("--lau-only", action="store_true",
@@ -316,7 +301,7 @@ def main() -> None:
                         help="Print event log statistics and recent events")
     args = parser.parse_args()
 
-    bot = DysnomiaBot(dry_run=args.dry_run)
+    bot = DysnomiaBot(dry_run=args.dry_run, interactive=args.interactive)
 
     if args.log_status:
         from .core.event_logger import EventLogger
@@ -324,7 +309,7 @@ def main() -> None:
         print(f"  Joystick Event Log Status")
         print(f"{'━'*50}")
         for name in ["joystick_events", "cycles", "engine_lau", "engine_arb",
-                      "engine_beat", "engine_wm", "engine_dss", "engine_tokenfactory"]:
+                      "engine_beat", "engine_dss", "engine_tokenfactory"]:
             count = EventLogger.event_count(name)
             if count > 0:
                 print(f"  {name}.jsonl: {count} events")
