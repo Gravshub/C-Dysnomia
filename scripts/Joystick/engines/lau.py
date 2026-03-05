@@ -91,6 +91,7 @@ TOKEN EMISSION & SELF-SNIPE HOOK
 from __future__ import annotations
 
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -103,13 +104,13 @@ from ..core.config import (
     JOEY_WALLET,
     AFFECTION,
     GIBS_LAU,
-    PLS_GAS_FLOOR,
 )
 from ..core.chain import w3_read, w3_submit, erc20, safe
 from ..core.executor import send_tx, approve_if_needed
 from ..core.simulator import simulate as sim_call, SimulationFailed, estimate_gas
 from ..core.wallet import pls_balance
 from .base import EngineBase, EngineResult
+from ..core.event_logger import events as _events
 
 log = logging.getLogger(__name__)
 
@@ -117,8 +118,9 @@ log = logging.getLogger(__name__)
 
 MOTZKIN_PRIME: int = 953_467_954_114_363
 
-# Must have this much PLS ABOVE the gas floor to run a full round
-MIN_PLS_ABOVE_FLOOR: int = 50_000 * 10**18
+# Minimum PLS to run a full ABUPRU round (~600K gas * ~2 Gwei ≈ 1.2K PLS + safety buffer)
+# Uses its own floor instead of the global PLS_GAS_FLOOR (which is for the whole bot)
+LAU_MIN_PLS: int = int(os.environ.get("LAU_MIN_PLS", "5000")) * 10**18
 
 # Conservative gas estimate for full 6-step canonical round
 FULL_ROUND_GAS_EST: int = 600_000
@@ -366,16 +368,21 @@ class LAUEngine(EngineBase):
     def is_ready(self) -> bool:
         """Check PLS balance and block-based scheduling."""
         bal    = pls_balance()
-        needed = PLS_GAS_FLOOR + MIN_PLS_ABOVE_FLOOR
+        needed = LAU_MIN_PLS
         if bal < needed:
             log.debug("LAUEngine: PLS %.0f < %.0f needed", bal / 1e18, needed / 1e18)
+            _events.log("engine.lau.not_ready", engine="LAU", success=False,
+                        data={"reason": "pls_low", "pls": bal / 1e18, "needed": needed / 1e18})
             return False
-        if w3_read.eth.block_number < self._next_run_block:
+        current_block = w3_read.eth.block_number
+        if current_block < self._next_run_block:
             log.debug(
                 "LAUEngine: waiting for block %d (current %d)",
-                self._next_run_block, w3_read.eth.block_number,
+                self._next_run_block, current_block,
             )
             return False
+        _events.log("engine.lau.ready", engine="LAU",
+                    data={"pls": bal / 1e18, "block": current_block})
         return True
 
     def simulate(self) -> tuple[int, int]:
@@ -411,6 +418,9 @@ class LAUEngine(EngineBase):
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """Execute full ABUPRU sequence on all targets."""
+        _events.log("engine.lau.execute_start", engine="LAU",
+                    data={"dry_run": dry_run, "targets": [t[0] for t in self.TARGETS]})
+
         all_hashes: list[str] = []
         total_gas:  int = 0
         all_notes:  list[str] = []
@@ -428,13 +438,25 @@ class LAUEngine(EngineBase):
 
         self._schedule_next_round()
 
-        return EngineResult(
+        result = EngineResult(
             success=ok,
             profit_wei=0,  # strategic — snipe profit not tracked as direct PLS
             gas_wei=total_gas,
             tx_hashes=all_hashes,
             notes=" | ".join(all_notes),
         )
+
+        _events.log("engine.lau.execute_done", engine="LAU",
+                    data={
+                        "success": ok,
+                        "tx_count": len(all_hashes),
+                        "gas_pls": total_gas / 1e18,
+                        "next_block": self._next_run_block,
+                    },
+                    success=ok,
+                    notes=" | ".join(all_notes))
+
+        return result
 
     # ── Per-target round ──────────────────────────────────────────────────────
 
@@ -461,16 +483,35 @@ class LAUEngine(EngineBase):
         gas_total: int = 0
 
         for i, (step_name, fn, note) in enumerate(sequence):
+            _events.log(f"engine.lau.step_start", engine="LAU",
+                        data={"target": label, "step": step_name, "index": i, "note": note})
+
             ok, tx_hash, receipt = self._execute_step(
                 f"{label}.{step_name}", fn, note, dry_run
             )
             if tx_hash:
                 hashes.append(tx_hash)
+
+            step_gas = 0
+            step_gas_price = 0
             if receipt:
-                gas_used  = receipt.get("gasUsed", 0)
-                gas_price = receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                gas_total += gas_used * gas_price
+                step_gas  = receipt.get("gasUsed", 0)
+                step_gas_price = receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                gas_total += step_gas * step_gas_price
+
+            _events.log_tx(f"engine.lau.step_done", engine="LAU", receipt=receipt,
+                           data={
+                               "target": label,
+                               "step": step_name,
+                               "index": i,
+                               "dry_run": dry_run,
+                           },
+                           success=ok,
+                           notes=f"{label}.{step_name}: {note}")
+
             if not ok:
+                _events.log_error(f"engine.lau.step_failed", f"failed at {step_name}",
+                                  engine="LAU", data={"target": label, "step": step_name})
                 return False, hashes, gas_total, f"failed at {step_name}"
 
             # Universal emit sniper — runs after every successful TX
@@ -481,6 +522,15 @@ class LAUEngine(EngineBase):
                 hashes.extend(snipe_hashes)
                 state.total_tokens_sniped   += len(snipe_hashes)
                 state.total_affection_spent += len(snipe_hashes) * 10**18
+                if snipe_hashes:
+                    _events.log("engine.lau.snipe", engine="LAU",
+                                data={
+                                    "step": step_name,
+                                    "sniped_count": len(snipe_hashes),
+                                    "snipe_hashes": snipe_hashes,
+                                    "total_sniped": state.total_tokens_sniped,
+                                    "total_aff_spent": state.total_affection_spent / 1e18,
+                                })
 
             # Inter-step block pause (skip after final step)
             if i < len(sequence) - 1:
@@ -494,18 +544,37 @@ class LAUEngine(EngineBase):
             upsilon_out = contract.functions.Generate().call({"from": JOEY_WALLET})
             state.last_generate_output = upsilon_out
             log.info("LAUEngine [%s] Generate().call() -> %d", label, upsilon_out)
+            _events.log("engine.lau.generate", engine="LAU",
+                        data={"target": label, "upsilon": upsilon_out})
         except Exception as e:
             log.warning("LAUEngine [%s] Generate().call() failed: %s", label, e)
+            _events.log_error("engine.lau.generate_failed", str(e),
+                              engine="LAU", data={"target": label})
 
         state.rounds_run += 1
         state.last_block  = w3_read.eth.block_number
 
-        return (
-            True, hashes, gas_total,
+        round_note = (
             f"round #{state.rounds_run} "
             f"upsilon={state.last_generate_output} "
-            f"sniped={state.total_tokens_sniped}",
+            f"sniped={state.total_tokens_sniped}"
         )
+
+        _events.log("engine.lau.round_complete", engine="LAU",
+                    data={
+                        "target": label,
+                        "round": state.rounds_run,
+                        "upsilon": state.last_generate_output,
+                        "rod_signal": state.view_rod_signal,
+                        "total_sniped": state.total_tokens_sniped,
+                        "total_aff_spent": state.total_affection_spent / 1e18,
+                        "tx_count": len(hashes),
+                        "gas_pls": gas_total / 1e18,
+                    },
+                    block=state.last_block,
+                    notes=round_note)
+
+        return True, hashes, gas_total, round_note
 
     # ── Step executor ─────────────────────────────────────────────────────────
 
@@ -667,6 +736,9 @@ class EmitSniper:
             if snipe_hash:
                 hashes.append(snipe_hash)
                 our_affection -= 1 * 10**18
+                _events.log("emitsniper.sniped", engine="LAU",
+                            tx_hash=snipe_hash,
+                            data={"token": token_addr, "context": context})
             else:
                 self._no_purchase.add(token_addr)
 

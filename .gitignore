@@ -87,6 +87,9 @@ packages/
 __pycache__/
 *.pyc
 
+# Joystick event logs (generated at runtime, not committed)
+scripts/Joystick/data/events/*.jsonl
+
 # macOS
 .DS_Store
 
