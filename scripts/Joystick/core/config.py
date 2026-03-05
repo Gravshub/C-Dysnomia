@@ -76,6 +76,9 @@ TGSV5 = os.getenv("TGSV5_ADDRESS", "")
 # TGSv7 address — Token Factory substrate
 TGSV7 = os.getenv("TGSV7_ADDRESS", "")
 
+# TGSv8 address — TGSv7 + mintWM + dual DEX
+TGSV8 = os.getenv("TGSV8_ADDRESS", "")
+
 # V4/V3 Personal/Index minters
 V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
 V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC")
