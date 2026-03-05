@@ -1,0 +1,108 @@
+"""
+config.py — Single source of truth for all addresses, thresholds, and env vars.
+No magic strings anywhere else in Joystick. Import from here.
+"""
+import os
+from decimal import Decimal
+from web3 import Web3
+
+# ── RPC ──────────────────────────────────────────────────────────────────────
+SUBMIT_RPC = os.getenv("PULSECHAIN_RPC", "https://rpc.pulsechain.com")
+READ_RPC   = os.getenv("PULSECHAIN_READ_RPC", "https://rpc-pulsechain.g4mm4.io")
+CHAIN_ID   = 369
+
+# ── Player ────────────────────────────────────────────────────────────────────
+JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
+
+# ── Core tokens ───────────────────────────────────────────────────────────────
+AFFECTION  = Web3.to_checksum_address("0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D")
+WM         = Web3.to_checksum_address("0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29")
+WPLS       = Web3.to_checksum_address("0xA1077a294dDE1B09bB078844df40758a5D0f9a27")
+PDAI       = Web3.to_checksum_address("0xefD766cCb38EaF1dfd701853BFCe31359239F305")
+PUSDC      = Web3.to_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+
+# ── Joey's contracts ──────────────────────────────────────────────────────────
+GIBS_LAU   = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
+GIBS_QING  = Web3.to_checksum_address("0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35")
+JOEY_YUE   = Web3.to_checksum_address("0x8e666227B0C5A42075a4f9bdf5d2176f287a9cf0")
+DSS        = Web3.to_checksum_address("0x91Df693177eE5C81016d0B7c4c2052A7d229c031")
+
+# GIBS QING waat — constant identifier for territory computation
+GIBS_QING_WAAT = 251913148994206487765525643443518492465195287520927385378321984475167864513
+
+# ── Game contracts ────────────────────────────────────────────────────────────
+META       = Web3.to_checksum_address("0xE77Bdae31b2219e032178d88504Cc0170a5b9B97")
+CHEON      = Web3.to_checksum_address("0x3d23084cA3F40465553797b5138CFC456E61FB5D")
+VOID       = Web3.to_checksum_address("0x965B0d74591bF30327075A247C47dBf487dCff08")
+MAP_ADDR   = Web3.to_checksum_address("0xD3a7A95012Edd46Ea115c693B74c5e524b3DdA75")
+CHOA       = Web3.to_checksum_address("0x0f5a352fd4cA4850c2099C15B3600ff085B66197")
+ENTEH_QING = Web3.to_checksum_address("0xA43F71ac277022A547c56706fbBc5d93f88C3467")
+
+# ── SHIO tokens (Beat prerequisites) ─────────────────────────────────────────
+FORNAX     = Web3.to_checksum_address("0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7")
+FOMALHAUTE = Web3.to_checksum_address("0x7aE73C498A308247BE73688c09c96B3fd06dDB84")
+CHO        = Web3.to_checksum_address("0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB")
+
+# ── Atropa ecosystem tokens (pDAI routes) ────────────────────────────────────
+PINDEPENDENCE = Web3.to_checksum_address("0xA2262D7728C689526693aE893D0fD8a352C7073C")
+GIMME_FIVE    = Web3.to_checksum_address("0x2fc636E7fDF9f3E8d61033103052079781a6e7D2")
+MATH_V11      = Web3.to_checksum_address("0xB680F0cc810317933F234f67EB6A9E923407f05D")
+RNG           = Web3.to_checksum_address("0xa96BcbeD7F01de6CEEd14fC86d90F21a36dE2143")
+
+# Seeded known LAU tokens (arb scanner starting list)
+SEED_LAUS = [
+    ("GIBS (Joey)",   GIBS_LAU),
+    ("GIBS-orphan",   Web3.to_checksum_address("0xabf97a71dfd71f3763c86080693c1ec94e5de846")),
+    ("enteh",         Web3.to_checksum_address("0xccE83CfF8B531EaDdcf11AB414C59DC046D1aAc7")),
+    ("Grav LAU",      Web3.to_checksum_address("0xF462A6fc9a07c4f4bd03a54e03a5db3024d64D47")),
+    ("pINDEPENDENCE", PINDEPENDENCE),
+    ("GIMME FIVE",    GIMME_FIVE),
+    ("MATH v1.1",     MATH_V11),
+    ("RNG",           RNG),
+]
+
+# ── DEX ───────────────────────────────────────────────────────────────────────
+PULSEX_V1_ROUTER  = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
+PULSEX_V1_FACTORY = Web3.to_checksum_address("0x1715a3E4A142d8b698131108995174F37aEBA10D")
+PULSEX_V2_FACTORY = Web3.to_checksum_address("0x29eA7545DEf87022BAdc76323F373EA1e707C523")
+NINEMM_FACTORY    = Web3.to_checksum_address("0xE26E7F6b5A43A667dBA42Cd9C829d5C75A8093b1")
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA11")
+
+# TGSv5 address — set after deployment
+TGSV5 = os.getenv("TGSV5_ADDRESS", "")
+
+# TGSv7 address — Token Factory substrate
+TGSV7 = os.getenv("TGSV7_ADDRESS", "")
+
+# TGSv8 address — TGSv7 + mintWM + dual DEX
+TGSV8 = os.getenv("TGSV8_ADDRESS", "")
+
+# V4/V3 Personal/Index minters
+V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
+V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC")
+
+# PulseX V2 Router
+PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
+
+# ── Thresholds (all env-overridable) ─────────────────────────────────────────
+# PLS buffer — never operate below this
+PLS_GAS_FLOOR  = int(os.getenv("PLS_GAS_FLOOR",  "100000")) * 10**18
+# Target PLS level after emergency refill
+PLS_REPLENISH  = int(os.getenv("PLS_REPLENISH",  "200000")) * 10**18
+# Fraction of profit kept as PLS (gas reserve + validator fund)
+PROFIT_SPLIT   = float(os.getenv("PROFIT_SPLIT",  "0.25"))
+# Gas price ceiling in Gwei — skip cycle if exceeded
+# PulseChain gas is typically 500K-1M Gwei (PLS is very cheap ~$0.00001)
+GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "2000000")) * 10**9
+# DEX slippage tolerance
+MAX_SLIPPAGE   = float(os.getenv("MAX_SLIPPAGE",  "0.02"))
+# Gas estimate multiplier (safety buffer)
+GAS_MULT       = float(os.getenv("GAS_MULT",      "1.3"))
+# Seconds between bot cycles
+CYCLE_DELAY    = int(os.getenv("CYCLE_DELAY",     "30"))
+# QING cache TTL in seconds (1 hour)
+CACHE_TTL      = int(os.getenv("CACHE_TTL",       "3600"))
+# Minimum PLS profit to bother executing (in wei)
+MIN_PROFIT_WEI = int(Decimal(os.getenv("MIN_PROFIT_PLS", "5")) * Decimal(10**18))
