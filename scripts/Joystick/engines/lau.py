@@ -654,7 +654,7 @@ class LAUEngine(EngineBase):
         self._next_run_block = w3_read.eth.block_number + gap
         log.info(
             "LAUEngine: next round >= block %d (+%d blks ~ %d min)",
-            self._next_run_block, gap, (gap * 3) // 60,
+            self._next_run_block, gap, (gap * 10) // 60,
         )
 
 
