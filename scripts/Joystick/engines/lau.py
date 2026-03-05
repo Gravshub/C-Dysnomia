@@ -1,0 +1,763 @@
+"""
+bot/engines/lau.py  —  Engine 6: LAU-ABUPRU
+|>JOYSTICK<| / PulseChain validator grind
+
+CANONICAL SEQUENCE  (from AFFECTION constructor source)
+
+  1  Alpha(Rod.Signal)       — seeds Rod via Charge->Induce->Torque->Amplify->Sustain->React
+                               sets: Rod.{Alpha,Eta,Kappa,Charge,Chin,Element,Monopole}
+                               + Mu.{Ohm, Pi, Sigma}
+                               MUST run first — everything downstream reads its output
+                               mints 4 tokens  ~133K gas
+
+  2  Beta(Mu.Upsilon)        — advances Rod using Upsilon as torque seed
+                               needs: Rod.Alpha, Cone.Dynamo  (both set by Alpha)
+                               mints 3 tokens  ~100K gas
+
+  3  Upsilon(_a=Mu.Upsilon, Phi=false)
+                             — XOR mix: Mu.Upsilon = _a ^ Mu.Ohm
+                               needs: Mu.Ohm  (set by Alpha)
+                               pure state mix — cannot revert
+                               mints 1 token   ~30K gas
+
+  4  Pi()                    — advances Cone using Rod.Kappa
+                               needs: Rod.Kappa  (set by Alpha/Beta)
+                               mints 3 tokens  ~96K gas
+
+  5  Rho()                   — final Cone advance + Omega accumulation
+                               needs: Rod.Eta, Mu.Upsilon, Mu.Pi  (Alpha+step3+Pi)
+                               mints 3 tokens  ~108K gas
+
+  6  Upsilon(_a=Mu.Upsilon, Phi=true)
+                             — XOR mix: Mu.Upsilon = _a ^ Mu.Ohm ^ Mu.Pi
+                               needs: Mu.Ohm, Mu.Pi  (from Rho/Pi)
+                               pure state mix — cannot revert
+                               mints 1 token   ~30K gas
+
+  Full canonical round: ~500K gas  ~ 450-600 PLS
+
+ORDERING RISK ANALYSIS
+
+  HARD CONSTRAINT:  Alpha MUST be first. React() inside Alpha sets the
+                    Eta/Kappa values that every subsequent call reads.
+                    If those are 0, React() will revert with ReactionZeroError.
+
+  SOFT CONSTRAINTS: Beta and Pi can swap (both read from Alpha output, not
+                    from each other). Upsilon(false) can run anywhere after
+                    Alpha. Upsilon(true) should run after both Pi and Rho
+                    since it XORs Mu.Pi which Rho refreshes.
+
+  SAFE SHUFFLE ZONE (steps 2-5):
+    Canonical:   Alpha -> Beta -> Upsilon(F) -> Pi -> Rho -> Upsilon(T)
+    Alt A:       Alpha -> Pi -> Upsilon(F) -> Beta -> Rho -> Upsilon(T)
+    Alt B:       Alpha -> Beta -> Pi -> Upsilon(F) -> Rho -> Upsilon(T)
+    Alt C:       Alpha -> Upsilon(F) -> Pi -> Beta -> Rho -> Upsilon(T)
+    These all produce valid (non-reverting) state — just different Faung paths.
+    The variance is intentional: on-chain footprint looks human, not algorithmic.
+
+  NOT SAFE:      Anything -> Alpha (Alpha not first)
+                 Rho before Pi (Mu.Pi will be stale)
+                 Upsilon(T) before Rho (Mu.Pi stale)
+
+TOKEN EMISSION & SELF-SNIPE HOOK
+
+  Every _mintToCap() call mints 1 token to address(this) — the CALLED
+  CONTRACT's own balance. Running AFFECTION's loop mints AFFECTION to
+  AFFECTION. Running GIBS_LAU's loop mints GIBS to GIBS_LAU.
+
+  These minted tokens do NOT go to our wallet automatically. They exit via:
+    - BuyWith*(amount)  on AFFECTION: pay G5/PI/MATH/Fa/Faung -> receive AFFECTION
+    - Purchase(AFFECTION, amount) on GIBS_LAU: pay 1 AFFECTION -> receive 1 GIBS
+
+  SELF-SNIPE RULE (applied universally across ALL engine actions):
+  After EVERY transaction we send in any engine, scan the receipt logs for:
+    1. Transfer events FROM address(0) (mint events) TO any contract address
+    2. For each such mint event, check:
+       a. Does the minting contract have a Purchase(AFFECTION, amount) function?
+       b. Is the minted token balance in the contract >= 1e18?
+       c. Do we hold enough AFFECTION to Purchase?
+    3. If YES to all: call Purchase(AFFECTION, 1e18) to claim 1 token at cost 1 AFFECTION
+    4. If token has a DEX pair: check if DEX price > 1 AFFECTION -> if so, sell immediately
+
+  For this engine specifically, after each Upsilon/Rho/Pi/Beta step:
+    - scan_and_snipe(receipt, emitting_contract=target_addr)
+
+  AFFECTION PURCHASE ROUTES (to refuel our snipe budget):
+    BuyWithPI(amount):   pay amount/300 pINDEPENDENCE -> receive amount AFFECTION
+    BuyWithG5(amount):   pay amount/5   GIMME FIVE    -> receive amount AFFECTION
+    BuyWithMATH(amount): pay amount     MATH           -> receive amount AFFECTION
+    These are Engine 1 arb territory — but the snipe hook calls them if needed.
+"""
+from __future__ import annotations
+
+import logging
+import random
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+from web3 import Web3
+from web3.types import TxReceipt
+
+from ..core.config import (
+    JOEY_WALLET,
+    AFFECTION,
+    GIBS_LAU,
+    PLS_GAS_FLOOR,
+)
+from ..core.chain import w3_read, w3_submit, erc20, safe
+from ..core.executor import send_tx, approve_if_needed
+from ..core.simulator import simulate as sim_call, SimulationFailed, estimate_gas
+from ..core.wallet import pls_balance
+from .base import EngineBase, EngineResult
+
+log = logging.getLogger(__name__)
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+MOTZKIN_PRIME: int = 953_467_954_114_363
+
+# Must have this much PLS ABOVE the gas floor to run a full round
+MIN_PLS_ABOVE_FLOOR: int = 50_000 * 10**18
+
+# Conservative gas estimate for full 6-step canonical round
+FULL_ROUND_GAS_EST: int = 600_000
+
+# Block jitter between steps within one round
+STEP_BLOCKS_MIN = 4
+STEP_BLOCKS_MAX = 11
+
+# Block jitter between full rounds — human pacing
+ROUND_BLOCKS_MIN = 80
+ROUND_BLOCKS_MAX = 320
+
+# Probability (0.0-1.0) of shuffling the middle 4 steps each round
+SHUFFLE_PROBABILITY = 0.30
+
+# ERC-20 Transfer(from, to, value) topic
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+# ── ABIs ──────────────────────────────────────────────────────────────────────
+
+DYNAMIC_ABI = [
+    {
+        "inputs": [{"name": "_a", "type": "uint64"}],
+        "name": "Alpha",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "_b", "type": "uint64"}],
+        "name": "Beta",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "_a",  "type": "uint64"},
+            {"name": "Phi", "type": "bool"},
+        ],
+        "name": "Upsilon",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "Pi",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "Rho",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "Generate",
+        "outputs": [{"name": "", "type": "uint64"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "MotzkinPrime",
+        "outputs": [{"name": "", "type": "uint64"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    # View() returns a Faung struct — decoded as flat tuple.
+    # Rod[0..17], Cone[18..35], Globals[36..46]
+    # We only need Rod[2]=Signal and Globals[41]=Upsilon, so we
+    # decode as raw tuple and index by position.
+    {
+        "inputs": [],
+        "name": "View",
+        "outputs": [
+            {
+                "name": "",
+                "type": "tuple",
+                "components": (
+                    # Rod VMFa (18 fields)
+                    [{"name": f"r{i}", "type": "uint64"} for i in range(17)]
+                    + [{"name": "rNu", "type": "uint8"}]
+                    # Cone VMFa (18 fields)
+                    + [{"name": f"c{i}", "type": "uint64"} for i in range(17)]
+                    + [{"name": "cNu", "type": "uint8"}]
+                    # Globals
+                    + [{"name": n, "type": "uint64"}
+                       for n in ["Phi", "Eta", "Xi", "Sigma", "Rho", "Upsilon",
+                                 "Ohm", "Pi", "Omicron", "Omega"]]
+                    + [{"name": "Chi", "type": "uint8"}]
+                ),
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+PURCHASE_ABI = [
+    {
+        "inputs": [
+            {"name": "_t", "type": "address"},
+            {"name": "_a", "type": "uint256"},
+        ],
+        "name": "Purchase",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "_a", "type": "address"}],
+        "name": "GetMarketRate",
+        "outputs": [{"type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "spender", "type": "address"},
+            {"name": "amount",  "type": "uint256"},
+        ],
+        "name": "approve",
+        "outputs": [{"type": "bool"}],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+]
+
+
+# ── Step builder ──────────────────────────────────────────────────────────────
+
+def _build_sequence(
+    contract,
+    state: "LAUState",
+) -> list[tuple[str, object, str]]:
+    """
+    Build ordered list of (step_name, ContractFunction, log_note).
+
+    Structure:
+      [0] Alpha       — always first (hard anchor)
+      [1..4] middle   — Beta / Upsilon_F / Pi / Rho in canonical or shuffled order
+      [5] Upsilon_T   — always last (hard anchor)
+
+    SHUFFLE_PROBABILITY % of rounds randomize the middle 4 steps.
+    All orderings in the middle are safe: they read from Alpha's output,
+    not from each other. Rho does use Mu.Pi but that is set by the
+    Amplify/Sustain chain inside Pi — so Pi must precede Rho.
+    To preserve that constraint inside the shuffle, Pi is always placed
+    before Rho even in shuffled mode.
+    """
+
+    alpha_arg = (
+        state.last_generate_output
+        if state.last_generate_output > 0
+        else (state.view_rod_signal or 1)
+    )
+    upsilon_arg = state.view_upsilon or 1
+
+    # Fixed anchors
+    first = [("Alpha",     contract.functions.Alpha(alpha_arg),              f"arg={alpha_arg}")]
+    last  = [("Upsilon_T", contract.functions.Upsilon(upsilon_arg, True),    f"arg={upsilon_arg} Phi=True")]
+
+    # Middle four — Pi must always precede Rho
+    candidates = [
+        ("Beta",      contract.functions.Beta(upsilon_arg),             f"arg={upsilon_arg}"),
+        ("Upsilon_F", contract.functions.Upsilon(upsilon_arg, False),   f"arg={upsilon_arg} Phi=False"),
+        ("Pi",        contract.functions.Pi(),                           "no-arg"),
+        ("Rho",       contract.functions.Rho(),                         "no-arg"),
+    ]
+
+    if random.random() < SHUFFLE_PROBABILITY:
+        # Shuffle Beta and Upsilon_F freely; keep Pi before Rho
+        free  = [c for c in candidates if c[0] in ("Beta", "Upsilon_F")]
+        fixed = [c for c in candidates if c[0] in ("Pi",   "Rho")]
+        random.shuffle(free)
+        # Interleave: pick a random insertion point for Pi+Rho block
+        insert_at = random.randint(0, len(free))
+        middle = free[:insert_at] + fixed + free[insert_at:]
+        log.info(
+            "LAUEngine SHUFFLE: %s",
+            " -> ".join([s[0] for s in first + middle + last]),
+        )
+    else:
+        middle = candidates  # canonical order
+
+    return first + middle + last
+
+
+# ── Per-target state ──────────────────────────────────────────────────────────
+
+@dataclass
+class LAUState:
+    last_generate_output:  int = 0   # last Generate() return (Mu.Upsilon)
+    view_rod_signal:       int = 0   # Rod.Signal from last View()
+    view_upsilon:          int = 0   # Mu.Upsilon from last View()
+    rounds_run:            int = 0
+    last_block:            int = 0
+    total_tokens_sniped:   int = 0
+    total_affection_spent: int = 0   # wei
+
+
+# ── Engine ────────────────────────────────────────────────────────────────────
+
+class LAUEngine(EngineBase):
+    """
+    Engine 6 — LAU Mathematical State Loop + Universal Emit Sniper.
+
+    Executes the 6-step Faung advancement sequence on Dynamic contracts
+    (AFFECTION + optionally GIBS_LAU), then scans every receipt for
+    _mintToCap() mint events and opportunistically Purchase()s any newly
+    minted tokens at their fixed 1:1 AFFECTION rate.
+    """
+
+    name     = "LAU"
+    priority = 50   # below arb / DSS / WM / Beat
+    MAX_FAILURES = 5  # More lenient — strategic engine
+
+    TARGETS: list[tuple[str, str]] = [
+        ("AFFECTION", AFFECTION),
+        # ("GIBS_LAU",  GIBS_LAU),  # enable after MotzkinPrime() verification
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._state: dict[str, LAUState] = {
+            label: LAUState() for label, _ in self.TARGETS
+        }
+        self._next_run_block: int = 0
+
+    # ── EngineBase interface ──────────────────────────────────────────────────
+
+    def is_ready(self) -> bool:
+        """Check PLS balance and block-based scheduling."""
+        bal    = pls_balance()
+        needed = PLS_GAS_FLOOR + MIN_PLS_ABOVE_FLOOR
+        if bal < needed:
+            log.debug("LAUEngine: PLS %.0f < %.0f needed", bal / 1e18, needed / 1e18)
+            return False
+        if w3_read.eth.block_number < self._next_run_block:
+            log.debug(
+                "LAUEngine: waiting for block %d (current %d)",
+                self._next_run_block, w3_read.eth.block_number,
+            )
+            return False
+        return True
+
+    def simulate(self) -> tuple[int, int]:
+        """
+        Verify Alpha() on the first target won't revert, estimate gas for full round.
+        Returns (0, gas_cost_wei) — LAU is strategic like Beat (no direct PLS profit,
+        but minted tokens are harvested by the EmitSniper).
+        """
+        label, addr = self.TARGETS[0]
+        cs_addr  = Web3.to_checksum_address(addr)
+        contract = w3_submit.eth.contract(address=cs_addr, abi=DYNAMIC_ABI)
+
+        if not self._verify_motzkin(contract, label):
+            raise SimulationFailed(f"{label}: MotzkinPrime mismatch")
+
+        self._refresh_view(contract, label, self._state[label])
+        state = self._state[label]
+
+        alpha_arg = (
+            state.last_generate_output
+            if state.last_generate_output > 0
+            else (state.view_rod_signal or 1)
+        )
+
+        # Simulate Alpha — if this passes, the rest of the sequence should work
+        alpha_fn = contract.functions.Alpha(alpha_arg)
+        sim_call(alpha_fn)  # raises SimulationFailed on revert
+
+        gas_price    = w3_submit.eth.gas_price
+        gas_cost_wei = int(FULL_ROUND_GAS_EST * gas_price * 1.3)
+
+        return 0, gas_cost_wei
+
+    def execute(self, dry_run: bool = False) -> EngineResult:
+        """Execute full ABUPRU sequence on all targets."""
+        all_hashes: list[str] = []
+        total_gas:  int = 0
+        all_notes:  list[str] = []
+        ok = True
+
+        for label, addr in self.TARGETS:
+            success, hashes, gas, note = self._run_target(
+                label, addr, self._state[label], dry_run
+            )
+            all_hashes.extend(hashes)
+            total_gas += gas
+            all_notes.append(f"{label}: {note}")
+            if not success:
+                ok = False
+
+        self._schedule_next_round()
+
+        return EngineResult(
+            success=ok,
+            profit_wei=0,  # strategic — snipe profit not tracked as direct PLS
+            gas_wei=total_gas,
+            tx_hashes=all_hashes,
+            notes=" | ".join(all_notes),
+        )
+
+    # ── Per-target round ──────────────────────────────────────────────────────
+
+    def _run_target(
+        self,
+        label:   str,
+        raw_addr: str,
+        state:   LAUState,
+        dry_run: bool,
+    ) -> tuple[bool, list[str], int, str]:
+        """Returns (success, tx_hashes, gas_wei, note)."""
+
+        addr     = Web3.to_checksum_address(raw_addr)
+        contract = w3_submit.eth.contract(address=addr, abi=DYNAMIC_ABI)
+
+        if not self._verify_motzkin(contract, label):
+            return False, [], 0, "MotzkinPrime mismatch"
+
+        self._refresh_view(contract, label, state)
+
+        sequence = _build_sequence(contract, state)
+
+        hashes: list[str] = []
+        gas_total: int = 0
+
+        for i, (step_name, fn, note) in enumerate(sequence):
+            ok, tx_hash, receipt = self._execute_step(
+                f"{label}.{step_name}", fn, note, dry_run
+            )
+            if tx_hash:
+                hashes.append(tx_hash)
+            if receipt:
+                gas_used  = receipt.get("gasUsed", 0)
+                gas_price = receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                gas_total += gas_used * gas_price
+            if not ok:
+                return False, hashes, gas_total, f"failed at {step_name}"
+
+            # Universal emit sniper — runs after every successful TX
+            if receipt and not dry_run:
+                snipe_hashes = _emit_sniper.scan_receipt(
+                    receipt, JOEY_WALLET, context=f"LAU.{label}.{step_name}"
+                )
+                hashes.extend(snipe_hashes)
+                state.total_tokens_sniped   += len(snipe_hashes)
+                state.total_affection_spent += len(snipe_hashes) * 10**18
+
+            # Inter-step block pause (skip after final step)
+            if i < len(sequence) - 1:
+                self._wait_blocks(
+                    random.randint(STEP_BLOCKS_MIN, STEP_BLOCKS_MAX),
+                    label, step_name,
+                )
+
+        # Read Generate() return value via eth_call (no gas cost)
+        try:
+            upsilon_out = contract.functions.Generate().call({"from": JOEY_WALLET})
+            state.last_generate_output = upsilon_out
+            log.info("LAUEngine [%s] Generate().call() -> %d", label, upsilon_out)
+        except Exception as e:
+            log.warning("LAUEngine [%s] Generate().call() failed: %s", label, e)
+
+        state.rounds_run += 1
+        state.last_block  = w3_read.eth.block_number
+
+        return (
+            True, hashes, gas_total,
+            f"round #{state.rounds_run} "
+            f"upsilon={state.last_generate_output} "
+            f"sniped={state.total_tokens_sniped}",
+        )
+
+    # ── Step executor ─────────────────────────────────────────────────────────
+
+    def _execute_step(
+        self,
+        label:   str,
+        fn,
+        note:    str,
+        dry_run: bool,
+    ) -> tuple[bool, Optional[str], Optional[TxReceipt]]:
+        try:
+            sim_call(fn)
+        except SimulationFailed as e:
+            log.warning("%s sim failed: %s", label, e)
+            return False, None, None
+        except Exception as e:
+            log.warning("%s sim error: %s", label, e)
+            return False, None, None
+
+        if dry_run:
+            log.info("%s [DRY RUN] OK  %s", label, note)
+            return True, None, None
+
+        try:
+            receipt  = send_tx(fn, label, skip_simulate=True)  # already simulated above
+            tx_hash  = receipt["transactionHash"].hex() if receipt else None
+            gas_used = receipt.get("gasUsed", 0) if receipt else 0
+            block    = receipt.get("blockNumber", 0) if receipt else 0
+            log.info("%s block=%d gas=%d  %s", label, block, gas_used, note)
+            return True, tx_hash, receipt
+        except Exception as e:
+            log.error("%s send_tx failed: %s", label, e)
+            return False, None, None
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _verify_motzkin(self, contract, label: str) -> bool:
+        try:
+            mp = contract.functions.MotzkinPrime().call()
+            return mp == MOTZKIN_PRIME
+        except Exception as e:
+            log.error("LAUEngine [%s] MotzkinPrime() failed: %s", label, e)
+            return False
+
+    def _refresh_view(self, contract, label: str, state: LAUState) -> None:
+        """
+        Pull live Rod.Signal and Mu.Upsilon from chain.
+        Faung tuple layout (flat, 0-indexed):
+          Rod[0..16] = uint64 fields, Rod[17] = uint8 Nu
+          Cone[18..35]
+          Globals start at [36]: Phi Eta Xi Sigma Rho Upsilon Ohm Pi Omicron Omega Chi
+          So Rod.Signal = [2], Mu.Upsilon = [41]
+        """
+        try:
+            raw = contract.functions.View().call({"from": JOEY_WALLET})
+            if isinstance(raw, (list, tuple)) and len(raw) > 41:
+                state.view_rod_signal = int(raw[2])
+                state.view_upsilon    = int(raw[41])
+                log.debug(
+                    "LAUEngine [%s] View: Rod.Signal=%d Upsilon=%d",
+                    label, state.view_rod_signal, state.view_upsilon,
+                )
+        except Exception as e:
+            log.warning("LAUEngine [%s] View() failed: %s — using cached", label, e)
+
+    def _wait_blocks(self, n: int, label: str, after: str) -> None:
+        target = w3_read.eth.block_number + n
+        log.debug("LAUEngine [%s] waiting %d blocks after %s", label, n, after)
+        while w3_read.eth.block_number < target:
+            time.sleep(random.uniform(1.8, 3.8))
+        time.sleep(random.uniform(1.0, 7.0))  # human jitter on top
+
+    def _schedule_next_round(self) -> None:
+        gap = random.randint(ROUND_BLOCKS_MIN, ROUND_BLOCKS_MAX)
+        self._next_run_block = w3_read.eth.block_number + gap
+        log.info(
+            "LAUEngine: next round >= block %d (+%d blks ~ %d min)",
+            self._next_run_block, gap, (gap * 3) // 60,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIVERSAL EMIT SNIPER  — importable by all engines
+# ══════════════════════════════════════════════════════════════════════════════
+
+class EmitSniper:
+    """
+    Scans any transaction receipt for _mintToCap()-style mint events and
+    opportunistically Purchase()s newly minted tokens at their fixed
+    1:1 AFFECTION rate.
+
+    RULE: Every on-chain action across all engines should run this after
+    every successful TX. Any token minted to a contract that we can claim
+    for 1 AFFECTION should be claimed immediately if profitable.
+
+    INTEGRATION — add to each engine module:
+
+        from ..engines.lau import _emit_sniper
+
+        # After every send_tx() call:
+        snipe_hashes = _emit_sniper.scan_receipt(receipt, JOEY_WALLET, context="Eng1.arb")
+
+    WHAT IT CHECKS:
+        Transfer(from=0x0, to=contract, value) — mint to self pattern
+        GetMarketRate(AFFECTION) > 0            — token has an AFFECTION buy rate
+        contract.balanceOf(contract) >= 1e18    — token is actually available
+        Purchase(AFFECTION, 1e18) sim passes    — will not revert
+        We hold >= 1 AFFECTION                  — we can afford it
+    """
+
+    def __init__(self) -> None:
+        # Cache addresses that have no Purchase route — don't re-probe them
+        self._no_purchase: set[str] = set()
+
+    def scan_receipt(
+        self,
+        receipt:    TxReceipt,
+        our_wallet: str,
+        context:    str = "?",
+    ) -> list[str]:
+        """Returns list of snipe tx hashes. Safe to call on any receipt."""
+        affection_addr = Web3.to_checksum_address(AFFECTION)
+        our_affection  = _affection_balance(our_wallet)
+        hashes: list[str] = []
+
+        for log_entry in receipt.get("logs", []):
+            topics = log_entry.get("topics", [])
+            if len(topics) < 3:
+                continue
+
+            def _h(t) -> str:
+                return (t.hex() if hasattr(t, "hex") else t).lower()
+
+            if _h(topics[0]) != TRANSFER_TOPIC[2:].lower():
+                continue
+
+            # from == 0x0 -> mint event
+            from_hex = _h(topics[1]).lstrip("0x")
+            if any(c != "0" for c in from_hex):
+                continue  # not a mint
+
+            token_addr = Web3.to_checksum_address(log_entry["address"])
+            to_addr    = Web3.to_checksum_address("0x" + _h(topics[2])[-40:])
+
+            # Only care about tokens minted to themselves (_mintToCap)
+            if to_addr != token_addr:
+                continue
+
+            if token_addr in self._no_purchase:
+                continue
+
+            if our_affection < 1 * 10**18:
+                log.debug("EmitSniper [%s]: AFFECTION exhausted — stop", context)
+                break
+
+            snipe_hash = self._try_purchase(
+                token_addr, affection_addr, our_wallet, context
+            )
+            if snipe_hash:
+                hashes.append(snipe_hash)
+                our_affection -= 1 * 10**18
+            else:
+                self._no_purchase.add(token_addr)
+
+        return hashes
+
+    def _try_purchase(
+        self,
+        token_addr:    str,
+        affection_addr: str,
+        our_wallet:    str,
+        context:       str,
+    ) -> Optional[str]:
+        try:
+            c = w3_submit.eth.contract(address=token_addr, abi=PURCHASE_ABI)
+
+            # Must have non-zero AFFECTION market rate
+            try:
+                rate = c.functions.GetMarketRate(affection_addr).call()
+                if rate == 0:
+                    return None
+            except Exception:
+                return None
+
+            # Contract must hold at least 1 token of itself
+            bal = c.functions.balanceOf(token_addr).call()
+            if bal < 1 * 10**18:
+                return None
+
+            # Ensure AFFECTION is approved for this target
+            aff_c = w3_submit.eth.contract(address=affection_addr, abi=PURCHASE_ABI)
+            approve_if_needed(aff_c, token_addr, 1 * 10**18, f"AFF->{token_addr[:8]}")
+
+            fn = c.functions.Purchase(affection_addr, 1 * 10**18)
+            try:
+                sim_call(fn)
+            except SimulationFailed:
+                return None
+
+            receipt = send_tx(fn, f"snipe[{context}->{token_addr[:8]}]", skip_simulate=True)
+            if receipt:
+                h = receipt["transactionHash"].hex()
+                log.info(
+                    "EmitSniper SNIPED %s  context=%s  tx=%s",
+                    token_addr, context, h,
+                )
+                return h
+
+        except Exception as e:
+            log.debug("EmitSniper._try_purchase %s: %s", token_addr, e)
+        return None
+
+
+def _affection_balance(wallet: str) -> int:
+    """Read AFFECTION balance for wallet."""
+    aff_c = erc20(AFFECTION)
+    return safe(aff_c, "balanceOf", wallet) or 0
+
+
+# Module-level singleton — LAUEngine and all other engines share this instance
+_emit_sniper = EmitSniper()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OPERATOR NOTES
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# ENABLING GIBS_LAU TARGET:
+#   Verify MotzkinPrime() before enabling:
+#     cast call 0x66a08aa12da955eb63d7ac121a88b2b210a07b03 \
+#       "MotzkinPrime()(uint64)" --rpc-url https://rpc.pulsechain.com
+#   Expected: 953467954114363
+#   If confirmed -> uncomment ("GIBS_LAU", GIBS_LAU) in TARGETS.
+#   Effect: _mintToCap() inside the loop mints GIBS into GIBS_LAU's own
+#   balance -> DSS.chatAndClaimWithMultiplier() sweeps them out each DSS cycle.
+#
+# PLS FLOOR REMINDER:
+#   Joey is currently at ~67,500 PLS — below the ~150K threshold.
+#   is_ready() gates correctly. Enable when PLS > 150K.
+#
+# SHUFFLE BEHAVIOR:
+#   30% of rounds: middle 4 steps are randomly reordered with Pi always
+#   preceding Rho (Pi sets Mu.Pi that Rho reads). Alpha always first,
+#   Upsilon(true) always last. All orderings in the safe zone produce
+#   valid non-reverting state — just different Faung trajectories.
+#
+# ADDING EmitSniper TO OTHER ENGINES:
+#   from ..engines.lau import _emit_sniper
+#
+#   After every send_tx():
+#     snipe_hashes = _emit_sniper.scan_receipt(receipt, JOEY_WALLET, context="Eng1.arb")
+#
+#   The sniper caches un-snipeable addresses in _no_purchase to avoid
+#   re-probing them every cycle. If a token's market rate changes (e.g.
+#   operator calls AddMarketRate), restart the bot or clear _no_purchase.
