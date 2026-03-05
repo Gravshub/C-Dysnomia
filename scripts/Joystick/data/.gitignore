@@ -1,0 +1,8 @@
+# Runtime state — not source code
+strategist_state.json
+bot_run.log
+bot_run.log.*
+arb_routes.json
+
+# Event logs are runtime data
+events/

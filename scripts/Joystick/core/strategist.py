@@ -34,6 +34,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,8 +46,18 @@ log = logging.getLogger("joystick.strategist")
 _JOYSTICK_DIR = Path(__file__).parent.parent
 _STATE_FILE = _JOYSTICK_DIR / "data" / "strategist_state.json"
 
+# Validator goal — 32 million PLS
+VALIDATOR_GOAL_PLS = 32_000_000
+
 
 # ── Data types ────────────────────────────────────────────────────────────────
+
+class Confidence(Enum):
+    SKIP = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+
 
 @dataclass
 class Recommendation:
@@ -57,6 +68,7 @@ class Recommendation:
     roi: float = 0.0             # Expected ROI multiplier
     profit_est: float = 0.0      # Estimated profit in PLS
     gas_est: float = 0.0         # Estimated gas cost in PLS
+    pool_impact_pct: float = 0.0 # Estimated slippage/pool impact 0.0-100.0
     risk_notes: list[str] = field(default_factory=list)
     approved: bool = False        # Set True after operator approval or auto-approve
 
@@ -266,7 +278,7 @@ class Strategist:
         # 3. Consecutive failure penalty (-2 per failure)
         if stats.consecutive_failures > 0:
             score -= stats.consecutive_failures * 2.0
-            risks.append(f"{stats.consecutive_failures} consecutive failures")
+            risks.append("RECENT_FAILURE")
 
         # 4. Strategic engines get a floor score (Beat, LAU advance game state)
         if engine.name in ("Beat", "LAU") and score < 1.0:
@@ -274,18 +286,40 @@ class Strategist:
             if profit_pls <= gas_pls:
                 risks.append("Strategic run (no direct profit)")
 
-        # 5. Gas affordability check
+        # 5. PLS balance below gas buffer floor
+        from .config import PLS_GAS_FLOOR
+        if pls_balance < PLS_GAS_FLOOR / 1e18:
+            risks.append("BELOW_GAS_BUFFER")
+
+        # 6. Gas affordability check
         if gas_pls > 0 and gas_pls > pls_balance * 0.1:
-            risks.append(f"Gas ({gas_pls:.1f} PLS) is >{10}% of balance")
+            risks.append(f"GAS_HIGH ({gas_pls:.1f} PLS > 10% of balance)")
             score -= 1.0
 
-        # 6. Profit/loss check
+        # 7. Profit/loss check
         if profit_pls <= gas_pls and engine.name not in ("Beat", "LAU"):
             risks.append("Unprofitable (profit <= gas)")
             score -= 5.0
 
+        # 8. Pool impact penalty (from simulate data — engines can expose this)
+        pool_impact = getattr(engine, '_last_pool_impact_pct', 0.0)
+        if pool_impact > 5.0:
+            risks.append("THIN_POOL")
+            score -= 2.0
+        elif pool_impact > 2.0:
+            risks.append("POOL_IMPACT_MODERATE")
+            score -= 0.5
+
+        # 9. Engine-specific flags
+        if engine.name == "DSS":
+            risks.append("PAIR_UNCONFIRMED")  # DSS should block in is_ready() but defensive
+
+        # 10. New token / unproven engine flag
+        if stats.total_runs == 0:
+            risks.append("NEW_ENGINE")
+
         # Confidence mapping
-        if score >= 5.0 and not risks:
+        if score >= 5.0 and len([r for r in risks if r in ("THIN_POOL", "RECENT_FAILURE", "BELOW_GAS_BUFFER")]) == 0:
             confidence = "HIGH"
         elif score >= 2.0:
             confidence = "MEDIUM"
@@ -293,6 +327,12 @@ class Strategist:
             confidence = "LOW"
         else:
             confidence = "SKIP"
+
+        # Pool impact degrades confidence
+        if pool_impact > 2.0 and confidence == "HIGH":
+            confidence = "MEDIUM"
+        if pool_impact > 5.0 and confidence == "MEDIUM":
+            confidence = "LOW"
 
         return score, confidence, risks
 
@@ -381,42 +421,115 @@ class Strategist:
             log.warning("Failed to load strategist state: %s", exc)
 
     def _save_state(self) -> None:
-        """Persist stats to disk."""
+        """Persist stats to disk. Atomic write via rename to prevent corruption."""
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "engine_stats": {name: s.to_dict() for name, s in self.stats.items()},
             "last_save_epoch": time.time(),
             "total_session_profit": round(self.total_session_profit, 6),
         }
+        tmp_path = _STATE_FILE.with_suffix(".tmp")
         try:
-            with open(_STATE_FILE, "w") as f:
+            with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
+            os.replace(str(tmp_path), str(_STATE_FILE))
         except Exception as exc:
             log.warning("Failed to save strategist state: %s", exc)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     # ── Status / diagnostics ──────────────────────────────────────────────────
 
     def print_status(self) -> None:
-        """Print strategist state summary."""
-        print(f"\n{'━' * 50}")
-        print("  Strategist Status")
-        print(f"{'━' * 50}")
-        print(f"  Mode:           {'Interactive' if self.interactive else 'Auto'}")
-        print(f"  Auto threshold: {self.AUTO_THRESHOLD}")
-        print(f"  Session P&L:    {self.total_session_profit:.4f} PLS")
-        print(f"  Cycles run:     {self.cycles_run}")
+        """Print strategist state summary in the canonical P&L table format."""
         print()
+        print(self.summary())
 
-        if not self.stats:
-            print("  No engine history yet.")
-        else:
-            print(f"  {'Engine':<15} {'Runs':>5} {'Wins':>5} {'Rate':>6} "
-                  f"{'Net PLS':>10} {'Best':>10} {'Last':>10}")
-            print(f"  {'-' * 15} {'-' * 5} {'-' * 5} {'-' * 6} "
-                  f"{'-' * 10} {'-' * 10} {'-' * 10}")
-            for name, s in sorted(self.stats.items()):
-                print(f"  {name:<15} {s.total_runs:>5} {s.total_successes:>5} "
-                      f"{s.win_rate:>5.0%} {s.net_pls:>10.4f} "
-                      f"{s.best_profit_pls:>10.4f} {s.last_profit_pls:>10.4f}")
+    def summary(self) -> str:
+        """
+        Formatted P&L summary table for --status output.
+        Returns a multi-line string.
+        """
+        lines = []
+        w = 60
+        lines.append(f"{'━' * w}")
+        lines.append(f" JOYSTICK P&L SUMMARY")
+        lines.append(f"{'━' * w}")
+        lines.append(f" Mode: {'Interactive' if self.interactive else 'Auto'}  |  "
+                      f"Threshold: {self.AUTO_THRESHOLD}  |  Cycles: {self.cycles_run}")
+        lines.append(f"{'─' * w}")
 
-        print(f"{'━' * 50}\n")
+        # Header row
+        lines.append(
+            f" {'Engine':<18} {'Calls':>5}  {'Win%':>5}  "
+            f"{'Profit PLS':>11}  {'Gas PLS':>9}  {'Net PLS':>10}"
+        )
+        lines.append(f"{'─' * w}")
+
+        # Canonical engine order
+        engine_order = ["Arb", "DSS", "Beat", "TokenFactory", "LAU"]
+        engine_display = {
+            "Arb": "Engine 1 Arb",
+            "DSS": "Engine 2 DSS",
+            "Beat": "Engine 3 Beat",
+            "TokenFactory": "Engine 4 Factory",
+            "LAU": "Engine 5 LAU",
+        }
+
+        total_calls = 0
+        total_successes = 0
+        total_profit = 0.0
+        total_gas = 0.0
+
+        for name in engine_order:
+            s = self.stats.get(name, EngineStats())
+            display = engine_display.get(name, name)
+            win_str = f"{s.win_rate:.0%}" if s.total_runs > 0 else "—%"
+            lines.append(
+                f" {display:<18} {s.total_runs:>5}  {win_str:>5}  "
+                f"{s.total_profit_pls:>+11.1f}  {s.total_gas_pls:>9.1f}  "
+                f"{s.net_pls:>+10.1f}"
+            )
+            total_calls += s.total_runs
+            total_successes += s.total_successes
+            total_profit += s.total_profit_pls
+            total_gas += s.total_gas_pls
+
+        # Also show any engines not in the canonical list
+        for name, s in sorted(self.stats.items()):
+            if name not in engine_order:
+                win_str = f"{s.win_rate:.0%}" if s.total_runs > 0 else "—%"
+                lines.append(
+                    f" {name:<18} {s.total_runs:>5}  {win_str:>5}  "
+                    f"{s.total_profit_pls:>+11.1f}  {s.total_gas_pls:>9.1f}  "
+                    f"{s.net_pls:>+10.1f}"
+                )
+                total_calls += s.total_runs
+                total_successes += s.total_successes
+                total_profit += s.total_profit_pls
+                total_gas += s.total_gas_pls
+
+        lines.append(f"{'─' * w}")
+        total_win = f"{total_successes / total_calls:.0%}" if total_calls > 0 else "—%"
+        total_net = total_profit - total_gas
+        lines.append(
+            f" {'TOTAL':<18} {total_calls:>5}  {total_win:>5}  "
+            f"{total_profit:>+11.1f}  {total_gas:>9.1f}  {total_net:>+10.1f}"
+        )
+
+        # Goal progress
+        from .chain import w3_read
+        from .config import JOEY_WALLET
+        try:
+            pls_bal = w3_read.eth.get_balance(JOEY_WALLET) / 1e18
+        except Exception:
+            pls_bal = 0.0
+        pct = (pls_bal / VALIDATOR_GOAL_PLS) * 100 if VALIDATOR_GOAL_PLS > 0 else 0
+        lines.append(
+            f" Goal progress: {pls_bal:,.0f} / {VALIDATOR_GOAL_PLS:,} PLS ({pct:.2f}%)"
+        )
+        lines.append(f"{'━' * w}")
+
+        return "\n".join(lines)
