@@ -60,6 +60,7 @@
 
 # Environment — contains private key, never commit
 .env
+.env.*
 .env.local
 *.env
 
