@@ -61,6 +61,8 @@ from .engines.dss   import DSSEngine
 from .engines.beat  import BeatEngine
 from .engines.token_factory import TokenFactoryEngine
 from .engines.lau import LAUEngine
+from .engines.treasury_sniper import TreasurySniperEngine
+from .engines.spine_runner import SpineRunnerEngine
 from .loops.terraform import TerraformLoop
 
 log = logging.getLogger("joystick")
@@ -88,6 +90,8 @@ class DysnomiaBot:
             BeatEngine(with_cheon=True),
             TokenFactoryEngine(),
             LAUEngine(),
+            TreasurySniperEngine(),
+            SpineRunnerEngine(),
         ]
 
         # Active intelligence layer — evaluates, recommends, tracks P&L
