@@ -6,140 +6,168 @@
       "symbol": "FDIC",
       "name": "FDIC",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "14330675472146828378010103048209",
+      "pls_per_token": 1.2494361956e-08
     },
     {
       "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
       "symbol": "DFM",
       "name": "Dysnomia Federal Monat",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 3.82238656e-10
     },
     {
       "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
       "symbol": "PARADE",
       "name": "PARADE",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 3.064242e-11
     },
     {
       "address": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
       "symbol": "TLRz",
       "name": "Tellerz",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 9.446893e-12
     },
     {
       "address": "0x6A8Ee78653c588530D31fa308F4b165F346BD9E0",
       "symbol": "JOB",
       "name": "JOB",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 1.1474521e-11
     },
     {
       "address": "0x1c27Fd7Ab4FAA8141119484E00D2455851639C2b",
       "symbol": "SSA",
       "name": "Social Security Administration",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 9.306972e-12
     },
     {
       "address": "0xDb4eBEAfb23eCA5275821aB0D87c7f6fa5514EA4",
       "symbol": "SCOIETY",
       "name": "Teh Fdeeralist Scoiety",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "148845497327331202308530623753000",
+      "pls_per_token": 1.1750273e-11
     },
     {
       "address": "0xD33358F1B3130e2E9715C5992028D9de384544E8",
       "symbol": "CAMPAIGN",
       "name": "US Presidential Campaign",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 5.6843766e-11
     },
     {
       "address": "0x7Ba907a5d308024E2A2010ea60318b834c1D8E9E",
       "symbol": "OPIUM",
       "name": "OPIUM",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 1.524956e-11
     },
     {
       "address": "0xf5f1E1B45524cf6919e7Ce3EdDB83569eC452aeA",
       "symbol": "BGDHTZ",
       "name": "BGDHTZ",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 9.503563e-12
     },
     {
       "address": "0x921Bc9A18EaF7299Ae42c1cc416ef070b04EF81E",
       "symbol": "TEHATER",
       "name": "TEHATER",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 5.2949451e-11
     },
     {
       "address": "0xca803da0dF03c7E0897ff09bC53369654be0e3E7",
       "symbol": "ARMS",
       "name": "ARMS",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 1.0667552e-11
     },
     {
       "address": "0xaAE18Cd46C45d343BbA1eab46716B4D69d799734",
       "symbol": "BAR",
       "name": "Cheat On Teh Bar Exam",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": false,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "11288175104634213601485937494956206",
+      "pls_per_token": 1.02538262e-10
     },
     {
       "address": "0x52b4F56d87765E7A9567E35bea97de13C3386554",
       "symbol": "OZZY",
       "name": "OZZY",
       "parent_expected": "FED/BAR chain",
-      "debenture": null,
-      "last_checked": null,
+      "debenture": true,
+      "last_checked": "2026-03-06T05:47:16Z",
       "claimable": null,
-      "notes": "Needs on-chain Debenture() check"
+      "notes": "Needs on-chain Debenture() check",
+      "selfBalance": "0",
+      "pls_per_token": 1.5437446e-11
     }
   ]
 }
