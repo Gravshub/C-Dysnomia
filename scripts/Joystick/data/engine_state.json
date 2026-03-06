@@ -1,0 +1,53 @@
+{
+  "last_updated": null,
+  "engine_states": {
+    "arb": {
+      "last_run": null,
+      "last_profit_pls": 0,
+      "total_profit_pls": 0,
+      "runs": 0,
+      "failures": 0
+    },
+    "dss": {
+      "last_run": null,
+      "last_profit_pls": 0,
+      "total_profit_pls": 0,
+      "runs": 0,
+      "failures": 0
+    },
+    "wm": {
+      "last_run": null,
+      "wm_minted": 0,
+      "runs": 0,
+      "failures": 0
+    },
+    "beat": {
+      "last_run": null,
+      "dione": 41,
+      "charge": 0,
+      "deimos": 0,
+      "yeo": 0,
+      "runs": 0
+    },
+    "treasury_sniper": {
+      "last_run": null,
+      "total_claimed_pls": 0,
+      "runs": 0,
+      "failures": 0
+    },
+    "spine_runner": {
+      "last_run": null,
+      "total_minted_pls": 0,
+      "iterations": 0,
+      "failures": 0
+    },
+    "web_weaver": {
+      "last_run": null,
+      "tokens_deployed": 0,
+      "pairs_created": 0
+    }
+  },
+  "arb_routes": {},
+  "price_cache": {},
+  "gas_history": []
+}
