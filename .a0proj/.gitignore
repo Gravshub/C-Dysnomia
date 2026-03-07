@@ -1,0 +1,9 @@
+# Vector memory (binary, large, regeneratable)
+memory/
+
+# Secrets and credentials
+secrets.env
+variables.env
+
+# Runtime state
+agents.json
