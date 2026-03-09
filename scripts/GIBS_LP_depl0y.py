@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-|>JOYSTICK<| — GIBS LAU FULL LP DEPLOYMENT
+|>JOYSTICK<| — GIBS LAU FULL LP DEPLOYMENT | CLAUDE SONNET 4.6
 Deploy 10 PulseX liquidity pools for GIBS LAU token.
 
 Pool 0: GIBS/WPLS  (price anchor, addLiquidityETH on V2)
@@ -23,7 +23,7 @@ Usage:
   python3 scripts/GIBS_LP_depl0y.py --all                 # deploy all 10 pools
 
 Requires:
-  - DYSNOMIA_PRIVATE_KEY or JOEY_PRIVATE_KEY env var
+  - JOEY_WALLET_PRIVKEY
   - RPC_URL env var (default: http://127.0.0.1:8545 for Anvil)
   - Joey wallet holds sufficient GIBS + partner tokens + PLS for gas
 """
@@ -39,7 +39,7 @@ from eth_account import Account
 # RPC + wallet
 # ---------------------------------------------------------------------------
 RPC_URL = os.getenv("RPC_URL", os.getenv("PULSECHAIN_RPC", "http://127.0.0.1:8545"))
-KEY = os.getenv("JOEY_PRIVATE_KEY") or os.getenv("DYSNOMIA_PRIVATE_KEY")
+KEY = os.getenv("JOEY_WALLET_PRIVKEY")
 
 CHAIN_ID = 369
 GAS_MULT = float(os.getenv("GAS_MULT", "1.3"))
@@ -550,7 +550,7 @@ def main():
     # Need key for deployment
     key = KEY
     if not key:
-        print("ERROR: Set DYSNOMIA_PRIVATE_KEY or JOEY_PRIVATE_KEY env var")
+        print("ERROR: Set JOEY_WALLET_PRIVKEY")
         sys.exit(1)
 
     acct = Account.from_key(key)
