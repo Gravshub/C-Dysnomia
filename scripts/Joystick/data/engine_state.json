@@ -15,12 +15,6 @@
       "runs": 0,
       "failures": 0
     },
-    "wm": {
-      "last_run": null,
-      "wm_minted": 0,
-      "runs": 0,
-      "failures": 0
-    },
     "beat": {
       "last_run": null,
       "dione": 41,
@@ -28,6 +22,21 @@
       "deimos": 0,
       "yeo": 0,
       "runs": 0
+    },
+    "token_factory": {
+      "last_run": null,
+      "wm_minted": 0,
+      "tokens_deployed": 0,
+      "total_profit_pls": 0,
+      "runs": 0,
+      "failures": 0
+    },
+    "lau": {
+      "last_run": null,
+      "rounds_completed": 0,
+      "snipes": 0,
+      "runs": 0,
+      "failures": 0
     },
     "treasury_sniper": {
       "last_run": null,
@@ -40,11 +49,6 @@
       "total_minted_pls": 0,
       "iterations": 0,
       "failures": 0
-    },
-    "web_weaver": {
-      "last_run": null,
-      "tokens_deployed": 0,
-      "pairs_created": 0
     }
   },
   "arb_routes": {},
