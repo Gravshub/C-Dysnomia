@@ -1,18 +1,22 @@
 """
-price.py — Live DEX price queries via PulseX V1 router.
+price.py — Live DEX price queries via PulseX V1/V2 routers.
 
 All prices return amounts in wei (int) unless _human suffix is used.
-Always uses the V1 router — V2 router has incorrect factory reference for many pairs.
+V1 router is default for most queries; V2 added for cross-pair graph arb.
 """
 import logging
 from typing import Sequence
 
 from web3 import Web3
 
-from ..core.config import WPLS, AFFECTION, PULSEX_V1_ROUTER
-from ..core.chain import router_contract, safe
+from ..core.config import WPLS, AFFECTION, PULSEX_V1_ROUTER, PULSEX_V2_ROUTER
+from ..core.chain import router_contract, safe, w3_read, factory_contract, pair_contract
+from ..core.config import PULSEX_V1_FACTORY, PULSEX_V2_FACTORY
 
 log = logging.getLogger(__name__)
+
+# V2 router ABI (same interface as V1 for getAmountsOut)
+_v2_router = None
 
 
 def get_amounts_out(amount_in: int, path: Sequence[str]) -> list[int] | None:
@@ -60,6 +64,62 @@ def pls_price_affection(amount_pls: int = 10**18) -> int | None:
     """How many wei AFFECTION for `amount_pls` wei WPLS (direct pair)."""
     amounts = get_amounts_out(amount_pls, [WPLS, AFFECTION])
     return amounts[-1] if amounts else None
+
+
+def get_amounts_out_v2(amount_in: int, path: Sequence[str]) -> list[int] | None:
+    """
+    Query PulseX V2 router.getAmountsOut.
+    Separate function because V1 and V2 routers have different pair sets.
+    """
+    global _v2_router
+    if _v2_router is None:
+        from ..core.chain import ROUTER_ABI
+        _v2_router = w3_read.eth.contract(
+            address=Web3.to_checksum_address(PULSEX_V2_ROUTER), abi=ROUTER_ABI
+        )
+    path_checksum = [Web3.to_checksum_address(a) for a in path]
+    result = safe(_v2_router, "getAmountsOut", amount_in, path_checksum)
+    return list(result) if result else None
+
+
+def get_reserves(token_a: str, token_b: str, factory: str = "V1") -> tuple[int, int] | None:
+    """
+    Get raw reserves for a pair from a specific factory.
+    Returns (reserve_a, reserve_b) normalized so token_a's reserve is first.
+    Returns None if no pair exists.
+    """
+    factory_addr = PULSEX_V1_FACTORY if factory == "V1" else PULSEX_V2_FACTORY
+    fc = factory_contract(factory_addr)
+    pair_addr = safe(fc, "getPair", Web3.to_checksum_address(token_a), Web3.to_checksum_address(token_b))
+    if not pair_addr or pair_addr == "0x" + "0" * 40:
+        return None
+    pc = pair_contract(pair_addr)
+    reserves = safe(pc, "getReserves")
+    if not reserves:
+        return None
+    t0 = safe(pc, "token0")
+    if t0 is None:
+        return None
+    token_a_cs = Web3.to_checksum_address(token_a)
+    if t0.lower() == token_a_cs.lower():
+        return (reserves[0], reserves[1])
+    else:
+        return (reserves[1], reserves[0])
+
+
+def simulate_swap_exact(amount_in: int, reserve_in: int, reserve_out: int) -> int:
+    """
+    Pure Uniswap v2 output calculation — no RPC call.
+    Used by graph.py for fast cycle scoring.
+
+    out = (amount_in * 997 * reserve_out) / (reserve_in * 1000 + amount_in * 997)
+    """
+    if reserve_in == 0 or reserve_out == 0 or amount_in == 0:
+        return 0
+    amount_in_with_fee = amount_in * 997
+    numerator = amount_in_with_fee * reserve_out
+    denominator = reserve_in * 1000 + amount_in_with_fee
+    return numerator // denominator
 
 
 def simulate_arb(
