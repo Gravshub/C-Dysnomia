@@ -1,7 +1,7 @@
 """
 base.py — EngineBase and EngineResult abstractions.
 
-Every engine (arb, dss, wm, beat) inherits from EngineBase and implements:
+Every engine (arb, dss, beat, token_factory, lau, treasury_sniper, spine_runner) inherits from EngineBase and implements:
   is_ready()  — prerequisite check, read-only, no TX
   simulate()  — (expected_profit_wei, expected_gas_wei) via eth_call
   execute()   — full TX sequence, returns EngineResult
@@ -66,7 +66,7 @@ class EngineBase(ABC):
         """
         Prerequisite check. Read-only (no TXs).
         Return False to skip this engine this cycle without counting as a failure.
-        Examples: SHIO balances present, GIBS pair exists, TGSv5 deployed.
+        Examples: SHIO balances present, GIBS pair exists, TGSv8 wired.
         """
 
     @abstractmethod
