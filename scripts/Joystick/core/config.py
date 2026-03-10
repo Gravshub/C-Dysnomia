@@ -86,6 +86,25 @@ V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC
 # PulseX V2 Router
 PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
 
+# ── Hub tokens for pair discovery (Tier 1 scan) ─────────────────────────────
+HUB_TOKENS = [
+    WPLS,
+    AFFECTION,
+    Web3.to_checksum_address("0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff"),  # FED
+    Web3.to_checksum_address("0x463413c579D29c26D59a65312657DFCe30D545A1"),  # TBILL
+    GIBS_LAU,                                                                 # GIBS
+    Web3.to_checksum_address("0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"),  # FDIC
+    Web3.to_checksum_address("0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6"),  # ATROPA
+    PDAI,                                                                     # pDAI
+]
+
+# ── Graph arb parameters ────────────────────────────────────────────────────
+GRAPH_ARB_MIN_PROFIT_PLS = int(os.getenv("GRAPH_ARB_MIN_PROFIT_PLS", "1000"))
+GRAPH_ARB_MAX_IMPACT_PCT = float(os.getenv("GRAPH_ARB_MAX_IMPACT_PCT", "10.0"))
+GRAPH_ARB_MAX_HOPS       = int(os.getenv("GRAPH_ARB_MAX_HOPS", "3"))
+GRAPH_CACHE_TTL          = int(os.getenv("GRAPH_CACHE_TTL", "300"))    # 5 min pair registry
+RESERVE_CACHE_TTL        = int(os.getenv("RESERVE_CACHE_TTL", "30"))   # 30 sec reserves
+
 # ── Thresholds (all env-overridable) ─────────────────────────────────────────
 # PLS buffer — never operate below this
 PLS_GAS_FLOOR  = int(os.getenv("PLS_GAS_FLOOR",  "100000")) * 10**18

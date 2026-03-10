@@ -1,17 +1,17 @@
 """
-arb.py — Engine 1: LAU/Atropa Purchase → DEX Arbitrage
+arb.py — Engine 1: Multi-Mode Arbitrage (RAZOR)
 
-Wraps logic from scripts/scan_lau_arb.py (discovery) and scripts/tx_lau_arb.py (execution).
+Three arb modes, ranked by ROI each cycle:
+  Mode 1: PurchaseArb — Buy tokens at Dysnomia market rate, sell on PulseX
+  Mode 2: CrossDexArb — Same token on V1 vs V2, exploit spread via router
+  Mode 3: CrossPairArb — Graph-based triangle arb across connected pools
 
-Flow per cycle:
-  1. scan_tokens() — get ranked list of arb-eligible tokens (cached, TTL 1hr)
-  2. rank_opportunities() — filter by profitability using exact Uniswap v2 formula
-  3. Execute top opportunity: approve → Purchase(token) → approve(router) → swapExactTokensForETH
-
-is_ready():  AFFECTION balance ≥ 1 AFFECTION (need payment capital)
-simulate():  Scan + rank; return (top_profit_wei, estimated_gas_wei)
-execute():   4-TX arb sequence on best opportunity
+is_ready():  Any mode viable (AFFECTION ≥ 1 OR WPLS balance for graph arb)
+simulate():  Run all modes, pick best opportunity across all three
+execute():   Dispatch to the right execution path based on mode
 """
+import json
+import os
 import time
 import logging
 
@@ -19,72 +19,191 @@ from web3 import Web3
 
 from .base import EngineBase, EngineResult
 from ..core.config import (
-    JOEY_WALLET, AFFECTION, WPLS, PULSEX_V1_ROUTER, MAX_SLIPPAGE,
+    JOEY_WALLET, AFFECTION, WPLS,
+    PULSEX_V1_ROUTER, PULSEX_V2_ROUTER,
+    MAX_SLIPPAGE, RESERVE_CACHE_TTL,
+    GRAPH_ARB_MIN_PROFIT_PLS,
 )
-from ..core.chain import erc20, purchasable, router_contract, safe, w3_submit
+from ..core.chain import erc20, purchasable, router_contract, safe, w3_submit, w3_read
 from ..core.executor import send_tx, approve_if_needed
 from ..core.simulator import SimulationFailed, estimate_gas
+from ..core.event_logger import events as _events
 from ..oracle.scanner import scan_tokens
 from ..oracle.profitability import rank_opportunities
 
 log = logging.getLogger(__name__)
 
-# Approximate gas for the 4-TX arb sequence (approve×2 + purchase + swap)
-# Used for profitability pre-check before a real estimate_gas() call
-ARB_GAS_ESTIMATE = 400_000  # conservative (real is ~250-350K total)
+# Gas estimates per mode
+PURCHASE_GAS_ESTIMATE = 400_000   # approve×2 + purchase + swap
+CROSS_PAIR_GAS_ESTIMATE = 500_000 # 3-hop swap via router
+
+# Event log file for RAZOR
+_JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_RAZOR_LOG = os.path.join(_JOYSTICK_DIR, "data", "events", "razor.json")
+
+
+def _log_razor_event(event: dict) -> None:
+    """Append a timestamped event to razor.json."""
+    event["ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    event["epoch"] = time.time()
+    try:
+        os.makedirs(os.path.dirname(_RAZOR_LOG), exist_ok=True)
+        with open(_RAZOR_LOG, "a") as f:
+            f.write(json.dumps(event, default=str) + "\n")
+    except Exception:
+        pass
 
 
 class ArbEngine(EngineBase):
     """
-    Engine 1: Purchase DYSNOMIA tokens at fixed market rate → sell on PulseX.
-    Covers all 272 QING assets (AFFECTION routes) and Atropa tokens (pDAI routes).
+    Engine 1 — RAZOR: Multi-mode arbitrage engine.
+
+    Mode 1 (Purchase): scan_tokens() → rank → approve → Purchase → swap → PLS
+    Mode 2 (CrossDex): V1↔V2 spread on same token/WPLS pair
+    Mode 3 (CrossPair): Graph-based triangle arb across connected DEX pools
     """
     name = "Arb"
 
     def __init__(self):
         super().__init__()
         self._top_opportunity: dict | None = None
+        self._pair_graph = None
+        self._graph_last_refresh: float = 0
 
     def is_ready(self) -> bool:
-        """Need at least 1 AFFECTION (or pDAI) to buy anything."""
+        """
+        Ready if ANY mode is viable:
+          - Purchase mode: AFFECTION balance >= 1
+          - CrossPair mode: PLS balance > 0 (WPLS wrapping handled by router)
+        """
+        # Check AFFECTION for Purchase mode
         aff = erc20(AFFECTION)
-        bal = safe(aff, "balanceOf", JOEY_WALLET) or 0
-        if bal >= 10**18:
+        aff_bal = safe(aff, "balanceOf", JOEY_WALLET) or 0
+        if aff_bal >= 10**18:
             return True
-        log.debug("ArbEngine not ready: AFFECTION balance %.4f < 1", bal / 1e18)
+
+        # Check PLS for CrossPair mode (need some PLS to swap)
+        pls_bal = w3_read.eth.get_balance(JOEY_WALLET)
+        if pls_bal >= 10 * 10**18:  # At least 10 PLS
+            return True
+
+        log.debug("ArbEngine not ready: AFF=%.4f, PLS=%.4f", aff_bal / 1e18, pls_bal / 1e18)
         return False
+
+    # ── simulate() — run all modes, pick best ──────────────────────────────
 
     def simulate(self) -> tuple[int, int]:
         """
-        Scan all tokens, rank by profitability, cache top opportunity.
+        Scan all modes, rank by profit, cache top opportunity.
         Returns (expected_profit_wei, expected_gas_wei).
-        Raises SimulationFailed if no profitable opportunity found.
+        Raises SimulationFailed if no profitable opportunity in any mode.
         """
-        from ..core.chain import w3_read
         gas_price = w3_read.eth.gas_price
-        gas_cost_wei = ARB_GAS_ESTIMATE * gas_price
+        best_opp = None
+
+        # Mode 1: Purchase arb
+        try:
+            opp = self._simulate_purchase(gas_price)
+            if opp and (best_opp is None or opp["profit_wei"] > best_opp["profit_wei"]):
+                best_opp = opp
+        except Exception as exc:
+            log.debug("Purchase mode scan failed: %s", exc)
+
+        # Mode 3: Cross-pair graph arb
+        try:
+            opp = self._simulate_cross_pair(gas_price)
+            if opp and (best_opp is None or opp["profit_wei"] > best_opp["profit_wei"]):
+                best_opp = opp
+        except Exception as exc:
+            log.debug("CrossPair mode scan failed: %s", exc)
+
+        if not best_opp:
+            raise SimulationFailed("No profitable arb opportunities across all modes")
+
+        self._top_opportunity = best_opp
+        mode = best_opp.get("mode", "?")
+
+        log.info(
+            "ArbEngine top [%s]: profit %.4f PLS",
+            mode, best_opp["profit_wei"] / 1e18,
+        )
+
+        return best_opp["profit_wei"], best_opp["gas_wei"]
+
+    def _simulate_purchase(self, gas_price: int) -> dict | None:
+        """Mode 1: Purchase → DEX arb scan."""
+        gas_cost_wei = PURCHASE_GAS_ESTIMATE * gas_price
 
         tokens = scan_tokens()
         ranked = rank_opportunities(tokens, gas_cost_wei)
 
         if not ranked:
-            raise SimulationFailed("No profitable arb opportunities in scan")
+            return None
 
         top = ranked[0]
-        self._top_opportunity = top
-
-        log.info(
-            "ArbEngine top: %s (%s) — profit %.4f PLS (impact %.1f%%)",
-            top["label"], top["symbol"],
-            top["profit_wei"] / 1e18,
-            top["impact_pct"],
+        log.debug(
+            "Purchase mode top: %s (%s) — profit %.4f PLS (impact %.1f%%)",
+            top["label"], top["symbol"], top["profit_wei"] / 1e18, top["impact_pct"],
         )
 
-        return top["profit_wei"], gas_cost_wei
+        return {
+            "mode": "purchase",
+            "profit_wei": top["profit_wei"],
+            "gas_wei": gas_cost_wei,
+            **top,
+        }
+
+    def _simulate_cross_pair(self, gas_price: int) -> dict | None:
+        """Mode 3: Graph-based triangle arb scan."""
+        from ..oracle.pair_discovery import (
+            load_pair_graph, discover_pairs, refresh_reserves, reserves_stale,
+        )
+        from ..oracle.graph import scan_all_triangles
+
+        # Load or build pair graph (with caching)
+        now = time.time()
+        if self._pair_graph is None or (now - self._graph_last_refresh) > RESERVE_CACHE_TTL:
+            cached = load_pair_graph()
+            if cached:
+                if reserves_stale(cached):
+                    refresh_reserves(cached)
+                self._pair_graph = cached
+            else:
+                log.info("Building pair graph (first scan)...")
+                self._pair_graph = discover_pairs()
+            self._graph_last_refresh = now
+
+        graph = self._pair_graph
+        if graph is None or graph.edge_count == 0:
+            return None
+
+        # Scan triangles from primary hubs
+        cycles = scan_all_triangles(
+            graph,
+            gas_price_wei=gas_price,
+            min_profit_pls=GRAPH_ARB_MIN_PROFIT_PLS,
+        )
+
+        if not cycles:
+            return None
+
+        top = cycles[0]
+        log.debug(
+            "CrossPair mode top: %s — profit %.4f PLS (score=%.2f)",
+            top.path_symbols, top.net_profit_pls / 1e18, top.score,
+        )
+
+        return {
+            "mode": "cross_pair",
+            "profit_wei": top.net_profit_pls,
+            "gas_wei": CROSS_PAIR_GAS_ESTIMATE * gas_price,
+            "cycle": top,
+        }
+
+    # ── execute() — dispatch by mode ────────────────────────────────────────
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """Execute the top arb opportunity found in simulate()."""
-        # Re-run simulate if no cached opportunity
         if self._top_opportunity is None:
             try:
                 self.simulate()
@@ -94,6 +213,31 @@ class ArbEngine(EngineBase):
         opp = self._top_opportunity
         self._top_opportunity = None  # Consume — force re-scan next cycle
 
+        mode = opp.get("mode", "purchase")
+
+        if mode == "purchase":
+            result = self._execute_purchase(opp, dry_run)
+        elif mode == "cross_pair":
+            result = self._execute_cross_pair(opp, dry_run)
+        else:
+            result = EngineResult(success=False, profit_wei=0, gas_wei=0, notes=f"Unknown mode: {mode}")
+
+        # Log to razor.json
+        _log_razor_event({
+            "mode": mode,
+            "success": result.success,
+            "profit_pls": result.profit_pls,
+            "gas_pls": result.gas_pls,
+            "net_pls": result.net_pls,
+            "tx_hashes": result.tx_hashes,
+            "notes": result.notes,
+            "dry_run": dry_run,
+        })
+
+        return result
+
+    def _execute_purchase(self, opp: dict, dry_run: bool) -> EngineResult:
+        """Mode 1: approve → Purchase → approve → swapExactTokensForETH."""
         token_addr   = opp["address"]
         payment_addr = opp["payment"]
         token_amount = opp["token_amount"]
@@ -113,7 +257,7 @@ class ArbEngine(EngineBase):
         gas_spent = 0
 
         try:
-            log.info("Arb: %s — buying %s %s for %.4f payment tokens",
+            log.info("Purchase Arb: %s — buying %s %s for %.4f payment tokens",
                      opp["label"], token_amount / 1e18, token_sym, payment_cost / 1e18)
 
             # Step 1: Approve payment token to target contract
@@ -144,42 +288,293 @@ class ArbEngine(EngineBase):
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Step 4: Swap tokens → native PLS
+            # Step 4: Swap tokens -> native PLS
             r = send_tx(
                 router.functions.swapExactTokensForETH(
                     sell_amount, min_pls, [token_addr, WPLS], JOEY_WALLET, deadline
                 ),
-                f"Swap {token_sym} → PLS",
+                f"Swap {token_sym} -> PLS",
                 dry_run=dry_run,
-                skip_simulate=True,  # ETH-out needs skip due to native value
+                skip_simulate=True,
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            log.info("Arb complete: %s. TXs: %d", token_sym, len(tx_hashes))
+            log.info("Purchase arb complete: %s. TXs: %d", token_sym, len(tx_hashes))
             return EngineResult(
                 success=True,
                 profit_wei=expected_pls,
                 gas_wei=gas_spent,
                 tx_hashes=tx_hashes,
-                notes=f"Arb: {opp['label']} ({token_sym})",
+                notes=f"PurchaseArb: {opp['label']} ({token_sym})",
             )
 
         except (SimulationFailed, AssertionError, Exception) as exc:
-            log.error("ArbEngine execute failed: %s", exc)
+            log.error("Purchase arb execute failed: %s", exc)
             return EngineResult(
                 success=False, profit_wei=0, gas_wei=gas_spent,
                 tx_hashes=tx_hashes, notes=str(exc),
             )
 
+    def _execute_cross_pair(self, opp: dict, dry_run: bool) -> EngineResult:
+        """
+        Mode 3: Triangle arb via multi-hop router swaps.
+
+        Execution strategy (Option B — simulate-then-execute):
+          1. Build swap path from cycle
+          2. For WPLS-rooted triangles: swapExactTokensForTokens per hop
+          3. Each hop uses 99% of simulated output as minAmountOut
+        """
+        cycle = opp.get("cycle")
+        if not cycle:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0, notes="No cycle data")
+
+        path = cycle.path
+        pools = cycle.pools
+        opt_input = cycle.optimal_input
+
+        if opt_input == 0:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0, notes="Zero optimal input")
+
+        tx_hashes = []
+        gas_spent = 0
+
+        try:
+            log.info("CrossPair Arb: %s — input %.4f of %s",
+                     cycle.path_symbols, opt_input / 1e18,
+                     self._pair_graph.symbol(path[0]) if self._pair_graph else path[0][:10])
+
+            # Determine if this is a WPLS-rooted triangle
+            is_wpls_rooted = path[0].lower() == WPLS.lower()
+
+            if is_wpls_rooted:
+                result = self._execute_wpls_triangle(cycle, dry_run)
+            else:
+                # For non-WPLS triangles, execute hop-by-hop through router
+                result = self._execute_generic_triangle(cycle, dry_run)
+
+            return result
+
+        except Exception as exc:
+            log.error("CrossPair arb execute failed: %s", exc)
+            return EngineResult(
+                success=False, profit_wei=0, gas_wei=gas_spent,
+                tx_hashes=tx_hashes, notes=str(exc),
+            )
+
+    def _execute_wpls_triangle(self, cycle, dry_run: bool) -> EngineResult:
+        """
+        Execute a WPLS-rooted triangle via PulseX router.
+        WPLS → B → C → WPLS using swapExactTokensForTokens per hop,
+        with final hop using swapExactTokensForETH to get native PLS back.
+        """
+        from ..oracle.price import simulate_swap_exact
+
+        path = cycle.path
+        pools = cycle.pools
+        opt_input = cycle.optimal_input
+
+        # Build the full swap path for the router
+        # For a triangle WPLS→B→C→WPLS, we can do it in one router call
+        # if all hops are on the same DEX factory
+        same_factory = len(set(p.factory for p in pools)) == 1
+        factory = pools[0].factory if same_factory else None
+
+        # Choose router based on factory
+        if factory == "V2":
+            router_addr = PULSEX_V2_ROUTER
+        else:
+            router_addr = PULSEX_V1_ROUTER
+
+        from ..core.chain import ROUTER_ABI
+        router = w3_submit.eth.contract(
+            address=Web3.to_checksum_address(router_addr), abi=ROUTER_ABI
+        )
+
+        deadline = int(time.time()) + 300
+        tx_hashes = []
+        gas_spent = 0
+
+        if same_factory:
+            # Single router call with full path
+            swap_path = [Web3.to_checksum_address(p) for p in path]
+            min_out = int(cycle.expected_output * (1 - MAX_SLIPPAGE))
+
+            # Need WPLS balance — wrap PLS if needed
+            wpls_c = erc20(WPLS)
+            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
+
+            if wpls_bal < opt_input:
+                # Wrap PLS → WPLS
+                wrap_amount = opt_input - wpls_bal + 10**15  # tiny buffer
+                log.info("  Wrapping %.4f PLS → WPLS", wrap_amount / 1e18)
+                if not dry_run:
+                    # WPLS deposit() is just sending ETH to WPLS contract
+                    from ..core.chain import ROUTER_ABI
+                    # Use low-level send for WPLS deposit
+                    from ..core import wallet
+                    nonce = wallet.next_nonce()
+                    tx = {
+                        "to": WPLS,
+                        "from": JOEY_WALLET,
+                        "value": wrap_amount,
+                        "gas": 50_000,
+                        "gasPrice": w3_submit.eth.gas_price,
+                        "nonce": nonce,
+                        "chainId": 369,
+                    }
+                    signed = wallet.account.sign_transaction(tx)
+                    tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+                    receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                    assert receipt["status"] == 1, "WPLS wrap failed"
+                    tx_hashes.append(tx_hash.hex())
+                    gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Approve router to spend WPLS
+            r = approve_if_needed(wpls_c_submit, router_addr, opt_input, "WPLS", dry_run=dry_run)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Execute the multi-hop swap
+            log.info("  Executing %d-hop swap: %s (min_out=%.4f)",
+                     len(pools), " → ".join(swap_path[:3]) + "...", min_out / 1e18)
+
+            r = send_tx(
+                router.functions.swapExactTokensForTokens(
+                    opt_input, min_out, swap_path, JOEY_WALLET, deadline
+                ),
+                f"Triangle swap: {cycle.path_symbols}",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            log.info("CrossPair arb complete. TXs: %d", len(tx_hashes))
+            return EngineResult(
+                success=True,
+                profit_wei=cycle.net_profit_pls,
+                gas_wei=gas_spent,
+                tx_hashes=tx_hashes,
+                notes=f"CrossPairArb: {cycle.path_symbols} [{factory}]",
+            )
+
+        else:
+            # Mixed factory — execute hop by hop
+            return self._execute_generic_triangle(cycle, dry_run)
+
+    def _execute_generic_triangle(self, cycle, dry_run: bool) -> EngineResult:
+        """
+        Execute a triangle hop-by-hop when pools span different factories.
+        Each hop is a separate swapExactTokensForTokens call on the appropriate router.
+        """
+        from ..core.chain import ROUTER_ABI
+
+        path = cycle.path
+        pools = cycle.pools
+        opt_input = cycle.optimal_input
+
+        deadline = int(time.time()) + 300
+        tx_hashes = []
+        gas_spent = 0
+        current_amount = opt_input
+
+        # Simulate each hop to get expected intermediate amounts
+        intermediate_amounts = [opt_input]
+        from ..oracle.price import simulate_swap_exact
+        for i, pool in enumerate(pools):
+            token_in = path[i].lower()
+            if pool.token_a.lower() == token_in:
+                r_in, r_out = pool.reserve_a, pool.reserve_b
+            else:
+                r_in, r_out = pool.reserve_b, pool.reserve_a
+            out = simulate_swap_exact(intermediate_amounts[-1], r_in, r_out)
+            intermediate_amounts.append(out)
+
+        # First hop: may need WPLS wrap + approve
+        start_token = Web3.to_checksum_address(path[0])
+        if start_token.lower() == WPLS.lower():
+            wpls_c = erc20(WPLS)
+            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
+            if wpls_bal < opt_input and not dry_run:
+                wrap_amount = opt_input - wpls_bal + 10**15
+                from ..core import wallet
+                nonce = wallet.next_nonce()
+                tx = {
+                    "to": WPLS, "from": JOEY_WALLET, "value": wrap_amount,
+                    "gas": 50_000, "gasPrice": w3_submit.eth.gas_price,
+                    "nonce": nonce, "chainId": 369,
+                }
+                signed = wallet.account.sign_transaction(tx)
+                tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+                receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                assert receipt["status"] == 1, "WPLS wrap failed"
+                tx_hashes.append(tx_hash.hex())
+                gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+        # Execute each hop
+        for i, pool in enumerate(pools):
+            token_in = Web3.to_checksum_address(path[i])
+            token_out = Web3.to_checksum_address(path[i + 1])
+
+            router_addr = PULSEX_V2_ROUTER if pool.factory == "V2" else PULSEX_V1_ROUTER
+            router = w3_submit.eth.contract(
+                address=Web3.to_checksum_address(router_addr), abi=ROUTER_ABI
+            )
+
+            # Get current balance of input token for this hop
+            if i == 0:
+                swap_amount = opt_input
+            else:
+                # Use actual balance received from previous hop
+                tok_c = erc20(token_in)
+                swap_amount = safe(tok_c, "balanceOf", JOEY_WALLET) or 0
+                if dry_run:
+                    swap_amount = intermediate_amounts[i]
+
+            min_out = int(intermediate_amounts[i + 1] * (1 - MAX_SLIPPAGE))
+
+            # Approve router for this token
+            tok_submit = w3_submit.eth.contract(address=token_in, abi=erc20(token_in)._abi)
+            r = approve_if_needed(tok_submit, router_addr, swap_amount, f"hop{i}", dry_run=dry_run)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Swap
+            hop_path = [token_in, token_out]
+            r = send_tx(
+                router.functions.swapExactTokensForTokens(
+                    swap_amount, min_out, hop_path, JOEY_WALLET, deadline
+                ),
+                f"Hop {i+1}/{len(pools)}: {pool.symbol_a}/{pool.symbol_b} [{pool.factory}]",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+        log.info("Generic triangle arb complete. TXs: %d", len(tx_hashes))
+        return EngineResult(
+            success=True,
+            profit_wei=cycle.net_profit_pls,
+            gas_wei=gas_spent,
+            tx_hashes=tx_hashes,
+            notes=f"CrossPairArb: {cycle.path_symbols} [mixed]",
+        )
+
 
 if __name__ == "__main__":
     import argparse, logging as _logging
     _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
-    parser = argparse.ArgumentParser(description="Arb Engine standalone test")
+    parser = argparse.ArgumentParser(description="Arb Engine — RAZOR multi-mode")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force-scan", action="store_true")
+    parser.add_argument("--mode", choices=["all", "purchase", "cross_pair"], default="all")
     args = parser.parse_args()
 
     if args.force_scan:
@@ -190,7 +585,9 @@ if __name__ == "__main__":
     print(f"Ready: {engine.is_ready()}")
     try:
         profit, gas = engine.simulate()
-        print(f"Top opportunity: profit={profit/1e18:.4f} PLS  gas={gas/1e18:.4f} PLS")
+        opp = engine._top_opportunity
+        mode = opp.get("mode", "?") if opp else "?"
+        print(f"Top opportunity [{mode}]: profit={profit/1e18:.4f} PLS  gas={gas/1e18:.4f} PLS")
         print(f"ROI: {engine.roi():.2f}x")
         if args.dry_run:
             result = engine.execute(dry_run=True)
