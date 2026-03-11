@@ -13,6 +13,7 @@ import json
 import os
 import logging
 from typing import Any
+from eth_abi import decode as abi_decode
 from web3 import Web3
 
 from .config import (
@@ -178,7 +179,8 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
             decoded.append(None)
             continue
         try:
-            result = fn_objects[i].call.__self__._decode_transaction_data(return_data)
+            output_types = [o['type'] for o in fn_objects[i].abi['outputs']]
+            result = abi_decode(output_types, return_data)
             decoded.append(result[0] if len(result) == 1 else result)
         except Exception:
             decoded.append(None)
