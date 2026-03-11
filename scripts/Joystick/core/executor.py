@@ -19,7 +19,7 @@ from web3.types import TxReceipt
 from web3.exceptions import TimeExhausted
 
 from .config import JOEY_WALLET, CHAIN_ID, GAS_MULT, GAS_PRICE_CEIL
-from .chain import w3_submit
+from .chain import w3_submit, get_submit_pool
 from .simulator import simulate, estimate_gas, SimulationFailed, GasTooHigh
 from . import wallet
 
@@ -76,7 +76,7 @@ def send_tx(
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
 
     # Step 2: Gas price ceiling
-    gas_price = w3_submit.eth.gas_price
+    gas_price = get_submit_pool().call(lambda w3: w3.eth.gas_price)
     if gas_price > GAS_PRICE_CEIL:
         raise GasTooHigh(
             f"Gas price {gas_price / 1e9:.1f} Gwei > ceiling "
@@ -102,15 +102,23 @@ def send_tx(
 
     tx = fn_call.build_transaction(tx_params)
 
-    # Step 5: Sign, submit, wait
+    # Step 5: Sign, submit via pool (auto-retry + failover + privacy tier)
     signed  = wallet.account.sign_transaction(tx)
-    tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
-    log.info("  TX: 0x%s", tx_hash.hex())
+    pool = get_submit_pool()
+    tx_hash_hex = pool.send_raw(signed.raw_transaction)
+    if tx_hash_hex is None:
+        # TX already in mempool — try to get receipt anyway
+        tx_hash_hex = signed.hash.hex()
+    log.info("  TX: 0x%s", tx_hash_hex)
 
+    # Wait for receipt — try submitting provider first, then fall back via pool
+    tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
     try:
-        receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
+        receipt = pool.call(
+            lambda w3: w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=300)
+        )
     except TimeExhausted:
-        log.error("  Receipt timeout — TX 0x%s may still be pending", tx_hash.hex())
+        log.error("  Receipt timeout — TX 0x%s may still be pending", tx_hash_hex)
         raise
 
     status = receipt["status"]
@@ -121,7 +129,7 @@ def send_tx(
         receipt["gasUsed"],
     )
 
-    assert status == 1, f"{label} REVERTED — tx: 0x{tx_hash.hex()}"
+    assert status == 1, f"{label} REVERTED — tx: 0x{tx_hash_hex}"
 
     # Step 6: Log Transfer events for exact amounts
     _log_transfers(receipt)

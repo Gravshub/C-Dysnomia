@@ -7,9 +7,19 @@ from decimal import Decimal
 from web3 import Web3
 
 # ── RPC ──────────────────────────────────────────────────────────────────────
+CHAIN_ID = 369
+
+# Legacy env vars — RPCPool reads them directly in rpc_provider.py.
+# Kept here for backward compat with standalone scripts that import config.
 SUBMIT_RPC = os.getenv("PULSECHAIN_RPC", "https://rpc.pulsechain.com")
 READ_RPC   = os.getenv("PULSECHAIN_READ_RPC", "https://rpc-pulsechain.g4mm4.io")
-CHAIN_ID   = 369
+
+# RPC tuning (env-overridable)
+RPC_READ_TIMEOUT   = int(os.getenv("RPC_READ_TIMEOUT", "30"))
+RPC_SUBMIT_TIMEOUT = int(os.getenv("RPC_SUBMIT_TIMEOUT", "60"))
+RPC_MAX_RETRIES    = int(os.getenv("RPC_MAX_RETRIES", "2"))
+RPC_CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("RPC_CB_THRESHOLD", "5"))
+RPC_COOLDOWN_BASE  = int(os.getenv("RPC_COOLDOWN_BASE", "30"))
 
 # ── Player ────────────────────────────────────────────────────────────────────
 JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")

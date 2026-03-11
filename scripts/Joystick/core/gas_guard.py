@@ -16,7 +16,7 @@ from .config import (
     JOEY_WALLET, GIBS_LAU, AFFECTION, WPLS,
     PULSEX_V1_ROUTER, PLS_GAS_FLOOR, PLS_REPLENISH, MAX_SLIPPAGE,
 )
-from .chain import erc20, router_contract, safe, w3_read
+from .chain import erc20, router_contract, safe
 from .wallet import pls_balance, fmt_pls, account
 from .executor import send_tx, approve_if_needed
 from .simulator import SimulationFailed
