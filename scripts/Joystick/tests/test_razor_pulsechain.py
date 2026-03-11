@@ -105,40 +105,10 @@ def phase2_oracle_scan():
         return []
 
     tgs = tgsv8_contract()
-    v1_factory = factory_contract(PULSEX_V1_FACTORY)
-    v2_factory = factory_contract(PULSEX_V2_FACTORY)
 
-    # Build candidate list
-    seen = set()
-    candidates = []
-    token_list = [(label, addr) for label, addr in SEED_LAUS]
-    token_list += [("HUB", addr) for addr in HUB_TOKENS if addr.lower() != WPLS.lower()]
-
-    try:
-        cached = scan_tokens()
-        for rec in cached:
-            addr = rec.get("address", "")
-            if addr:
-                token_list.append((rec.get("label", rec.get("symbol", "?")), addr))
-    except Exception as exc:
-        print(f"  Warning: scan_tokens() failed: {exc}")
-
-    for label, addr in token_list:
-        from web3 import Web3
-        addr_lower = addr.lower()
-        if addr_lower in seen or addr_lower == WPLS.lower():
-            continue
-        seen.add(addr_lower)
-
-        addr_cs = Web3.to_checksum_address(addr)
-        v1_pair = safe(v1_factory, "getPair", addr_cs, WPLS)
-        v2_pair = safe(v2_factory, "getPair", addr_cs, WPLS)
-
-        has_v1 = v1_pair and v1_pair != "0x" + "0" * 40
-        has_v2 = v2_pair and v2_pair != "0x" + "0" * 40
-
-        if has_v1 and has_v2:
-            candidates.append((addr_cs, label))
+    # Delegate candidate discovery to engine (single source of truth)
+    engine = ArbEngine()
+    candidates = engine._cross_dex_candidates()
 
     print(f"  Found {len(candidates)} tokens with BOTH V1 and V2 pairs\n")
 
@@ -168,6 +138,8 @@ def phase2_oracle_scan():
                 "direction": direction,
                 "v1_liq_wpls": v1rB,
                 "v2_liq_wpls": v2rB,
+                "v1rA": v1rA, "v1rB": v1rB,
+                "v2rA": v2rA, "v2rB": v2rB,
             })
         except Exception:
             continue
@@ -175,13 +147,36 @@ def phase2_oracle_scan():
     # Sort by spread descending
     spreads.sort(key=lambda x: x["spread_bps"], reverse=True)
 
-    # Display top 20
-    print(f"  {'Token':<20s} {'Spread':>8s} {'Dir':>6s} {'V1 WPLS':>14s} {'V2 WPLS':>14s}")
-    print(f"  {'-'*20} {'-'*8} {'-'*6} {'-'*14} {'-'*14}")
+    # Display top 20 with profit estimate
+    gas_price = w3_read.eth.gas_price
+    gas_cost = 350_000 * gas_price
+    print(f"  Gas cost estimate: {gas_cost / 1e18:.2f} PLS")
+    print()
+    print(f"  {'Token':<20s} {'Spread':>8s} {'Dir':>6s} {'V1 WPLS':>14s} {'V2 WPLS':>14s} {'Net PLS':>12s}")
+    print(f"  {'-'*20} {'-'*8} {'-'*6} {'-'*14} {'-'*14} {'-'*12}")
     for s in spreads[:20]:
+        # Estimate net profit: trade 5% of smaller pool
+        smaller = min(s['v1_liq_wpls'], s['v2_liq_wpls'])
+        trade = int(smaller * 5 // 100)
+        v1rA = s.get('v1rA', 0)
+        v1rB = s.get('v1rB', 0)
+        v2rA = s.get('v2rA', 0)
+        v2rB = s.get('v2rB', 0)
+        net_str = "N/A"
+        if v1rA and v1rB and v2rA and v2rB and trade > 0:
+            if s['direction'] == 'V1<V2':
+                buy_rI, buy_rO = v1rB, v1rA
+                sell_rI, sell_rO = v2rA, v2rB
+            else:
+                buy_rI, buy_rO = v2rB, v2rA
+                sell_rI, sell_rO = v1rA, v1rB
+            tokens = (buy_rO * trade * 997) // (buy_rI * 1000 + trade * 997)
+            wpls_back = (sell_rO * tokens * 997) // (sell_rI * 1000 + tokens * 997) if tokens > 0 else 0
+            net = (wpls_back - trade - gas_cost)
+            net_str = f"{net / 1e18:>12.2f}"
         print(
             f"  {s['label'][:20]:<20s} {s['spread_bps']:>7.0f}bp {s['direction']:>6s} "
-            f"{s['v1_liq_wpls']/1e18:>14.2f} {s['v2_liq_wpls']/1e18:>14.2f}"
+            f"{s['v1_liq_wpls']/1e18:>14.2f} {s['v2_liq_wpls']/1e18:>14.2f} {net_str}"
         )
 
     actionable = [s for s in spreads if s["spread_bps"] >= 50]

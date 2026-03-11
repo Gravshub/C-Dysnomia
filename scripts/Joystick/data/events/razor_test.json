@@ -1,0 +1,2 @@
+{"balances": {"pls": 1992199.5534275686, "affection": 0.0, "gibs": 0.0, "wm": 0.0, "fornax": 0.0, "fomalhaute": 0.0, "cho": 0.0}, "spreads": 0, "purchase_opps": 0, "cross_dex_opp": false, "elapsed_sec": 23.2, "ts": "2026-03-11T05:55:52Z"}
+{"balances": {"pls": 1992199.5534275686, "affection": 0.0, "gibs": 0.0, "wm": 0.0, "fornax": 0.0, "fomalhaute": 0.0, "cho": 0.0}, "spreads": 7, "purchase_opps": 0, "cross_dex_opp": false, "engine_result": {"success": false, "profit_pls": 0.0, "gas_pls": 0.0, "net_pls": 0.0}, "elapsed_sec": 170.4, "ts": "2026-03-11T06:02:36Z"}
