@@ -14,7 +14,7 @@ from eth_account import Account as EthAccount
 from eth_account.signers.local import LocalAccount
 
 from .config import JOEY_WALLET, CHAIN_ID
-from .chain import w3_submit, w3_read
+from .chain import w3_submit, w3_read, get_submit_pool, get_read_pool
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,8 @@ def next_nonce() -> int:
     """
     global _nonce
     if _nonce is None:
-        _nonce = w3_submit.eth.get_transaction_count(JOEY_WALLET, "pending")
+        _nonce = get_submit_pool().call(
+            lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
         log.debug("Nonce fetched from chain: %d", _nonce)
     n = _nonce
     _nonce += 1
@@ -65,13 +66,14 @@ def peek_nonce() -> int:
     """Read current nonce without incrementing."""
     global _nonce
     if _nonce is None:
-        _nonce = w3_submit.eth.get_transaction_count(JOEY_WALLET, "pending")
+        _nonce = get_submit_pool().call(
+            lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
     return _nonce
 
 # ── Balance helpers ───────────────────────────────────────────────────────────
 def pls_balance() -> int:
     """Native PLS balance in wei."""
-    return w3_read.eth.get_balance(JOEY_WALLET)
+    return get_read_pool().call(lambda w3: w3.eth.get_balance(JOEY_WALLET))
 
 def fmt_pls(wei: int) -> str:
     """Format wei as human-readable PLS string."""
