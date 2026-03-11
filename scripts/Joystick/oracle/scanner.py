@@ -40,6 +40,9 @@ FACTORIES   = [
 ]
 PAYMENT_TOKENS = [AFFECTION, PDAI]
 
+# Populated by scan_tokens() via route_auditor — gates _enrich_token payment loop
+_active_payment_filter: set = set()
+
 
 # ── Cache helpers ─────────────────────────────────────────────────────────────
 def _load_cache() -> list[dict] | None:
@@ -154,6 +157,9 @@ def _enrich_token(label: str, token_addr: str) -> dict | None:
     best_rate = None
     best_payment = None
     for payment_addr in PAYMENT_TOKENS:
+        # Skip unfunded payment routes (checked by route_auditor)
+        if _active_payment_filter and payment_addr not in _active_payment_filter:
+            continue
         rate = safe(token, "GetMarketRate", payment_addr)
         if rate and rate > 0:
             best_rate = rate
@@ -199,12 +205,28 @@ def scan_tokens(force: bool = False) -> list[dict]:
 
     log.info("Running fresh token scan (cache miss or force)")
 
+    from .route_auditor import audit_payment_routes, discover_extra_tokens
+
+    # Gate payment tokens by actual balance
+    global _active_payment_filter
+    audit = audit_payment_routes()
+    _active_payment_filter = set(audit["funded_addresses"])
+    if not _active_payment_filter:
+        log.warning("No funded payment routes — scan will return empty")
+        return []
+
     # Gather all token addresses to check
     all_tokens: dict[str, str] = {}  # address → label
 
     # Always include seed list
     for label, addr in SEED_LAUS:
         all_tokens[addr.lower()] = label
+
+    # Expand token pool with data file discoveries
+    extra_tokens = discover_extra_tokens()
+    for label, addr in extra_tokens:
+        if addr.lower() not in all_tokens:
+            all_tokens[addr.lower()] = label
 
     # Discover QINGs from MAP → resolve to their Asset (LAU) tokens
     qing_addrs = _fetch_qings_blockscout()
@@ -216,7 +238,8 @@ def scan_tokens(force: bool = False) -> list[dict]:
             if asset_cs.lower() not in all_tokens:
                 all_tokens[asset_cs.lower()] = f"QING-{qing_addr[:8]}"
 
-    log.info("Enriching %d token candidates...", len(all_tokens))
+    log.info("Scan pool: %d tokens (%d seed + %d QING + %d data)",
+             len(all_tokens), len(SEED_LAUS), len(qing_addrs), len(extra_tokens))
 
     results = []
     for addr, label in all_tokens.items():
