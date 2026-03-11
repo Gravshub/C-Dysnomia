@@ -23,9 +23,10 @@ from Joystick.core.config import (
 )
 from Joystick.core.chain import (
     erc20, safe, tgsv8_contract, factory_contract,
-    snapshot_balances, rpc_health, w3_read,
+    snapshot_balances, rpc_health, w3_read, w3_submit,
 )
 from Joystick.core.simulator import SimulationFailed
+from Joystick.core.wallet import account as wallet_account, next_nonce
 from Joystick.oracle.scanner import scan_tokens
 from Joystick.oracle.profitability import rank_opportunities
 from Joystick.engines.arb import ArbEngine
@@ -48,6 +49,116 @@ def _hr(title: str) -> None:
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
+
+
+# ── Phase 0: Acquire AFFECTION via TGSv8 ─────────────────────────────────────
+
+def phase0_acquire_affection(pls_amount: int = 500, dry_run: bool = True):
+    """Swap PLS → AFFECTION via TGSv8.swapNativeForTokens(). Tokens land in
+    TGSv8 working balance, then withdraw() to Joey's EOA."""
+    _hr(f"Phase 0: Acquire AFFECTION via TGSv8 ({'DRY-RUN' if dry_run else 'LIVE'})")
+
+    if not TGSV8:
+        print("  SKIPPED: TGSv8 not configured")
+        return
+
+    if wallet_account is None:
+        print("  SKIPPED: No wallet (read-only mode)")
+        return
+
+    tgs = tgsv8_contract()
+    tgs_submit = tgsv8_contract(w3=w3_submit)
+    amount_wei = int(pls_amount * 10**18)
+    DEX_BEST = 2  # DEX enum: V1=0, V2=1, BEST=2
+
+    # Pre-flight: check current AFFECTION balance
+    aff_before = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+    print(f"  AFFECTION before:  {aff_before / 1e18:.4f}")
+    print(f"  Swapping:          {pls_amount} PLS → AFFECTION via TGSv8")
+
+    # Quote: how much AFFECTION for this PLS?
+    from web3 import Web3
+    router_addr = safe(tgs, "routerV2") or safe(tgs, "routerV1")
+    if router_addr:
+        from Joystick.core.chain import router_contract
+        router = router_contract()
+        try:
+            path = [Web3.to_checksum_address(WPLS), Web3.to_checksum_address(AFFECTION)]
+            amounts = router.functions.getAmountsOut(amount_wei, path).call()
+            expected_aff = amounts[-1]
+            print(f"  Expected output:   {expected_aff / 1e18:.4f} AFFECTION")
+        except Exception as exc:
+            print(f"  Quote failed: {exc}")
+            expected_aff = 0
+    else:
+        expected_aff = 0
+
+    if dry_run:
+        print("  DRY-RUN: no TX sent")
+        return
+
+    # Step 1: swapNativeForTokens — sends PLS, gets AFFECTION into TGSv8
+    print("\n  Step 1: TGSv8.swapNativeForTokens(AFFECTION, 0, BEST)")
+    try:
+        tx_fn = tgs_submit.functions.swapNativeForTokens(
+            Web3.to_checksum_address(AFFECTION),
+            0,       # minOut — accept any amount for small test
+            DEX_BEST,
+        )
+        tx = tx_fn.build_transaction({
+            "from": JOEY_WALLET,
+            "value": amount_wei,
+            "gas": 500_000,
+            "gasPrice": w3_submit.eth.gas_price,
+            "nonce": next_nonce(),
+            "chainId": 369,
+        })
+        signed = wallet_account.sign_transaction(tx)
+        tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+        print(f"  TX sent: {tx_hash.hex()}")
+        receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        print(f"  Status:  {'OK' if receipt['status'] == 1 else 'REVERTED'}")
+        print(f"  Gas:     {receipt['gasUsed']} ({receipt['gasUsed'] * receipt['effectiveGasPrice'] / 1e18:.2f} PLS)")
+    except Exception as exc:
+        print(f"  FAILED: {exc}")
+        return
+
+    # Step 2: Check TGSv8 working balance
+    tgs_aff_bal = safe(tgs, "bal", AFFECTION) or 0
+    print(f"\n  TGSv8 AFFECTION bal: {tgs_aff_bal / 1e18:.4f}")
+
+    if tgs_aff_bal == 0:
+        print("  No AFFECTION in TGSv8 — nothing to withdraw")
+        return
+
+    # Step 3: Withdraw AFFECTION from TGSv8 to Joey
+    print(f"  Step 2: TGSv8.withdraw(AFFECTION, {tgs_aff_bal / 1e18:.4f})")
+    try:
+        tx_fn = tgs_submit.functions.withdraw(
+            Web3.to_checksum_address(AFFECTION),
+            tgs_aff_bal,
+        )
+        tx = tx_fn.build_transaction({
+            "from": JOEY_WALLET,
+            "gas": 100_000,
+            "gasPrice": w3_submit.eth.gas_price,
+            "nonce": next_nonce(),
+            "chainId": 369,
+        })
+        signed = wallet_account.sign_transaction(tx)
+        tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+        print(f"  TX sent: {tx_hash.hex()}")
+        receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        print(f"  Status:  {'OK' if receipt['status'] == 1 else 'REVERTED'}")
+    except Exception as exc:
+        print(f"  FAILED: {exc}")
+        return
+
+    # Verify
+    aff_after = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+    gained = (aff_after - aff_before) / 1e18
+    print(f"\n  AFFECTION after:   {aff_after / 1e18:.4f}")
+    print(f"  Gained:            {gained:.4f} AFFECTION")
 
 
 # ── Phase 1: Health Check ────────────────────────────────────────────────────
@@ -300,6 +411,8 @@ def main():
     parser.add_argument("--execute", action="store_true", help="Live execution (sends TX!)")
     parser.add_argument("--mode2-only", action="store_true", help="CrossDex scan only")
     parser.add_argument("--skip-scan", action="store_true", help="Skip token discovery (faster)")
+    parser.add_argument("--acquire-aff", type=int, metavar="PLS",
+                        help="Acquire AFFECTION by swapping PLS via TGSv8 (e.g. --acquire-aff 500)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args()
 
@@ -311,6 +424,11 @@ def main():
 
     start = time.time()
     results = {}
+
+    # Phase 0: Acquire AFFECTION (optional)
+    if args.acquire_aff:
+        is_live = args.execute
+        phase0_acquire_affection(pls_amount=args.acquire_aff, dry_run=not is_live)
 
     # Phase 1: Health check (always)
     bals = phase1_health()

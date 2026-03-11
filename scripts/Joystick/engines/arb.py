@@ -426,9 +426,9 @@ class ArbEngine(EngineBase):
         token_sym    = opp.get("symbol", "?")
 
         router = router_contract(w3=w3_submit)
-        token_c   = w3_submit.eth.contract(address=token_addr,   abi=purchasable(token_addr)._abi)
-        payment_c = w3_submit.eth.contract(address=payment_addr, abi=erc20(payment_addr)._abi)
-        token_erc = w3_submit.eth.contract(address=token_addr,   abi=erc20(token_addr)._abi)
+        token_c   = w3_submit.eth.contract(address=token_addr,   abi=purchasable(token_addr).abi)
+        payment_c = w3_submit.eth.contract(address=payment_addr, abi=erc20(payment_addr).abi)
+        token_erc = w3_submit.eth.contract(address=token_addr,   abi=erc20(token_addr).abi)
 
         deadline = int(time.time()) + 300
         min_pls  = int(expected_pls * (1 - MAX_SLIPPAGE))
@@ -538,7 +538,7 @@ class ArbEngine(EngineBase):
 
             # Step 1: Ensure WPLS balance (wrap PLS if needed)
             wpls_c = erc20(WPLS)
-            wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c.abi)
             wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
 
             if wpls_bal < trade_amount and not dry_run:
@@ -727,7 +727,7 @@ class ArbEngine(EngineBase):
 
             # Need WPLS balance — wrap PLS if needed
             wpls_c = erc20(WPLS)
-            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c.abi)
             wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
 
             if wpls_bal < opt_input:
@@ -822,7 +822,7 @@ class ArbEngine(EngineBase):
         start_token = Web3.to_checksum_address(path[0])
         if start_token.lower() == WPLS.lower():
             wpls_c = erc20(WPLS)
-            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_c_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c.abi)
             wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
             if wpls_bal < opt_input and not dry_run:
                 wrap_amount = opt_input - wpls_bal + 10**15
@@ -863,7 +863,7 @@ class ArbEngine(EngineBase):
             min_out = int(intermediate_amounts[i + 1] * (1 - MAX_SLIPPAGE))
 
             # Approve router for this token
-            tok_submit = w3_submit.eth.contract(address=token_in, abi=erc20(token_in)._abi)
+            tok_submit = w3_submit.eth.contract(address=token_in, abi=erc20(token_in).abi)
             r = approve_if_needed(tok_submit, router_addr, swap_amount, f"hop{i}", dry_run=dry_run)
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
