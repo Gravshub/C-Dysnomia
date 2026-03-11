@@ -26,7 +26,7 @@ load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 
 from Joystick.core.config import (
     JOEY_WALLET, AFFECTION, WM, WPLS, GIBS_LAU, GIBS_QING,
-    TGSV8, TGSV7, TGSV5,
+    TGSV8,
 )
 from Joystick.core.chain import (
     w3_read, erc20, safe, multicall,
@@ -47,8 +47,6 @@ def run_recon():
 
     # ── Step 0: Address check ─────────────────────────────────────────────
     print(f"\nTGSV8_ADDRESS: {TGSV8 or '(not set)'}")
-    print(f"TGSV7_ADDRESS: {TGSV7 or '(not set)'}")
-    print(f"TGSV5_ADDRESS: {TGSV5 or '(not set)'}")
     if not TGSV8:
         print("[FAIL] TGSV8_ADDRESS not set in .env — cannot proceed")
         sys.exit(1)

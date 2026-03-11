@@ -77,8 +77,6 @@ META_ABI      = load_abi("meta")
 CHEON_ABI     = load_abi("cheon")
 DSS_ABI       = load_abi("dss")
 MULTICALL3_ABI = load_abi("multicall3")
-TGSV7_ABI     = load_abi("tgsv7")
-TGSV5_ABI     = load_abi("tgsv5")
 TGSV8_ABI     = load_abi("tgsv8")
 
 # ── Contract factory helpers ──────────────────────────────────────────────
@@ -100,20 +98,6 @@ def factory_contract(address: str) -> Any:
 
 def pair_contract(address: str) -> Any:
     return w3_read.eth.contract(address=Web3.to_checksum_address(address), abi=PAIR_ABI)
-
-def tgsv7_contract(w3=None) -> Any:
-    from .config import TGSV7
-    if not TGSV7:
-        raise EnvironmentError("TGSV7_ADDRESS not set in .env")
-    w3 = w3 or w3_read
-    return w3.eth.contract(address=Web3.to_checksum_address(TGSV7), abi=TGSV7_ABI)
-
-def tgsv5_contract(w3=None) -> Any:
-    from .config import TGSV5
-    if not TGSV5:
-        raise EnvironmentError("TGSV5_ADDRESS not set in .env")
-    w3 = w3 or w3_read
-    return w3.eth.contract(address=Web3.to_checksum_address(TGSV5), abi=TGSV5_ABI)
 
 def tgsv8_contract(w3=None) -> Any:
     from .config import TGSV8

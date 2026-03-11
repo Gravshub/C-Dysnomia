@@ -80,13 +80,8 @@ NINEMM_FACTORY    = Web3.to_checksum_address("0xE26E7F6b5A43A667dBA42Cd9C829d5C7
 # ── Infrastructure ────────────────────────────────────────────────────────────
 MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA11")
 
-# TGSv5 address — set after deployment
-TGSV5 = os.getenv("TGSV5_ADDRESS", "")
-
-# TGSv7 address — Token Factory substrate
-TGSV7 = os.getenv("TGSV7_ADDRESS", "")
-
-# TGSv8 address — TGSv7 + mintWM + dual DEX
+# TGSv8 — Active execution layer (Token Factory + WM Minting + Dual DEX)
+# Supersedes TGSv5 (WM-only) and TGSv7 (no mintWM). See data/events/tgs_deprecation_log.json.
 TGSV8 = os.getenv("TGSV8_ADDRESS", "")
 
 # V4/V3 Personal/Index minters

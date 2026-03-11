@@ -1,0 +1,139 @@
+{
+  "event": "TGS Deprecation Cleanup",
+  "date": "2026-03-11",
+  "branch": "claude/test-razor-pulsechain-SVUrX",
+  "author": "Claude (Joystick session)",
+
+  "summary": "Consolidated Treasury Game Shark (TGS) contract references from three versions (v5, v7, v8) down to TGSv8 only. Removed dead code paths from the active runtime codebase while archiving legacy scripts and preserving all data files (ABIs, addresses, recon snapshots) for future reference.",
+
+  "contract_history": {
+    "TGSv5": {
+      "address": "0xeeB330d3419193b4E42507fA07CcF2fC681a6127",
+      "deployed_block": 25911970,
+      "deployed_date": "2026-03-01",
+      "deployed_session": "Session 5 (claude/optimize-pls-generation-OlVDG)",
+      "deploy_cost_pls": 816.4,
+      "purpose": "WM batch minter — calls WM.RHO() N times via mintWM(count). Single-purpose: no token factory, no DEX, no swap.",
+      "superseded_by": "TGSv8 (mintWM built-in)",
+      "status": "DEPRECATED"
+    },
+    "TGSv7": {
+      "address": "0x82E8B7e24bD9f0b389e94ddB8714B001a58e387d",
+      "deployed_block": 25938174,
+      "deployed_date": "2026-03-04",
+      "deployed_session": "Session 5b (claude/token-factory-tgsv7-mint-aoZ7G)",
+      "purpose": "Token Factory — createV4, createV3, mintTokens, claimTokens, deposit/withdraw, single DEX router. Did NOT include mintWM (required TGSv5 as external dependency).",
+      "superseded_by": "TGSv8 (all v7 functions + mintWM + dual DEX)",
+      "status": "SUPERSEDED"
+    },
+    "TGSv8": {
+      "address": "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32",
+      "deployed_block": 25943194,
+      "deployed_date": "2026-03-04",
+      "deployed_session": "Session 5b (claude/token-factory-tgsv7-mint-aoZ7G)",
+      "purpose": "Complete execution layer: Token Factory + WM batch minting + Dual DEX (V1+V2) + atomicArb + swapNativeForTokens + getReservesBoth. Self-contained — no external TGS dependency.",
+      "status": "ACTIVE"
+    }
+  },
+
+  "code_changes": {
+    "removed_from_runtime": [
+      {
+        "file": "scripts/Joystick/core/chain.py",
+        "what": "TGSV7_ABI and TGSV5_ABI load_abi() calls (lines 80-81)",
+        "reason": "No active code imports these. ABIs kept on disk at data/abis/tgsv5.json and data/abis/tgsv7.json."
+      },
+      {
+        "file": "scripts/Joystick/core/chain.py",
+        "what": "tgsv7_contract() and tgsv5_contract() factory functions (lines 104-116)",
+        "reason": "Only imported by archived tools/tgsv7_*.py scripts. No engine or bot code used them."
+      },
+      {
+        "file": "scripts/Joystick/core/config.py",
+        "what": "TGSV5 and TGSV7 env var definitions (lines 83-87)",
+        "reason": "No active engine reads these. TGSV8 is the sole active config variable."
+      },
+      {
+        "file": "scripts/Joystick/tools/tgsv8_recon.py",
+        "what": "Import of TGSV7/TGSV5 from config + print lines showing their addresses",
+        "reason": "tgsv8_recon.py should only check TGSv8 state."
+      }
+    ],
+    "archived": [
+      {
+        "from": "scripts/Joystick/tools/tgsv7_recon.py",
+        "to": "scripts/Joystick/tools/archive/tgsv7_recon.py",
+        "lines": 235,
+        "reason": "Superseded by tgsv8_recon.py"
+      },
+      {
+        "from": "scripts/Joystick/tools/tgsv7_bootstrap_mv.py",
+        "to": "scripts/Joystick/tools/archive/tgsv7_bootstrap_mv.py",
+        "lines": 178,
+        "reason": "TGSv8 has mintWM built-in — no need for separate TGSv5 bootstrap step"
+      },
+      {
+        "from": "scripts/Joystick/tools/tgsv7_mint_test.py",
+        "to": "scripts/Joystick/tools/archive/tgsv7_mint_test.py",
+        "lines": 496,
+        "reason": "Superseded by tgsv8_mint_test.py"
+      },
+      {
+        "from": "scripts/tx_deploy_tgsv5.py",
+        "to": "scripts/archive/tx_deploy_tgsv5.py",
+        "lines": 230,
+        "reason": "Historical deployment script — TGSv5 already deployed, not needed for future deploys"
+      },
+      {
+        "from": "agent/wm_minter.py",
+        "to": "agent/archive/wm_minter.py",
+        "lines": 400,
+        "reason": "Standalone TGSv5 WM minting agent — superseded by Engine 4 (token_factory.py) using TGSv8.mintWM()"
+      }
+    ],
+    "preserved_data": [
+      {
+        "file": "scripts/Joystick/data/abis/tgsv5.json",
+        "bytes": 538,
+        "reason": "ABI may be needed for future on-chain reads of the deployed TGSv5 contract"
+      },
+      {
+        "file": "scripts/Joystick/data/abis/tgsv7.json",
+        "bytes": 4900,
+        "reason": "ABI may be needed for future on-chain reads of the deployed TGSv7 contract"
+      },
+      {
+        "file": "scripts/Joystick/data/contracts.json",
+        "change": "Keys renamed from TGSV5/TGSV7 to TGSV5_DEPRECATED/TGSV7_DEPRECATED",
+        "reason": "Addresses preserved for audit trail — contracts are still on-chain"
+      },
+      {
+        "file": "data/tgsv7_recon.json",
+        "reason": "Historical deployment recon snapshot — read-only reference"
+      },
+      {
+        "file": "data/tgsv8_recon.json",
+        "reason": "Active deployment recon snapshot"
+      },
+      {
+        "file": "data/tgsv8_mint_wm_baseline.json",
+        "reason": "Gas baseline data for TGSv8.mintWM() calibration"
+      }
+    ]
+  },
+
+  "verification": {
+    "not_broken": [
+      "bot.py — never imported TGSV5/TGSV7",
+      "engines/arb.py — only uses TGSV8",
+      "engines/token_factory.py — only uses TGSV8",
+      "engines/beat.py, dss.py, lau.py — no TGS dependency",
+      "tests/test_razor_pulsechain.py — only uses TGSV8",
+      "tools/tgsv8_recon.py, tgsv8_mint_test.py, tgsv8_mint_wm_test.py — only use TGSV8"
+    ],
+    "intentionally_broken": [
+      "tools/archive/tgsv7_*.py — will fail to import removed symbols if run from archive. This is expected — they are archived, not active.",
+      "agent/archive/wm_minter.py — standalone TGSv5 agent, superseded by Engine 4"
+    ]
+  }
+}
