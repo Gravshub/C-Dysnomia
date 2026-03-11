@@ -53,6 +53,7 @@ from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_healt
 from .core.wallet import reset_nonce, fmt_pls, pls_balance
 from .core.executor import send_tx
 from .core.gas_guard import GasGuard
+from .core.gas_oracle import GasOracle
 from .core.simulator import SimulationFailed, GasTooHigh
 from .core.event_logger import events as _events
 from .core.strategist import Strategist
@@ -64,6 +65,7 @@ from .engines.lau import LAUEngine
 from .engines.treasury_sniper import TreasurySniperEngine
 from .engines.spine_runner import SpineRunnerEngine
 from .loops.terraform import TerraformLoop
+from .oracle.route_auditor import route_summary
 
 log = logging.getLogger("joystick")
 
@@ -78,10 +80,11 @@ class DysnomiaBot:
     """
 
     def __init__(self, dry_run: bool = False, interactive: bool = False):
-        self.dry_run   = dry_run
-        self.cycle     = 0
-        self.gas_guard = GasGuard()
-        self.delay     = AdaptiveDelay()
+        self.dry_run    = dry_run
+        self.cycle      = 0
+        self.gas_guard  = GasGuard()
+        self.gas_oracle = GasOracle()
+        self.delay      = AdaptiveDelay()
 
         # Engine priority is determined by Strategist scoring each cycle.
         # List order only matters as a tiebreaker within equal scores.
@@ -159,6 +162,24 @@ class DysnomiaBot:
         )
         _events.log_balance_snapshot(snap)
 
+        # 0b. Gas oracle update (rolling window)
+        gas_price = self.gas_oracle.update()
+        gas_status = self.gas_oracle.status()
+        log.info(
+            "Gas: %.0f Gwei (avg=%.0f, trend=%s, ceil=%.0f)",
+            gas_status["current_gwei"], gas_status["average_gwei"],
+            gas_status["trend"], gas_status["ceiling_gwei"],
+        )
+
+        # Gas above ceiling — raise GasTooHigh so run() uses the existing
+        # adaptive delay path (after_gas_high → 2x backoff, not after_skip
+        # which would cause exponential backoff every cycle)
+        if self.gas_oracle.is_above_ceiling():
+            raise GasTooHigh(
+                f"Gas {gas_status['current_gwei']:.0f} Gwei > "
+                f"ceiling {gas_status['ceiling_gwei']:.0f}"
+            )
+
         # 1. Gas guard
         if not self.gas_guard.check():
             _events.log("bot.gas_guard.low", success=False, data={"pls_wei": snap["pls"]})
@@ -183,6 +204,10 @@ class DysnomiaBot:
         cycle_success = True
 
         cycle_outcome = "skip"
+
+        # Advisory: log if gas is falling (non-urgent engines may benefit from waiting)
+        if self.gas_oracle.should_wait():
+            log.info("GasOracle: gas is falling — non-urgent engines may benefit from waiting")
 
         if rec.engine is None or not rec.approved:
             reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
@@ -349,6 +374,11 @@ class DysnomiaBot:
         # RPC health
         print(f"  -- RPC Health --")
         rpc_health()
+        # Route audit
+        print(route_summary())
+        print()
+        print(f"  Gas Oracle: {self.gas_oracle}")
+        print()
         # P&L summary table from Strategist
         print(self.strategist.summary())
         print()
