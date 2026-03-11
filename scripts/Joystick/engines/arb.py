@@ -1,15 +1,3 @@
-"""
-arb.py — Engine 1: Multi-Mode Arbitrage (RAZOR)
-
-Three arb modes, ranked by ROI each cycle:
-  Mode 1: PurchaseArb — Buy tokens at Dysnomia market rate, sell on PulseX
-  Mode 2: CrossDexArb — Same token on V1 vs V2, exploit spread via router
-  Mode 3: CrossPairArb — Graph-based triangle arb across connected pools
-
-is_ready():  Any mode viable (AFFECTION ≥ 1 OR WPLS balance for graph arb)
-simulate():  Run all modes, pick best opportunity across all three
-execute():   Dispatch to the right execution path based on mode
-"""
 import json
 import os
 import time
@@ -21,8 +9,10 @@ from .base import EngineBase, EngineResult
 from ..core.config import (
     JOEY_WALLET, AFFECTION, WPLS,
     PULSEX_V1_ROUTER, PULSEX_V2_ROUTER,
+    PULSEX_V1_FACTORY, PULSEX_V2_FACTORY,
     MAX_SLIPPAGE, RESERVE_CACHE_TTL,
-    GRAPH_ARB_MIN_PROFIT_PLS,
+    GRAPH_ARB_MIN_PROFIT_PLS, TGSV8,
+    HUB_TOKENS, SEED_LAUS,
 )
 from ..core.chain import erc20, purchasable, router_contract, safe, w3_submit, w3_read
 from ..core.executor import send_tx, approve_if_needed
@@ -35,7 +25,12 @@ log = logging.getLogger(__name__)
 
 # Gas estimates per mode
 PURCHASE_GAS_ESTIMATE = 400_000   # approve×2 + purchase + swap
+CROSS_DEX_GAS_ESTIMATE = 350_000  # deposit + atomicArb + withdraw via TGSv8
 CROSS_PAIR_GAS_ESTIMATE = 500_000 # 3-hop swap via router
+
+# Mode 2 thresholds
+CROSS_DEX_MIN_SPREAD_BPS = 50     # 0.5% minimum spread to consider (50 basis points)
+CROSS_DEX_TEST_AMOUNT = 10 * 10**18  # 10 tokens for spread detection
 
 # Event log file for RAZOR
 _JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,6 +69,7 @@ class ArbEngine(EngineBase):
         """
         Ready if ANY mode is viable:
           - Purchase mode: AFFECTION balance >= 1
+          - CrossDex mode: TGSv8 deployed + PLS/WPLS > 10 (for deposit+arb)
           - CrossPair mode: PLS balance > 0 (WPLS wrapping handled by router)
         """
         # Check AFFECTION for Purchase mode
@@ -82,7 +78,7 @@ class ArbEngine(EngineBase):
         if aff_bal >= 10**18:
             return True
 
-        # Check PLS for CrossPair mode (need some PLS to swap)
+        # Check PLS for CrossDex / CrossPair modes
         pls_bal = w3_read.eth.get_balance(JOEY_WALLET)
         if pls_bal >= 10 * 10**18:  # At least 10 PLS
             return True
@@ -108,6 +104,14 @@ class ArbEngine(EngineBase):
                 best_opp = opp
         except Exception as exc:
             log.debug("Purchase mode scan failed: %s", exc)
+
+        # Mode 2: Cross-DEX spread via TGSv8 atomicArb
+        try:
+            opp = self._simulate_cross_dex(gas_price)
+            if opp and (best_opp is None or opp["profit_wei"] > best_opp["profit_wei"]):
+                best_opp = opp
+        except Exception as exc:
+            log.debug("CrossDex mode scan failed: %s", exc)
 
         # Mode 3: Cross-pair graph arb
         try:
@@ -152,6 +156,181 @@ class ArbEngine(EngineBase):
             "gas_wei": gas_cost_wei,
             **top,
         }
+
+    def _simulate_cross_dex(self, gas_price: int) -> dict | None:
+        """
+        Mode 2: V1↔V2 cross-DEX spread via TGSv8.
+
+        Uses TGSv8.getBestAmountsOut() to find tokens where V1 and V2 prices
+        diverge, then simulates atomicArb() via eth_call to verify profitability.
+
+        Requires TGSv8 deployed and TGSV8_ADDRESS set in .env.
+        """
+        if not TGSV8:
+            log.debug("CrossDex: TGSv8 not configured — skipping")
+            return None
+
+        from ..core.chain import tgsv8_contract, factory_contract
+
+        tgs = tgsv8_contract()  # read-only instance
+        gas_cost_wei = CROSS_DEX_GAS_ESTIMATE * gas_price
+
+        # Collect candidate tokens: all tokens that might have pairs on BOTH DEXes
+        candidates = self._cross_dex_candidates()
+        if not candidates:
+            log.debug("CrossDex: no dual-DEX candidates found")
+            return None
+
+        best = None
+
+        for token_addr, label in candidates:
+            try:
+                # Query reserves on both DEXes via TGSv8.getReservesBoth()
+                v1rA, v1rB, v2rA, v2rB = safe(
+                    tgs, "getReservesBoth", token_addr, WPLS
+                ) or (0, 0, 0, 0)
+
+                # Need liquidity on BOTH DEXes
+                if v1rA == 0 or v1rB == 0 or v2rA == 0 or v2rB == 0:
+                    continue
+
+                # Compute spot prices (WPLS per token) on each DEX
+                # price = reserveWPLS / reserveToken
+                v1_price = v1rB / v1rA  # WPLS per token on V1
+                v2_price = v2rB / v2rA  # WPLS per token on V2
+
+                if v1_price == 0 or v2_price == 0:
+                    continue
+
+                # Calculate spread in basis points
+                spread_bps = abs(v1_price - v2_price) / min(v1_price, v2_price) * 10000
+
+                if spread_bps < CROSS_DEX_MIN_SPREAD_BPS:
+                    continue
+
+                # Determine direction: buy on cheaper DEX, sell on expensive DEX
+                # DEX enum: 0=V1, 1=V2
+                if v1_price < v2_price:
+                    buy_dex, sell_dex = 0, 1  # Buy V1 (cheaper), sell V2
+                    buy_reserves = (v1rA, v1rB)
+                    sell_reserves = (v2rA, v2rB)
+                else:
+                    buy_dex, sell_dex = 1, 0  # Buy V2 (cheaper), sell V1
+                    buy_reserves = (v2rA, v2rB)
+                    sell_reserves = (v1rA, v1rB)
+
+                # Optimal input: cap at 5% of the smaller pool's WPLS reserve
+                # to limit price impact
+                smaller_wpls_reserve = min(v1rB, v2rB)
+                max_input = smaller_wpls_reserve * 5 // 100
+
+                # Also cap at Joey's available WPLS/PLS
+                wpls_bal = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
+                pls_bal = w3_read.eth.get_balance(JOEY_WALLET)
+                available = wpls_bal + pls_bal - gas_cost_wei
+                if available <= 0:
+                    continue
+                trade_amount = min(max_input, available)
+                if trade_amount < 10**16:  # At least 0.01 WPLS
+                    continue
+
+                # Simulate profit: buy tokenOut with WPLS, sell tokenOut back to WPLS
+                # Step 1: WPLS → token on buy_dex (Uniswap v2 formula)
+                buy_r_in = buy_reserves[1]   # WPLS reserve on buy side
+                buy_r_out = buy_reserves[0]  # Token reserve on buy side
+                tokens_bought = (buy_r_out * trade_amount * 997) // (buy_r_in * 1000 + trade_amount * 997)
+
+                if tokens_bought == 0:
+                    continue
+
+                # Step 2: token → WPLS on sell_dex
+                sell_r_in = sell_reserves[0]   # Token reserve on sell side
+                sell_r_out = sell_reserves[1]  # WPLS reserve on sell side
+                wpls_received = (sell_r_out * tokens_bought * 997) // (sell_r_in * 1000 + tokens_bought * 997)
+
+                profit_wei = wpls_received - trade_amount - gas_cost_wei
+                if profit_wei <= 0:
+                    continue
+
+                log.debug(
+                    "CrossDex: %s spread=%.0fbps input=%.4f profit=%.4f PLS (buy=%s sell=%s)",
+                    label, spread_bps, trade_amount / 1e18, profit_wei / 1e18,
+                    "V1" if buy_dex == 0 else "V2",
+                    "V1" if sell_dex == 0 else "V2",
+                )
+
+                if best is None or profit_wei > best["profit_wei"]:
+                    best = {
+                        "mode": "cross_dex",
+                        "profit_wei": profit_wei,
+                        "gas_wei": gas_cost_wei,
+                        "token": token_addr,
+                        "label": label,
+                        "trade_amount": trade_amount,
+                        "buy_dex": buy_dex,
+                        "sell_dex": sell_dex,
+                        "spread_bps": spread_bps,
+                        "tokens_bought": tokens_bought,
+                        "wpls_received": wpls_received,
+                    }
+
+            except Exception as exc:
+                log.debug("CrossDex scan error for %s: %s", label, exc)
+                continue
+
+        return best
+
+    def _cross_dex_candidates(self) -> list[tuple[str, str]]:
+        """
+        Build list of (token_address, label) for tokens likely to have
+        pairs on both V1 and V2 DEXes.
+
+        Sources: HUB_TOKENS + SEED_LAUS + scan_tokens() cached results.
+        """
+        from ..core.chain import factory_contract
+
+        seen = set()
+        candidates = []
+
+        # Start with hub tokens and seed LAUs
+        token_list = [(label, addr) for label, addr in SEED_LAUS]
+        token_list += [("HUB", addr) for addr in HUB_TOKENS if addr.lower() != WPLS.lower()]
+
+        # Add tokens from scanner cache if available
+        try:
+            cached = scan_tokens()
+            for rec in cached:
+                addr = rec.get("address", "")
+                if addr:
+                    token_list.append((rec.get("label", rec.get("symbol", "?")), addr))
+        except Exception:
+            pass
+
+        # Filter to tokens with pairs on BOTH V1 and V2
+        v1_factory = factory_contract(PULSEX_V1_FACTORY)
+        v2_factory = factory_contract(PULSEX_V2_FACTORY)
+
+        for label, addr in token_list:
+            addr_lower = addr.lower()
+            if addr_lower in seen or addr_lower == WPLS.lower():
+                continue
+            seen.add(addr_lower)
+
+            addr_cs = Web3.to_checksum_address(addr)
+
+            # Quick check: does this token have pairs on BOTH factories?
+            v1_pair = safe(v1_factory, "getPair", addr_cs, WPLS)
+            if not v1_pair or v1_pair == "0x" + "0" * 40:
+                continue
+
+            v2_pair = safe(v2_factory, "getPair", addr_cs, WPLS)
+            if not v2_pair or v2_pair == "0x" + "0" * 40:
+                continue
+
+            candidates.append((addr_cs, label))
+
+        log.debug("CrossDex: %d dual-DEX candidates found", len(candidates))
+        return candidates
 
     def _simulate_cross_pair(self, gas_price: int) -> dict | None:
         """Mode 3: Graph-based triangle arb scan."""
@@ -217,6 +396,8 @@ class ArbEngine(EngineBase):
 
         if mode == "purchase":
             result = self._execute_purchase(opp, dry_run)
+        elif mode == "cross_dex":
+            result = self._execute_cross_dex(opp, dry_run)
         elif mode == "cross_pair":
             result = self._execute_cross_pair(opp, dry_run)
         else:
@@ -312,6 +493,149 @@ class ArbEngine(EngineBase):
 
         except (SimulationFailed, AssertionError, Exception) as exc:
             log.error("Purchase arb execute failed: %s", exc)
+            return EngineResult(
+                success=False, profit_wei=0, gas_wei=gas_spent,
+                tx_hashes=tx_hashes, notes=str(exc),
+            )
+
+    def _execute_cross_dex(self, opp: dict, dry_run: bool) -> EngineResult:
+        """
+        Mode 2: Cross-DEX arbitrage via TGSv8.atomicArb().
+
+        Flow:
+          1. Wrap PLS → WPLS if needed
+          2. Approve TGSv8 to pull WPLS
+          3. Deposit WPLS into TGSv8 working balance
+          4. Call TGSv8.atomicArb(WPLS, token, amount, buyDex, sellDex, minProfit)
+          5. Withdraw profit (WPLS) from TGSv8
+          6. Optionally unwrap WPLS → PLS
+        """
+        from ..core.chain import tgsv8_contract
+        from ..core import wallet
+
+        token_addr = opp["token"]
+        trade_amount = opp["trade_amount"]
+        buy_dex = opp["buy_dex"]
+        sell_dex = opp["sell_dex"]
+        label = opp.get("label", "?")
+        expected_profit = opp["profit_wei"]
+
+        tgs_addr = Web3.to_checksum_address(TGSV8)
+        tgs_read = tgsv8_contract()
+        tgs_write = tgsv8_contract(w3=w3_submit)
+
+        tx_hashes = []
+        gas_spent = 0
+
+        try:
+            log.info(
+                "CrossDex Arb: %s — %.4f WPLS, buy=%s sell=%s, spread=%.0fbps",
+                label, trade_amount / 1e18,
+                "V1" if buy_dex == 0 else "V2",
+                "V1" if sell_dex == 0 else "V2",
+                opp.get("spread_bps", 0),
+            )
+
+            # Step 1: Ensure WPLS balance (wrap PLS if needed)
+            wpls_c = erc20(WPLS)
+            wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c._abi)
+            wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
+
+            if wpls_bal < trade_amount and not dry_run:
+                wrap_amount = trade_amount - wpls_bal + 10**15
+                log.info("  Wrapping %.4f PLS → WPLS", wrap_amount / 1e18)
+                nonce = wallet.next_nonce()
+                tx = {
+                    "to": WPLS,
+                    "from": JOEY_WALLET,
+                    "value": wrap_amount,
+                    "gas": 50_000,
+                    "gasPrice": w3_submit.eth.gas_price,
+                    "nonce": nonce,
+                    "chainId": 369,
+                }
+                signed = wallet.account.sign_transaction(tx)
+                tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+                receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                assert receipt["status"] == 1, "WPLS wrap failed"
+                tx_hashes.append(tx_hash.hex())
+                gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Step 2: Approve TGSv8 to pull WPLS
+            r = approve_if_needed(wpls_submit, tgs_addr, trade_amount, "WPLS→TGSv8", dry_run=dry_run)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Step 3: Deposit WPLS into TGSv8 working balance
+            r = send_tx(
+                tgs_write.functions.deposit(WPLS, trade_amount),
+                f"Deposit {trade_amount / 1e18:.4f} WPLS into TGSv8",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Step 4: TGSv8 needs to approve routers for the tokens it will swap
+            # atomicArb handles internal approvals — the contract manages this
+
+            # Step 5: Call atomicArb() — atomic: reverts if profit < minProfit
+            min_profit = max(0, int(expected_profit * 0.8))  # 80% of expected as safety
+            r = send_tx(
+                tgs_write.functions.atomicArb(
+                    WPLS,           # tokenIn
+                    token_addr,     # tokenOut
+                    trade_amount,   # amountIn
+                    buy_dex,        # buyOn (DEX enum: 0=V1, 1=V2)
+                    sell_dex,       # sellOn
+                    min_profit,     # minProfit
+                ),
+                f"atomicArb {label} ({trade_amount / 1e18:.4f} WPLS)",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Step 6: Withdraw all WPLS from TGSv8 (principal + profit)
+            if not dry_run:
+                tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
+                if tgs_wpls_bal > 0:
+                    r = send_tx(
+                        tgs_write.functions.withdraw(WPLS, tgs_wpls_bal),
+                        f"Withdraw {tgs_wpls_bal / 1e18:.4f} WPLS from TGSv8",
+                        dry_run=dry_run,
+                    )
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            log.info("CrossDex arb complete: %s. TXs: %d", label, len(tx_hashes))
+            return EngineResult(
+                success=True,
+                profit_wei=expected_profit,
+                gas_wei=gas_spent,
+                tx_hashes=tx_hashes,
+                notes=f"CrossDexArb: {label} buy={'V1' if buy_dex == 0 else 'V2'} sell={'V1' if sell_dex == 0 else 'V2'}",
+            )
+
+        except (SimulationFailed, AssertionError, Exception) as exc:
+            log.error("CrossDex arb execute failed: %s", exc)
+            # Attempt to recover any WPLS left in TGSv8
+            try:
+                if not dry_run:
+                    tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
+                    if tgs_wpls_bal > 0:
+                        log.info("  Recovering %.4f WPLS from TGSv8", tgs_wpls_bal / 1e18)
+                        send_tx(
+                            tgs_write.functions.withdraw(WPLS, tgs_wpls_bal),
+                            "Recovery withdraw",
+                            dry_run=False,
+                        )
+            except Exception as recovery_exc:
+                log.error("  Recovery withdraw also failed: %s", recovery_exc)
+
             return EngineResult(
                 success=False, profit_wei=0, gas_wei=gas_spent,
                 tx_hashes=tx_hashes, notes=str(exc),
@@ -570,18 +894,35 @@ class ArbEngine(EngineBase):
 
 if __name__ == "__main__":
     import argparse, logging as _logging
-    _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
-    parser = argparse.ArgumentParser(description="Arb Engine — RAZOR multi-mode")
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--force-scan", action="store_true")
-    parser.add_argument("--mode", choices=["all", "purchase", "cross_pair"], default="all")
+
+    parser = argparse.ArgumentParser(
+        description="RAZOR — Engine 1 multi-mode arbitrage",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--dry-run",     action="store_true", help="simulate only, no TX sent")
+    parser.add_argument("--execute",     action="store_true", help="live execution (sends TX!)")
+    parser.add_argument("--force-scan",  action="store_true", help="bypass token discovery cache")
+    parser.add_argument("--mode",        choices=["all", "purchase", "cross_dex", "cross_pair"],
+                        default="all",   help="restrict to one arb mode (default: all)")
+    parser.add_argument("--status",      action="store_true", help="print engine readiness and exit")
+    parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     args = parser.parse_args()
+
+    _logging.basicConfig(
+        level=_logging.DEBUG if args.verbose else _logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(message)s",
+    )
 
     if args.force_scan:
         from ..oracle.scanner import invalidate_cache
         invalidate_cache()
 
     engine = ArbEngine()
+
+    if args.status:
+        print(engine.status_line())
+        raise SystemExit(0)
+
     print(f"Ready: {engine.is_ready()}")
     try:
         profit, gas = engine.simulate()
@@ -589,8 +930,48 @@ if __name__ == "__main__":
         mode = opp.get("mode", "?") if opp else "?"
         print(f"Top opportunity [{mode}]: profit={profit/1e18:.4f} PLS  gas={gas/1e18:.4f} PLS")
         print(f"ROI: {engine.roi():.2f}x")
-        if args.dry_run:
+
+        if opp:
+            for k, v in opp.items():
+                if k not in ("mode", "profit_wei", "gas_wei", "cycle"):
+                    print(f"  {k}: {v}")
+
+        if args.execute:
+            result = engine.execute(dry_run=False)
+            print(f"LIVE result: success={result.success} net={result.net_pls:.4f} PLS")
+        elif args.dry_run:
             result = engine.execute(dry_run=True)
-            print(f"Dry-run result: {result}")
+            print(f"Dry-run result: success={result.success} notes={result.notes}")
+
     except SimulationFailed as e:
         print(f"No opportunity: {e}")
+
+
+# ── Module Documentation ─────────────────────────────────────────────────────
+#
+# arb.py — Engine 1: Multi-Mode Arbitrage (RAZOR)
+#
+# Three arb modes, ranked by ROI each cycle:
+#   Mode 1: PurchaseArb  — Buy tokens at Dysnomia market rate, sell on PulseX
+#   Mode 2: CrossDexArb  — Same token on V1 vs V2, exploit spread via TGSv8.atomicArb()
+#   Mode 3: CrossPairArb — Graph-based triangle arb across connected pools
+#
+# is_ready():  Any mode viable (AFFECTION >= 1 OR PLS >= 10 for cross-DEX/pair)
+# simulate():  Run all modes, pick best opportunity across all three
+# execute():   Dispatch to the right execution path based on mode
+#
+# Mode 2 flow (TGSv8 substrate):
+#   1. _cross_dex_candidates()     — find tokens with BOTH V1+V2 WPLS pairs
+#   2. TGSv8.getReservesBoth()     — read reserves from both DEXes in one call
+#   3. Compute spread (bps)        — filter >= 50bps (CROSS_DEX_MIN_SPREAD_BPS)
+#   4. Uniswap v2 formula          — simulate buy on cheaper, sell on expensive
+#   5. TGSv8.atomicArb()           — atomic execution, reverts if unprofitable
+#   6. deposit(WPLS) beforehand    — withdraw(WPLS) after for principal + profit
+#
+# CLI:
+#   python -m scripts.Joystick.engines.arb --status
+#   python -m scripts.Joystick.engines.arb --dry-run
+#   python -m scripts.Joystick.engines.arb --execute
+#   python -m scripts.Joystick.engines.arb --mode cross_dex --dry-run -v
+#   python -m scripts.Joystick.engines.arb --force-scan --dry-run
+# ─────────────────────────────────────────────────────────────────────────────
