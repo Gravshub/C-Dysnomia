@@ -1,12 +1,13 @@
 """
-chain.py — Dual-RPC connections, ABI loader, contract factories, Multicall3 helper.
+chain.py — RPC pools, ABI loader, contract factories, Multicall3 helper.
 
 ABIs are stored as JSON in data/abis/ and loaded via load_abi().
-Patterns established here match the existing scripts exactly:
-  - w3_read  → pulsechainstats.com (less congested for queries)
-  - w3_submit → pulsechain.com     (reliable for TX submission)
-  - safe()   → error-tolerant view call (returns None on failure)
-  - multicall() → batch N reads into ONE RPC round-trip via Multicall3
+
+RPC connections use health-scored provider pools (rpc_provider.py):
+  - _read_pool   → rotates across G4MM4, PulseChain, PublicNode, PCStats
+  - _submit_pool → Tier 1 only (PulseChain, G4MM4, PublicNode) for TX privacy
+  - safe()       → auto-retry + failover on every view call
+  - multicall()  → batch N reads via Multicall3 with pool failover
 """
 import json
 import os
@@ -15,12 +16,12 @@ from typing import Any
 from web3 import Web3
 
 from .config import (
-    SUBMIT_RPC, READ_RPC,
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, GIBS_QING,
     FORNAX, FOMALHAUTE, CHO, WM,
     PULSEX_V1_ROUTER, PULSEX_V1_FACTORY, PULSEX_V2_FACTORY, NINEMM_FACTORY,
     MULTICALL3,
 )
+from .rpc_provider import build_default_pools, RPCAllProvidersDown
 
 log = logging.getLogger(__name__)
 
@@ -35,13 +36,34 @@ def load_abi(name: str) -> list:
         return json.load(f)
 
 
-# ── RPC connections ───────────────────────────────────────────────────────
-w3_submit = Web3(Web3.HTTPProvider(SUBMIT_RPC, request_kwargs={"timeout": 60}))
-w3_read   = Web3(Web3.HTTPProvider(READ_RPC,   request_kwargs={"timeout": 30}))
+# ── RPC pools ──────────────────────────────────────────────────────────────
+_read_pool, _submit_pool = build_default_pools()
 
-if not w3_read.is_connected():
-    log.warning("Read RPC unavailable — falling back to submit RPC for reads")
-    w3_read = w3_submit
+# Backward compat aliases — point at the best current provider.
+# For critical paths, use _read_pool.call() or _submit_pool.send_raw() directly.
+w3_read   = _read_pool.get_w3()
+w3_submit = _submit_pool.get_w3()
+
+
+def get_read_pool():
+    """Access the read RPCPool for pool.call() usage."""
+    return _read_pool
+
+
+def get_submit_pool():
+    """Access the submit RPCPool for pool.send_raw() usage."""
+    return _submit_pool
+
+
+def rpc_health() -> None:
+    """Print health report for all RPC providers."""
+    for label, pool in [("READ POOL", _read_pool), ("SUBMIT POOL", _submit_pool)]:
+        print(f"\n  -- {label} --")
+        for r in pool.health_report():
+            status = "OK" if r["healthy"] else "DOWN"
+            print(f"    [{status:4s}] {r['name']:12s}  {r['latency_ms']:6.0f}ms  "
+                  f"err={r['error_rate']}%  score={r['score']}")
+    print()
 
 # ── ABIs (loaded from JSON) ──────────────────────────────────────────────
 ERC20_ABI     = load_abi("erc20")
@@ -99,11 +121,18 @@ def tgsv8_contract(w3=None) -> Any:
     w3 = w3 or w3_read
     return w3.eth.contract(address=Web3.to_checksum_address(TGSV8), abi=TGSV8_ABI)
 
-# ── safe() — error-tolerant view call ────────────────────────────────────
+# ── safe() — error-tolerant view call with RPC failover ─────────────────
 def safe(contract, fn: str, *args) -> Any | None:
-    """Call a view function; return None on any error (no raise)."""
+    """Call a view function with automatic retry + RPC failover.
+    Returns None on any error (contract reverts or all RPCs down)."""
+    def _do_call(w3):
+        c = w3.eth.contract(address=contract.address, abi=contract.abi)
+        return getattr(c.functions, fn)(*args).call()
     try:
-        return getattr(contract.functions, fn)(*args).call()
+        return _read_pool.call(_do_call)
+    except RPCAllProvidersDown:
+        log.error("All read RPCs down for safe(%s.%s)", contract.address[:10], fn)
+        return None
     except Exception:
         return None
 
@@ -122,8 +151,6 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
         ])
         aff_bal, gibs_bal = results
     """
-    mc = w3_read.eth.contract(address=MULTICALL3, abi=MULTICALL3_ABI)
-
     encoded_calls = []
     fn_objects = []
     for contract, fn_name, args in calls:
@@ -135,8 +162,12 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
             "callData": fn._encode_transaction_data(),
         })
 
+    def _do_multicall(w3):
+        mc = w3.eth.contract(address=MULTICALL3, abi=MULTICALL3_ABI)
+        return mc.functions.aggregate3(encoded_calls).call()
+
     try:
-        results = mc.functions.aggregate3(encoded_calls).call()
+        results = _read_pool.call(_do_multicall)
     except Exception as exc:
         log.warning("Multicall3 failed (%s) — falling back to individual calls", exc)
         return [safe(c, fn, *a) for c, fn, a in calls]
@@ -175,7 +206,7 @@ def snapshot_balances() -> dict:
         (cho_c,  "balanceOf", [GIBS_LAU]),
     ])
 
-    pls = w3_read.eth.get_balance(JOEY_WALLET)
+    pls = _read_pool.call(lambda w3: w3.eth.get_balance(JOEY_WALLET))
 
     return {
         "pls":        pls,

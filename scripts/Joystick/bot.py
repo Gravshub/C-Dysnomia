@@ -49,7 +49,7 @@ from .core.config import (
     JOEY_WALLET, AFFECTION, WPLS, PULSEX_V1_ROUTER,
     CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR,
 )
-from .core.chain import snapshot_balances, router_contract, w3_submit
+from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_health, get_read_pool
 from .core.wallet import reset_nonce, fmt_pls, pls_balance
 from .core.executor import send_tx
 from .core.gas_guard import GasGuard
@@ -241,7 +241,12 @@ class DysnomiaBot:
                         notes=result.notes,
                     )
 
-        # 6. Cycle summary event
+        # 6. Periodic RPC health log (every 100 cycles)
+        if self.cycle > 0 and self.cycle % 100 == 0:
+            for r in get_read_pool().health_report():
+                log.info("RPC[read] %s: %sms err=%s%%", r["name"], r["latency_ms"], r["error_rate"])
+
+        # 7. Cycle summary event
         _events.log_cycle(
             cycle_num=self.cycle,
             balances=snap,
@@ -297,6 +302,9 @@ class DysnomiaBot:
         for lp in self.loops:
             print(f"  {lp.status_line()}")
         print()
+        # RPC health
+        print(f"  -- RPC Health --")
+        rpc_health()
         # P&L summary table from Strategist
         print(self.strategist.summary())
         print()
@@ -351,7 +359,16 @@ def main() -> None:
                         help="Run only the LAU engine (ABUPRU sequence)")
     parser.add_argument("--log-status", action="store_true",
                         help="Print event log statistics and recent events")
+    parser.add_argument("--rpc-status", action="store_true",
+                        help="Print RPC provider health and exit")
     args = parser.parse_args()
+
+    if args.rpc_status:
+        print(f"\n{'━'*60}")
+        print(f"  Joystick RPC Provider Health")
+        print(f"{'━'*60}")
+        rpc_health()
+        return
 
     bot = DysnomiaBot(dry_run=args.dry_run, interactive=args.interactive)
 

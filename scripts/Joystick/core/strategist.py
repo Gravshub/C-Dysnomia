@@ -520,10 +520,10 @@ class Strategist:
         )
 
         # Goal progress
-        from .chain import w3_read
+        from .chain import get_read_pool
         from .config import JOEY_WALLET
         try:
-            pls_bal = w3_read.eth.get_balance(JOEY_WALLET) / 1e18
+            pls_bal = get_read_pool().call(lambda w3: w3.eth.get_balance(JOEY_WALLET)) / 1e18
         except Exception:
             pls_bal = 0.0
         pct = (pls_bal / VALIDATOR_GOAL_PLS) * 100 if VALIDATOR_GOAL_PLS > 0 else 0
