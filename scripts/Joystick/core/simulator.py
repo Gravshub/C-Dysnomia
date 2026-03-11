@@ -15,7 +15,6 @@ from typing import Any
 from web3.exceptions import ContractLogicError
 
 from .config import JOEY_WALLET
-from .chain import w3_read
 
 log = logging.getLogger(__name__)
 
