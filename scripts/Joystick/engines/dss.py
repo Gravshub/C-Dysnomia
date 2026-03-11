@@ -108,7 +108,7 @@ class DSSEngine(EngineBase):
     def execute(self, dry_run: bool = False) -> EngineResult:
         """chatAndClaimWithMultiplier → receive GIBS → swap to native PLS."""
         dss_c   = w3_submit.eth.contract(address=DSS,     abi=DSS_ABI)
-        gibs_c  = w3_submit.eth.contract(address=GIBS_LAU, abi=erc20(GIBS_LAU)._abi)
+        gibs_c  = w3_submit.eth.contract(address=GIBS_LAU, abi=erc20(GIBS_LAU).abi)
         router  = router_contract(w3=w3_submit)
         deadline = int(time.time()) + 300
 
