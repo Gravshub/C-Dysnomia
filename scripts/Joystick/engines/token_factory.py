@@ -2,7 +2,8 @@
 token_factory.py — Engine 4: AFFECTION Generate() gas-mint + WM Batch Minter + Token Mint/Sell
 
 Dual-mode token factory with priority:
-  1. AFFECTION Generate() — gas-only mint via Multi AFFECTION contract (262% ROI)
+  1. AFFECTION Generate() — DISABLED: _mintToCap mints to AFFECTION contract,
+     not caller. Needs multiBuyWith() + payment tokens or custom contract.
   2. Token mint/sell       — mint existing tokens via parent → sell on DEX
   3. WM batch mint         — strategic WM accumulation via TGSv8.mintWM(N)
 
@@ -194,13 +195,18 @@ class TokenFactoryEngine(EngineBase):
     AFF_MIN_ROI_PCT = 20.0          # skip if ROI below this
     AFF_MAX_POOL_IMPACT_PCT = 2.0   # max % of pool reserves to sell in one TX
 
-    # TODO: Path B — Deploy our own MultiAffection contract for:
-    #   - Guaranteed AFF delivery (explicit transfer instead of tx.origin reliance)
-    #   - multiGenerateAndSwap() — atomic mint+sell in one TX, no MEV sandwich risk
-    #   - Custom batch sizes beyond Helios's contract gas limits
-    #   - Integration with TGSv8 working balance for atomic routes
-    #   Currently using Path A (Helios's deployed contract at 0xCF13...).
-    #   Test confirmed AFF goes to tx.origin (Joey), so Path A works.
+    # ── CRITICAL FINDING (block 26,007,782) ──────────────────────────────
+    # multiGenerate() is NOT profitable standalone:
+    #   - _mintToCap() mints AFF to address(this) = AFFECTION contract itself
+    #   - multiGenerate() just calls Generate() N times — AFF stays in contract
+    #   - Only multiBuyWith() transfers AFF to msg.sender, but requires payment tokens
+    #   - At current prices, payment token cost exceeds AFF DEX value
+    #
+    # AFF Generate mode is DISABLED until one of:
+    #   a) multiBuyWith() path implemented with payment token acquisition
+    #   b) Custom contract deployed that calls Generate() + transfers AFF out
+    #   c) Payment token prices drop enough for multiBuyWith() to be profitable
+    AFF_GENERATE_ENABLED = False
 
     def __init__(self):
         super().__init__()
@@ -235,13 +241,14 @@ class TokenFactoryEngine(EngineBase):
         return self._multi_aff
 
     def is_ready(self) -> bool:
-        # AFF Generate mode works independently of TGSv8
-        try:
-            multi = self._get_multi_aff()
-            if multi is not None:
-                return True
-        except Exception:
-            pass
+        # AFF Generate mode works independently of TGSv8 (when enabled)
+        if self.AFF_GENERATE_ENABLED:
+            try:
+                multi = self._get_multi_aff()
+                if multi is not None:
+                    return True
+            except Exception:
+                pass
 
         if not TGSV8:
             log.debug("TokenFactory: TGSV8_ADDRESS not set")
@@ -374,7 +381,16 @@ class TokenFactoryEngine(EngineBase):
             batch, aff_minted, aff_minted_wei, gas_est, gas_cost_wei,
             gross_output_wei, net_profit_wei, roi_pct, sell_dex
         Or None if not profitable.
+
+        NOTE: Currently disabled — Generate() mints AFF to the AFFECTION
+        contract itself (via _mintToCap), not to the caller. multiGenerate()
+        alone does not deliver AFF to Joey's EOA. Requires multiBuyWith()
+        with a payment token, or a custom contract with explicit transfer.
+        See AFF_GENERATE_ENABLED flag.
         """
+        if not self.AFF_GENERATE_ENABLED:
+            return None
+
         try:
             multi = self._get_multi_aff()
         except Exception:

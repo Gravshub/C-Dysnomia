@@ -42,7 +42,7 @@ PAYMENT_REGISTRY = [
     },
     {
         "label":   "pUSDC",
-        "address": Web3.to_checksum_address("0x15D38573d2feeb82e7ad5187aB8c1D52810B880"),
+        "address": Web3.to_checksum_address("0x015D38573d2feeb82e7ad5187aB8c1D52810B880"),
         "min_balance_wei": 1 * 10**18,
         "acquisition_hint": "Buy on PulseX: WPLS → pUSDC",
     },
