@@ -594,6 +594,25 @@ function Purchase(address _t, uint256 _a) public {
 ```
 Caller pays `_marketRates[_t]` units of token `_t`, receives `_a` units of this token from the contract's self-balance.
 
+### Generate() — Verified On-Chain Source
+
+From AFFECTION contract (`0x24F0...`, verified via Blockscout):
+```solidity
+function Generate() public returns(uint64) {
+    Amplify(Mu.Cone, Mu.Upsilon);   // triggers _mintToCap() internally
+    Sustain(Mu.Cone, Mu.Ohm);       // triggers _mintToCap() internally
+    React(Mu.Cone, Mu.Pi, Mu.Cone.Dynamo);  // triggers _mintToCap() internally
+    React(Mu.Rod, Mu.Pi, Mu.Rod.Dynamo);
+    Mu.Omega = Mu.Omega ^ Mu.Rod.Kappa;
+    Mu.Upsilon = Mu.Upsilon ^ Mu.Ohm ^ Mu.Pi;
+    _mintToCap();
+    return Mu.Upsilon;
+}
+```
+Confirmed via TX receipt: **3 mints per call** (300 mints / 100 loops in `multiGenerate(100)` TX `0x9867...`). The 3 mints come from Amplify + Sustain + the explicit `_mintToCap()` at the end. All mint to `address(this)`.
+
+**AFFECTION supply cap**: `1,111,111,111` tokens (hardcoded in `_mintToCap()` override: `totalSupply() <= 1111111111 * 10**decimals()`).
+
 ### Generate() → _mintToCap() → Self-Balance Flow
 
 ```
@@ -673,6 +692,24 @@ Savings path: Seller → Buyer (2,056 transfers, 80,782 AFF held back)
 | pDAI/WPLS V2 pair | `0xae8429918fdbf9a5867e3243697637dc56aa76a1` | PLS → pDAI acquisition |
 
 **Why it was profitable then but not now**: Grav ran this when AFF DEX price was higher relative to pDAI cost. The BuyWith fixed rates (1 pDAI/AFF via PI route) made arbitrage profitable when AFF traded above ~1 pDAI on DEX. Currently AFF ≈ 0.36 pDAI equivalent — deeply underwater.
+
+### Payment Token Intermediate Rates (from Helios wiki)
+
+Each payment token has its own BuyWith functions for acquiring it. These are the **fixed contract rates** (not DEX):
+
+| Token | BuyWithDAI Rate | BuyWithUSDC | BuyWithUSDT | Notes |
+|-------|----------------|-------------|-------------|-------|
+| pINDEPENDENCE | 300 pDAI/PI | 300 pUSDC/PI | 300 pUSDT/PI | **pUSDC/pUSDT BUGGED** — only pDAI works |
+| GIMME FIVE | 5 pDAI/G5 | 5 pUSDC/G5 | 5 pUSDT/G5 | **pUSDC/pUSDT BUGGED** |
+| MATH v1.1 | 1 pDAI/MATH | 1 pUSDC/MATH | 1 pUSDT/MATH | pUSDT bugged, pUSDC works |
+| RNG | 1 pDAI/RNG | 1 pUSDC/RNG | 1 pUSDT/RNG | Also: BuyWithG5(4:1), BuyWithPI(212:1) |
+
+**Full cost chain to AFFECTION** (fixed contract rates):
+- PI route: 300 pDAI → 1 PI → 300 AFF → **1.00 pDAI/AFF**
+- G5 route: 5 pDAI → 1 G5 → 5 AFF → **1.00 pDAI/AFF**
+- MATH route: 1 pDAI → 1 MATH → 1 AFF → **1.00 pDAI/AFF**
+
+All routes converge to ~1 pDAI/AFF through contract rates. Profit only exists when AFF DEX price > 1 pDAI equivalent (~139 PLS at current pDAI/PLS rate).
 
 ---
 
