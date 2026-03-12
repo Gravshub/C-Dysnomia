@@ -47,7 +47,7 @@ load_dotenv()
 
 from .core.config import (
     JOEY_WALLET, AFFECTION, WPLS, PULSEX_V1_ROUTER,
-    CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR,
+    CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR, AdaptiveDelay,
 )
 from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_health, get_read_pool
 from .core.wallet import reset_nonce, fmt_pls, pls_balance
@@ -81,6 +81,7 @@ class DysnomiaBot:
         self.dry_run   = dry_run
         self.cycle     = 0
         self.gas_guard = GasGuard()
+        self.delay     = AdaptiveDelay()
 
         # Engine priority is determined by Strategist scoring each cycle.
         # List order only matters as a tiebreaker within equal scores.
@@ -118,24 +119,35 @@ class DysnomiaBot:
         })
         while True:
             try:
-                self.run_cycle()
+                outcome = self.run_cycle()
             except KeyboardInterrupt:
                 log.info("Interrupted — stopping.")
                 _events.log("bot.stop", notes="KeyboardInterrupt")
                 break
             except GasTooHigh as exc:
-                log.warning("Gas too high: %s — sleeping %ds", exc, CYCLE_DELAY * 2)
-                time.sleep(CYCLE_DELAY * 2)
+                self.delay.after_gas_high()
+                log.warning("Gas too high: %s — sleeping %.0fs",
+                            exc, self.delay.seconds)
+                self.delay.wait()
                 continue
             except Exception as exc:
                 log.error("Cycle %d uncaught: %s", self.cycle, exc, exc_info=True)
+                outcome = "failure"
+
+            # Adaptive delay based on cycle outcome
+            if outcome == "profit":
+                self.delay.after_profit()
+            elif outcome == "skip":
+                self.delay.after_skip()
+            else:  # "failure", "strategic"
+                self.delay.after_failure()
 
             self.cycle += 1
-            log.info("Cycle %d done — sleeping %ds", self.cycle - 1, CYCLE_DELAY)
-            time.sleep(CYCLE_DELAY)
+            log.info("Cycle %d done — sleeping %.0fs", self.cycle - 1, self.delay.seconds)
+            self.delay.wait()
 
-    def run_cycle(self) -> None:
-        """Single bot cycle."""
+    def run_cycle(self) -> str:
+        """Single bot cycle. Returns outcome: 'profit', 'skip', 'failure', or 'strategic'."""
         log.info("━━━ Cycle %d ━━━", self.cycle)
 
         # 0. Balance snapshot (Multicall3: 1 RPC call)
@@ -154,10 +166,10 @@ class DysnomiaBot:
                 if not self.gas_guard.emergency_refill():
                     log.error("Emergency refill failed — skipping cycle")
                     _events.log_error("bot.gas_guard.refill_failed", "Emergency refill failed")
-                    return
+                    return "failure"
             else:
                 log.warning("[dry-run] Gas below floor — would trigger emergency refill")
-                return
+                return "failure"
 
         # 2. Reset nonce for fresh cycle
         reset_nonce()
@@ -170,6 +182,8 @@ class DysnomiaBot:
         result_notes = ""
         cycle_success = True
 
+        cycle_outcome = "skip"
+
         if rec.engine is None or not rec.approved:
             reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
             log.info("Strategist: %s", reason)
@@ -177,6 +191,9 @@ class DysnomiaBot:
             engine = rec.engine
             log.info("▶ %s [%s]: est profit %.4f PLS (gas %.4f PLS, ROI %.2fx)",
                      engine.name, rec.confidence, rec.profit_est, rec.gas_est, rec.roi)
+
+            # Measure realized PLS profit via balance delta
+            pls_before = pls_balance()
 
             result = engine.execute(dry_run=self.dry_run)
             _events.log_engine_result(engine.name, result, cycle_num=self.cycle)
@@ -186,14 +203,24 @@ class DysnomiaBot:
 
             if result.success:
                 engine.record_success()
-                log.info("✓ %s: net %.4f PLS  TXs=%d  notes=%s",
-                         engine.name, result.net_pls, len(result.tx_hashes), result.notes)
-                if result.profit_wei > 0 and not self.dry_run:
-                    self.compound(result.profit_wei)
+
+                pls_after = pls_balance()
+                realized_profit = max(0, pls_after - pls_before)
+
+                log.info("✓ %s: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
+                         engine.name, result.net_pls, realized_profit / 1e18,
+                         len(result.tx_hashes), result.notes)
+
+                if realized_profit > 0 and not self.dry_run:
+                    self.compound(realized_profit)
+                    cycle_outcome = "profit"
+                else:
+                    cycle_outcome = "strategic"
             else:
                 engine.record_failure()
                 log.error("✗ %s failed: %s", engine.name, result.notes)
                 cycle_success = False
+                cycle_outcome = "failure"
 
             # Structured cycle log line (TASK 5)
             now = datetime.now()
@@ -256,14 +283,31 @@ class DysnomiaBot:
             success=cycle_success,
         )
 
+        return cycle_outcome
+
     def compound(self, profit_pls_wei: int) -> None:
         """
         Route profits: 25% stays as PLS (gas reserve + validator fund).
                        75% → buy AFFECTION for next arb cycle.
+        Respects PLS_GAS_FLOOR — will reduce or skip to avoid breaching.
         """
         compound_wei = int(profit_pls_wei * (1.0 - PROFIT_SPLIT))
         if compound_wei < 10**16:  # < 0.01 PLS — not worth the gas
             return
+
+        # Re-check gas floor after engine execution may have consumed PLS
+        current_pls = pls_balance()
+        headroom = current_pls - compound_wei
+        if headroom < PLS_GAS_FLOOR:
+            safe_compound = current_pls - PLS_GAS_FLOOR
+            if safe_compound < 10**16:
+                log.info("Compound skipped — would breach gas floor "
+                         "(PLS=%.4f, floor=%.4f)",
+                         current_pls / 1e18, PLS_GAS_FLOOR / 1e18)
+                return
+            log.info("Compound reduced: %.4f → %.4f PLS (gas floor protection)",
+                     compound_wei / 1e18, safe_compound / 1e18)
+            compound_wei = int(safe_compound)
 
         router = router_contract(w3=w3_submit)
         deadline = int(time.time()) + 300

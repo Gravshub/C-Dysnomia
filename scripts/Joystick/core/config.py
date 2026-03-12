@@ -124,9 +124,54 @@ GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "2000000")) * 10**9
 MAX_SLIPPAGE   = float(os.getenv("MAX_SLIPPAGE",  "0.02"))
 # Gas estimate multiplier (safety buffer)
 GAS_MULT       = float(os.getenv("GAS_MULT",      "1.3"))
-# Seconds between bot cycles
-CYCLE_DELAY    = int(os.getenv("CYCLE_DELAY",     "30"))
+# Seconds between bot cycles (base for adaptive delay)
+CYCLE_DELAY      = int(os.getenv("CYCLE_DELAY",       "30"))
+# Adaptive delay bounds and backoff factor
+CYCLE_DELAY_MIN  = int(os.getenv("CYCLE_DELAY_MIN",   "15"))
+CYCLE_DELAY_MAX  = int(os.getenv("CYCLE_DELAY_MAX",   "300"))
+CYCLE_BACKOFF    = float(os.getenv("CYCLE_BACKOFF",    "1.5"))
 # QING cache TTL in seconds (1 hour)
 CACHE_TTL      = int(os.getenv("CACHE_TTL",       "3600"))
 # Minimum PLS profit to bother executing (in wei)
 MIN_PROFIT_WEI = int(Decimal(os.getenv("MIN_PROFIT_PLS", "5")) * Decimal(10**18))
+
+
+class AdaptiveDelay:
+    """Exponential backoff when idle, tighten when profitable."""
+
+    def __init__(
+        self,
+        base: int = CYCLE_DELAY,
+        lo: int = CYCLE_DELAY_MIN,
+        hi: int = CYCLE_DELAY_MAX,
+        backoff: float = CYCLE_BACKOFF,
+    ):
+        self.base = base
+        self.lo = lo
+        self.hi = hi
+        self.backoff = backoff
+        self.current = float(base)
+
+    def after_profit(self) -> None:
+        """Profitable cycle — tighten to base/2 (floor at lo)."""
+        self.current = max(self.lo, self.base / 2)
+
+    def after_skip(self) -> None:
+        """All engines skipped — back off exponentially."""
+        self.current = min(self.hi, self.current * self.backoff)
+
+    def after_failure(self) -> None:
+        """Engine failure or strategic success — reset to base."""
+        self.current = float(self.base)
+
+    def after_gas_high(self) -> None:
+        """Gas too high — double current adaptive delay, capped."""
+        self.current = min(self.hi, self.current * 2)
+
+    def wait(self) -> None:
+        import time
+        time.sleep(self.current)
+
+    @property
+    def seconds(self) -> float:
+        return self.current
