@@ -80,15 +80,18 @@ class GasGuard:
         gibs_bal = safe(gibs, "balanceOf", JOEY_WALLET) or 0
 
         if gibs_bal > 0:
-            # Calculate how much GIBS to sell (amount needed / GIBS price)
+            # Calculate how much GIBS to sell to receive need_wei PLS
             try:
                 amounts = safe(router, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
                 if amounts and amounts[-1] >= need_wei:
-                    # Partial sell — only sell what's needed
+                    # Partial sell — use getAmountsIn to find exact GIBS needed
                     partial_amounts = safe(
-                        router, "getAmountsOut", need_wei, [WPLS, GIBS_LAU]
+                        router, "getAmountsIn", need_wei, [GIBS_LAU, WPLS]
                     )
-                    sell_gibs = (partial_amounts[-1] if partial_amounts else gibs_bal)
+                    sell_gibs = min(
+                        partial_amounts[0] if partial_amounts else gibs_bal,
+                        gibs_bal,
+                    )
                 else:
                     sell_gibs = gibs_bal  # Sell all
             except Exception:
@@ -117,13 +120,24 @@ class GasGuard:
         aff_bal = safe(aff, "balanceOf", JOEY_WALLET) or 0
 
         if aff_bal > 0:
-            min_pls = int(need_wei * (1 - MAX_SLIPPAGE))
-            log.info("Selling %.4f AFFECTION for PLS (fallback)", aff_bal / 1e18)
+            # Calculate partial sell amount
             try:
-                approve_if_needed(aff, PULSEX_V1_ROUTER, aff_bal, "AFFECTION", dry_run=dry_run)
+                amounts = safe(router, "getAmountsOut", aff_bal, [AFFECTION, WPLS])
+                if amounts and amounts[-1] >= need_wei:
+                    partial = safe(router, "getAmountsIn", need_wei, [AFFECTION, WPLS])
+                    sell_aff = min(partial[0] if partial else aff_bal, aff_bal)
+                else:
+                    sell_aff = aff_bal
+            except Exception:
+                sell_aff = aff_bal
+
+            min_pls = int(need_wei * (1 - MAX_SLIPPAGE))
+            log.info("Selling %.4f AFFECTION for PLS (fallback)", sell_aff / 1e18)
+            try:
+                approve_if_needed(aff, PULSEX_V1_ROUTER, sell_aff, "AFFECTION", dry_run=dry_run)
                 send_tx(
                     router.functions.swapExactTokensForETH(
-                        aff_bal, min_pls, [AFFECTION, WPLS], JOEY_WALLET, deadline
+                        sell_aff, min_pls, [AFFECTION, WPLS], JOEY_WALLET, deadline
                     ),
                     "Emergency: AFFECTION → PLS",
                     dry_run=dry_run,
