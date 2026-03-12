@@ -653,41 +653,55 @@ multiBuyWith(paymentToken, N)
 ### Grav's AFFECTION Bot Pipeline (Reverse-Engineered)
 
 **Operational window**: Blocks ~21,009,000 – 21,133,000 (~5M blocks ago)
-**Total volume**: 3,248,259 AFF across 5,745 batches (~565 AFF/batch)
-**pDAI spent**: 405,684 pDAI → effective cost: ~0.125 pDAI/AFF
+**Total lifetime volume**: 4,055,439 AFF (broader scan; 3,248,259 in peak window)
+**Primary route**: PLS → pUSDC → MATH v1.1 → `BuyWithMATH()` on AFFECTION (not PI/G5 as initially assumed)
+**pDAI also used**: 405,684 pDAI via PI/G5 routes (secondary path)
 
 **Bot addresses**:
 | Role | Address | Nonces | PLS Balance |
 |------|---------|--------|-------------|
+| Funder (was "Buyer") | `0x1B79F904087DaaF6C67d7AD2cfA1D7c727De885B` | 13,702 | 57,583 PLS |
 | Minter | `0x217a76D9BEf7CeC27eFB5039099221241ca26F93` | 27,657 | 108,456 PLS |
-| Buyer (savings) | `0x1B79F904087DaaF6C67d7AD2cfA1D7c727De885B` | 13,702 | 57,583 PLS |
 | Seller | `0xa767a0D5E04eD4c90Ad68F316A9E55090aa28c51` | 27,393 | 20,259 PLS |
 
-**Pipeline flow**:
+**Role correction**: The "Buyer" bot (`0x1B79...`) is actually the **Funder** — swaps PLS → pUSDC on DEX, sends pUSDC to Minter. Seller→Funder transfers were AFF savings, not part of the profit pipeline.
+
+**Pipeline flow (primary — pUSDC → MATH route)**:
 ```
-pDAI/WPLS V2 Pair (0xae84...)           ← PLS → pDAI swap
-  ↓ 405,684 pDAI
+Funder Bot (0x1B79...)
+  ├→ Swaps PLS → pUSDC on DEX
+  ↓ pUSDC sent to Minter
 Minter Bot (0x217a...)
-  ├→ Multi PI contract (0x3026...)       ← pDAI → BuyWithDAI → PI (114 batches, 1,213 PI)
-  ├→ Multi G5 contract (0xa4c6...)       ← pDAI → G5 (83 batches, 7,288 G5)
-  ↓ PI + G5 tokens
-Custom BuyWith Contract (0x32d3...)      ← Grav's deploy, 4,579 bytes, nonce=1
-  ├→ AFFECTION.BuyWithPI() / BuyWithG5() ← payment token → AFFECTION contract
-  ├→ AFF from AFFECTION self-balance → contract (msg.sender)
+  ├→ Custom pUSDC→MATH contract (0x9837...)  ← pUSDC → BuyWithUSDC → MATH v1.1 (batch)
+  ↓ MATH v1.1 tokens
+  ├→ Custom BuyWithMATH contract (0x7947...)  ← MATH → AFFECTION.BuyWithMATH() (batch)
   ↓ AFF forwarded to Minter (tx.origin)
 Minter → Seller (0xa767...)
   ↓ 10,119 swaps on AFF/WPLS V2 Pair (0x1551...)
   ↓ AFF → WPLS → PLS profit
 
-Savings path: Seller → Buyer (2,056 transfers, 80,782 AFF held back)
+Savings path: Seller → Funder (2,056 transfers, 80,782 AFF held back for savings)
+```
+
+**Secondary route (pDAI → PI/G5)**:
+```
+Minter Bot (0x217a...)
+  ├→ Multi PI contract (0x3026...)       ← pDAI → BuyWithDAI → PI (114 batches, 1,213 PI)
+  ├→ Multi G5 contract (0xa4c6...)       ← pDAI → G5 (83 batches, 7,288 G5)
+  ↓ PI + G5 tokens
+Custom BuyWith Contract (0x32d3...)      ← Grav's deploy, 4,579 bytes, nonce=1
+  ├→ AFFECTION.BuyWithPI() / BuyWithG5()
+  ↓ AFF forwarded to Minter (tx.origin)
 ```
 
 **Key contracts in Grav's pipeline**:
 | Contract | Address | Purpose |
 |----------|---------|---------|
-| Custom BuyWith wrapper | `0x32d390e9e1b1dc7af2349312ad55be81dfc6398c` | Calls BuyWithPI/G5, forwards AFF to tx.origin |
-| Multi PI (not Helios's) | `0x3026512fd7116e0a6b6db942f263cc9eef063143` | pDAI → PI batch mint |
-| Multi G5 (Helios's) | `0xa4c61D20945c11855E7A390153fd29ceC9C7349b` | pDAI → G5 batch mint |
+| pUSDC→MATH batch mint | `0x98375dA84C1493767De695Ee7Eef0BB522380A07` | Primary: pUSDC → BuyWithUSDC → MATH v1.1 (selector `bc9820c1`) |
+| MATH→AFF batch BuyWith | `0x79474ff39B0F9Dc7d5F7209736C2a6913cf50F82` | Primary: MATH → BuyWithMATH → AFF (batch) |
+| Custom BuyWith wrapper | `0x32d390e9e1b1dc7af2349312ad55be81dfc6398c` | Secondary: Calls BuyWithPI/G5, forwards AFF to tx.origin |
+| Multi PI (not Helios's) | `0x3026512fd7116e0a6b6db942f263cc9eef063143` | Secondary: pDAI → PI batch mint |
+| Multi G5 (Helios's) | `0xa4c61D20945c11855E7A390153fd29ceC9C7349b` | Secondary: pDAI → G5 batch mint |
 | AFF/WPLS V2 sell pair | `0x155172653e94a7e5f0e04126803dcb6896796fbb` | AFF sell target (factory: PulseX V2) |
 | pDAI/WPLS V2 pair | `0xae8429918fdbf9a5867e3243697637dc56aa76a1` | PLS → pDAI acquisition |
 
@@ -878,10 +892,10 @@ LAU creation, Beat analysis, SHIO acquisition, wallet encryption. See earlier en
 - **MAINNET TX `0x9867...` (block 26,007,782)**: `multiGenerate(100)` succeeded (4,005,067 gas) — but 300 AFF minted to AFFECTION contract's self-balance, NOT to Joey. **Critical finding**: `_mintToCap()` always mints to `address(this)`.
 - **AFF Generate mode DISABLED** — `AFF_GENERATE_ENABLED = False` in token_factory.py
 - **Reverse-engineered Grav's 3-bot AFFECTION pipeline** via on-chain Transfer event analysis:
-  - Minter bot (`0x217a...`, 27,657 TXs) → acquires PI/G5 via pDAI
-  - Custom contract (`0x32d3...`) → calls `BuyWithPI()`/`BuyWithG5()`, forwards AFF to tx.origin
-  - Seller bot (`0xa767...`) → swaps AFF on PulseX V2 pair
-  - Total: 3,248,259 AFF farmed, 405,684 pDAI spent across 5,745 batches
+  - Funder bot (`0x1B79...`) → swaps PLS → pUSDC, sends to Minter
+  - Minter bot (`0x217a...`, 27,657 TXs) → **primary route**: pUSDC → MATH v1.1 → `BuyWithMATH()` on AFFECTION (via custom contracts `0x9837...` and `0x7947...`). Secondary: PI/G5 via pDAI
+  - Seller bot (`0xa767...`) → swaps AFF on PulseX V2 pair. Seller→Funder transfers = AFF savings (not profit pipeline)
+  - Total: 4,055,439 AFF lifetime (3,248,259 in peak window), 405,684 pDAI on secondary route
   - Pipeline was profitable when AFF > 1 pDAI on DEX; currently at ~0.36 pDAI (unprofitable)
 - **Verified all BuyWith function selectors** and confirmed `msg.sender` delivery pattern
 - **Current route profitability**: All BuyWith routes net-negative. PI route: -64%. G5 route: -57%.
@@ -985,7 +999,7 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 - **Enteh** — 25-26 successful Beat calls, skips CHEON.Su() entirely
 - **RatKing** (`0x530c8cE7...`) — Fornax whale (25K)
 - **GIBS LP arb bots** found the 9,852 PLS/GIBS implied price on thin pools and immediately arbed back toward parity — Joey earns fees on both sides
-- **Grav's AFFECTION pipeline** — 3-bot system: Minter (`0x217a76D9...`, 27,657 nonce), Buyer/savings (`0x1B79F904...`, 13,702 nonce), Seller (`0xa767a0D5...`, 27,393 nonce). Farmed 3.25M AFF via pDAI→PI/G5→BuyWith→DEX sell. Custom intermediary contract at `0x32d390e9...`. Active around blocks 21M-21.1M, currently idle.
+- **Grav's AFFECTION pipeline** — 3-bot system: Funder (`0x1B79F904...`, 13,702 nonce), Minter (`0x217a76D9...`, 27,657 nonce), Seller (`0xa767a0D5...`, 27,393 nonce). Farmed 4.06M AFF lifetime. **Primary route**: PLS → pUSDC → MATH v1.1 → BuyWithMATH (via `0x9837...` + `0x7947...`). Secondary: pDAI → PI/G5 → BuyWithPI/G5 (via `0x32d3...`). Active blocks ~21M-21.1M, currently idle.
 - **AFF/WPLS V2 sell pair**: `0x155172653e94a7e5f0e04126803dcb6896796fbb` (PulseX V2 factory, token0=AFF, token1=WPLS)
 - **pDAI/WPLS V2 pair**: `0xae8429918fdbf9a5867e3243697637dc56aa76a1` (PulseX V2)
 
@@ -1022,7 +1036,7 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 4. **E3 dual-mode monitoring** — WM currently unprofitable (23 PLS cost vs 17 PLS value), scan for crossover
 5. **Monitor GIBS LP pairs** — arb activity ongoing, fees accumulating
 6. **E8 Web Weaver design** — deploy V3 sibling tokens as ammo for MXDAI/S&㉿500 families
-7. **Helios AFFECTION wiki deep dive** — scrape affection.gitbook.io/docs for additional routes and mechanics not yet discovered
+7. **Consider pUSDC → MATH route** — Grav's primary path. If AFF DEX price recovers above ~118 PLS, this route (via custom batch contracts) becomes profitable again
 
 **Last Updated**: 2026-03-12 (block 26,007,782)
 **Status**: OPERATIONAL. 10 GIBS LP pairs live. E2 unlocked at 10x break-even. E4 AFF Generate DISABLED (mints to contract, BuyWith routes unprofitable). Treasury recon + Grav pipeline recon complete.
