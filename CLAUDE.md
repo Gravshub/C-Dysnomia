@@ -284,7 +284,7 @@ Venues are marketplace/chatroom instances with:
 | E1 | RAZOR (Arb) | `arb.py` | Cross-DEX QING arbitrage via `atomicArb()` | Ready (net-negative per recon) |
 | E2 | CEREAL (DSS) | `dss.py` | `chatAndClaim` → GIBS → PLS | **UNLOCKED** at 10x above break-even |
 | E3 | MERIDIAN (Beat) | `beat.py` | Territory positioning (`CHEON.Su` + `META.Beat`) | Running (Dione=41) |
-| E4 | Token Factory | `token_factory.py` | TGSv8 `mintWM()` + **AFFECTION Generate()** + mint-and-sell | **AFF: 262% ROI** |
+| E4 | Token Factory | `token_factory.py` | TGSv8 `mintWM()` + AFFECTION BuyWith routes + mint-and-sell | **AFF DISABLED** — needs BuyWith path (see Session 11) |
 | E5 | LAU (ABUPRU) | `lau.py` | Mathematical state loop + EmitSniper | Gated (150K PLS floor) |
 | E6 | DaVINCI (Treasury Sniper) | `treasury_sniper.py` | `batchClaimTreasury()` via recon data | Needs recon — yields ~1-10K PLS after impact |
 | E7 | BACKBONE (Spine Runner) | `spine_runner.py` | `batchMintAndClaim()` on Debenture=True | Needs OZZY spine via E8 |
@@ -395,7 +395,7 @@ AFFECTION (`0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D`) has multiple buy-in pat
 | `BuyWithFaung(amount)` | Faung (libDynamic) | 2 Faung | |
 | `Generate()` | (none — RNG) | gas only | Mints 3 AFF per call |
 
-`Generate()` is key — it's a gas-only mint that produces 3 AFFECTION per call. No payment token needed. This is the foundation of the multi-mint loop.
+`Generate()` calls `_mintToCap()` 3 times — but **mints AFF to the AFFECTION contract's own `balanceOf(address(this))`**, NOT to the caller. To extract AFF, you must use `BuyWith*()` or `Purchase()` which transfer from the contract's self-balance to `msg.sender`. See "AFFECTION Verified Mechanics" below for full details.
 
 ### Arb Routes (Helios documented)
 
@@ -437,8 +437,8 @@ Helios deployed batch-loop contracts that call mint/buy functions N times in a s
 Address: `0xCF138a83D739eE98D7A54159E94e5BFaa4B61988` (deployed 2025-05-06)
 
 **Functions**:
-- `multiGenerate(loops)` — calls `AFFECTION.Generate()` N times. Each call mints 3 AFF. Gas-only, no payment token.
-- `multiBuyWith(address, loops)` — calls `multiGenerate(loops)` first, then buys AFF with the specified payment token. Each loop produces 3 AFF.
+- `multiGenerate(loops)` — calls `AFFECTION.Generate()` N times. **WARNING**: AFF stays in AFFECTION contract's self-balance. Does NOT deliver to caller. Only primes supply for `BuyWith*` calls.
+- `multiBuyWith(address, loops)` — calls `multiGenerate(loops)` first, then buys AFF using payment token. **This is the function that actually delivers AFF to `msg.sender`**.
 
 **perLoop costs** (hardcoded in constructor):
 - G5: 0.6 per loop (0.2 per AFF)
@@ -450,25 +450,28 @@ Address: `0xCF138a83D739eE98D7A54159E94e5BFaa4B61988` (deployed 2025-05-06)
 **Usage pattern**:
 1. Approve payment token to Multi AFFECTION contract (`type(uint256).max`)
 2. Call `multiBuyWith(paymentTokenAddress, N)` where N = number of loops
-3. Receive N × 3 AFFECTION back to caller
+3. Receive N × 3 AFFECTION back to caller (msg.sender)
 
 **Constructor auto-approves** all payment tokens to AFFECTION contract with `type(uint256).max`. No per-call approval chain needed inside the contract.
 
 ### Integration with TGSv8
 
-Two paths to leverage this:
+**Path A: Call BuyWith* directly from EOA**
+Joey's wallet calls `AFFECTION.BuyWithPI(amount)` / `BuyWithG5(amount)` directly. AFF goes to `msg.sender` = Joey. Simplest path but requires acquiring payment tokens first via DEX.
 
-**Path A: Call Multi AFFECTION directly**
-TGSv8's `executeRoute()` can include steps to:
-1. `TRANSFER_IN` payment tokens from Joey
-2. `APPROVE` payment token to Multi AFFECTION contract
-3. Call `multiBuyWith()` externally (would need a wrapper or direct low-level call)
+**Path B: Use Helios Multi AFFECTION**
+Call `multiBuyWith(paymentToken, N)` which batches Generate+Buy in one TX. More gas efficient for large batches. Requires payment token approval to Multi AFFECTION contract.
 
-**Path B: Deploy our own MultiAffection**
-Deploy a version of the MultiAffection contract that sends minted AFF to TGSv8 instead of `msg.sender`. This keeps everything inside the working balance. The contract source is public (Solidity ^0.8.28, no OZ imports — matches our pattern).
+**Path C: Deploy custom contract (Grav's approach)**
+Deploy a contract that:
+1. Accepts payment tokens from caller
+2. Calls `AFFECTION.BuyWithPI()` / `BuyWithG5()` in a loop
+3. Receives AFF (as `msg.sender`)
+4. Forwards AFF to `tx.origin` or specified recipient
+See Grav's `0x32d390...` contract as reference implementation (4,579 bytes).
 
-**Path C: Native TGSv8 integration**
-Add a `batchMintAffection()` function to a future TGSv9 that calls `Generate()` in a loop directly on the AFFECTION contract. Each call = 3 AFF at gas cost only. No payment token needed.
+**Path D: Native TGSv9 integration**
+Add a `batchBuyAffection(paymentToken, amount)` function that wraps BuyWith* calls with working balance management. Generate() alone is useless without the Buy step.
 
 ### AFFECTION Token Addresses (Complete)
 
@@ -531,28 +534,145 @@ High-value V3 targets exist (MXDAI: 118 PLS/tok, 29M liq; S&㉿500: 44K PLS, 6M 
 ### Strategy E: Purchase→DEX Arbitrage (Engine 1)
 AFFECTION routes across 272 QING venues. Currently net-negative per recon.
 
-### Strategy F: AFFECTION Generate() Loop — **CONFIRMED PROFITABLE** (Engine 3)
+### Strategy F: AFFECTION BuyWith Routes — **CURRENTLY UNPROFITABLE** (Engine 4)
 
-`AFFECTION.Generate()` mints 3 AFF per call at gas cost only. Via Multi AFFECTION contract (`0xCF138a83D739eE98D7A54159E94e5BFaa4B61988`):
+**STATUS**: DISABLED as of block 26,007,782. The `multiGenerate()` approach was based on a false assumption. See Session 11 for full analysis.
 
-**Confirmed profitability** (block 26,007,120):
-| Batch Size | Gas Cost | AFF Minted | Cost/AFF | DEX Price | Profit/AFF | ROI |
-|-----------|----------|-----------|----------|-----------|-----------|-----|
-| multiGenerate(100) | 4,273 PLS | 300 AFF | 14.24 PLS | 51.5 PLS | 37.3 PLS | 262% |
-| multiGenerate(50) | 2,165 PLS | 150 AFF | 14.43 PLS | 51.5 PLS | 37.1 PLS | 257% |
-| multiGenerate(25) | 1,114 PLS | 75 AFF | 14.85 PLS | 51.5 PLS | 36.7 PLS | 247% |
+**What we learned (mainnet TX `0x9867...`, block 26,007,782)**:
+- `multiGenerate(100)` succeeded — 300 AFF minted to AFFECTION contract's self-balance
+- AFF did NOT arrive in Joey's wallet — `_mintToCap()` mints to `address(this)` always
+- Cost: ~3,357 PLS gas for a public-good supply increase (no private benefit)
+- **`multiGenerate()` alone is useless** — it primes supply but doesn't extract
 
-**Per TX (multiGenerate(100))**: ~11,177 PLS net profit.
+**The correct mechanism** (verified via Grav's bot pipeline):
+1. Acquire payment tokens (PI, G5, MATH via DEX)
+2. Call `BuyWithPI()` / `BuyWithG5()` on AFFECTION — this transfers AFF to `msg.sender`
+3. Sell AFF on DEX for PLS
 
-**DEX liquidity**: V2 pool has 5.7M AFF / 295M WPLS. Selling 300 AFF = 0.005% impact. Can run dozens of times.
+**Current break-even analysis** (block 26,007,910):
 
-**AFF supply**: 177.8M of 1B minted (82% remaining). Long runway.
+| Route | Cost/AFF (pDAI equiv) | AFF DEX Price (pDAI equiv) | Status |
+|-------|----------------------|---------------------------|--------|
+| pDAI → PI → BuyWithPI | 1.0000 pDAI | 0.3624 pDAI | -64% loss |
+| pDAI → G5 → BuyWithG5 | 0.8509 pDAI | 0.3624 pDAI | -57% loss |
+| PLS → pDAI → PI → AFF → PLS | ~41,700 PLS cost | ~15,112 PLS out | -64% loss |
 
-**Tax check**: Clean. No fee in Generate(), no retained dust in multi contract, Helios tip address holds only voluntary tips.
+**Profitability trigger**: AFF must trade above ~118 PLS (G5 route) or ~139 PLS (PI route) for BuyWith paths to become profitable. Currently at ~50 PLS.
 
-**WM comparison**: Currently unprofitable — 23.2 PLS/WM mint cost vs 17.0 PLS DEX price. E3 monitors but does not execute WM mints until gas drops ~30%.
+**WM comparison**: Also unprofitable — 23.2 PLS/WM mint cost vs 17.0 PLS DEX price.
 
-**Open question**: Does `multiGenerate()` alone deliver AFF to tx.origin or hold in contract? `multiBuyWith()` guarantees delivery via explicit transfer. Test with small batch before scaling.
+**DEX liquidity** (unchanged): V2 pool has 5.7M AFF / 292M WPLS. Selling 300 AFF = 0.005% impact.
+
+**AFF supply**: 177.9M of ~1B minted. AFFECTION self-balance: 3,233 AFF (includes our 300 from the failed multiGenerate).
+
+---
+
+## AFFECTION Verified Mechanics (Session 11 — On-Chain Verified)
+
+### _mintToCap() — The Core Mint Pattern
+
+From `solidity/dysnomia/01_dysnomia.sol`:
+```solidity
+function _mintToCap() internal {
+    if(totalSupply() < (maxSupply * 10 ** decimals()))
+        _mint(address(this), 1 * 10 ** decimals());  // ← MINTS TO SELF
+}
+```
+**ALL DYSNOMIA tokens mint to `address(this)`.** This is not a bug — it's the design. Tokens accumulate in the contract's own balance and are extracted via `Purchase()` or `BuyWith*()`.
+
+### Purchase() — The Extraction Function
+
+```solidity
+function Purchase(address _t, uint256 _a) public {
+    if(_marketRates[_t] == 0) revert MarketRateNotFound(_t);
+    DYSNOMIA BuyToken = DYSNOMIA(_t);
+    uint256 cost = (_a * _marketRates[_t]) / (10 ** decimals());
+    bool success1 = BuyToken.transferFrom(msg.sender, address(this), cost);
+    require(success1, string.concat(unicode"Need Approved ", BuyToken.name()));
+    DYSNOMIA(address(this)).transfer(msg.sender, _a);  // ← TRANSFER TO CALLER
+}
+```
+Caller pays `_marketRates[_t]` units of token `_t`, receives `_a` units of this token from the contract's self-balance.
+
+### Generate() → _mintToCap() → Self-Balance Flow
+
+```
+Generate()
+  ├── _mintToCap() × 3  →  +3 AFF to balanceOf(AFFECTION_contract)
+  └── NO transfer to caller
+
+BuyWithPI(amount)
+  ├── transferFrom(caller, AFFECTION, cost_in_PI)  ← caller pays PI
+  ├── _mintToCap() × 3  →  +3 AFF to self-balance (supply priming)
+  └── transfer(caller, amount)  ← AFF delivered to msg.sender
+
+multiGenerate(N)
+  ├── Generate() × N  →  +3N AFF to self-balance
+  └── NO transfer (just primes supply)
+
+multiBuyWith(paymentToken, N)
+  ├── multiGenerate(N)  →  +3N AFF to self-balance
+  ├── BuyWith*(3N)  →  pulls payment, transfers 3N AFF to msg.sender
+  └── AFF DELIVERED to msg.sender ✓
+```
+
+### Function Selectors (Verified)
+
+| Function | Selector | Delivers AFF? |
+|----------|----------|---------------|
+| `Generate()` | `0xd805b650` | NO — mints to contract |
+| `Purchase(address,uint256)` | `0x2499a533` | YES → msg.sender |
+| `BuyWithDAI(uint256)` | `0x377de122` | YES → msg.sender |
+| `BuyWithPI(uint256)` | `0xca9cf41c` | YES → msg.sender |
+| `BuyWithG5(uint256)` | `0xb61a722b` | YES → msg.sender |
+| `BuyWithMATH(uint256)` | `0x512ab7de` | YES → msg.sender |
+| `BuyWithFa(uint256)` | `0xf8784afe` | YES → msg.sender |
+| `BuyWithFaung(uint256)` | `0x5118149a` | YES → msg.sender |
+| `multiGenerate(uint256)` | `0xd1f05872` | NO — just primes supply |
+| `multiBuyWith(address,uint256)` | `0xcc93bb90` | YES → msg.sender |
+
+### Grav's AFFECTION Bot Pipeline (Reverse-Engineered)
+
+**Operational window**: Blocks ~21,009,000 – 21,133,000 (~5M blocks ago)
+**Total volume**: 3,248,259 AFF across 5,745 batches (~565 AFF/batch)
+**pDAI spent**: 405,684 pDAI → effective cost: ~0.125 pDAI/AFF
+
+**Bot addresses**:
+| Role | Address | Nonces | PLS Balance |
+|------|---------|--------|-------------|
+| Minter | `0x217a76D9BEf7CeC27eFB5039099221241ca26F93` | 27,657 | 108,456 PLS |
+| Buyer (savings) | `0x1B79F904087DaaF6C67d7AD2cfA1D7c727De885B` | 13,702 | 57,583 PLS |
+| Seller | `0xa767a0D5E04eD4c90Ad68F316A9E55090aa28c51` | 27,393 | 20,259 PLS |
+
+**Pipeline flow**:
+```
+pDAI/WPLS V2 Pair (0xae84...)           ← PLS → pDAI swap
+  ↓ 405,684 pDAI
+Minter Bot (0x217a...)
+  ├→ Multi PI contract (0x3026...)       ← pDAI → BuyWithDAI → PI (114 batches, 1,213 PI)
+  ├→ Multi G5 contract (0xa4c6...)       ← pDAI → G5 (83 batches, 7,288 G5)
+  ↓ PI + G5 tokens
+Custom BuyWith Contract (0x32d3...)      ← Grav's deploy, 4,579 bytes, nonce=1
+  ├→ AFFECTION.BuyWithPI() / BuyWithG5() ← payment token → AFFECTION contract
+  ├→ AFF from AFFECTION self-balance → contract (msg.sender)
+  ↓ AFF forwarded to Minter (tx.origin)
+Minter → Seller (0xa767...)
+  ↓ 10,119 swaps on AFF/WPLS V2 Pair (0x1551...)
+  ↓ AFF → WPLS → PLS profit
+
+Savings path: Seller → Buyer (2,056 transfers, 80,782 AFF held back)
+```
+
+**Key contracts in Grav's pipeline**:
+| Contract | Address | Purpose |
+|----------|---------|---------|
+| Custom BuyWith wrapper | `0x32d390e9e1b1dc7af2349312ad55be81dfc6398c` | Calls BuyWithPI/G5, forwards AFF to tx.origin |
+| Multi PI (not Helios's) | `0x3026512fd7116e0a6b6db942f263cc9eef063143` | pDAI → PI batch mint |
+| Multi G5 (Helios's) | `0xa4c61D20945c11855E7A390153fd29ceC9C7349b` | pDAI → G5 batch mint |
+| AFF/WPLS V2 sell pair | `0x155172653e94a7e5f0e04126803dcb6896796fbb` | AFF sell target (factory: PulseX V2) |
+| pDAI/WPLS V2 pair | `0xae8429918fdbf9a5867e3243697637dc56aa76a1` | PLS → pDAI acquisition |
+
+**Why it was profitable then but not now**: Grav ran this when AFF DEX price was higher relative to pDAI cost. The BuyWith fixed rates (1 pDAI/AFF via PI route) made arbitrage profitable when AFF traded above ~1 pDAI on DEX. Currently AFF ≈ 0.36 pDAI equivalent — deeply underwater.
 
 ---
 
@@ -612,7 +732,7 @@ PLS/USD:       $0.00708
 E1 (RAZOR arb):           Ready — net-negative per recon, low priority
 E2 (CEREAL DSS):          UNLOCKED — 10x above break-even, awaiting first cycle
 E3 (MERIDIAN Beat):       Running — Dione=41
-E4 (Token Factory):       **AFF Generate 262% ROI** — center-stage priority
+E4 (Token Factory):       AFF DISABLED — multiGenerate mints to contract, BuyWith routes unprofitable
 E5 (LAU ABUPRU):          Gated — 150K PLS floor
 E6 (DaVINCI Sniper):      Needs recon targets — ~1-10K PLS yield
 E7 (BACKBONE Spine):      Needs OZZY spine via E8
@@ -709,6 +829,30 @@ LAU creation, Beat analysis, SHIO acquisition, wallet encryption. See earlier en
 
 **Balance**: 1,991,521 PLS, 169 GIBS, 97.18 AFFECTION, 263.15 WM (nonce 113)
 
+### Session 11 (2026-03-12) — AFFECTION Mainnet Test + Grav Pipeline Recon
+
+**Branch**: `claude/add-affection-minting-KhBTl`
+
+**Focus**: Live mainnet test of AFFECTION Generate(), reverse-engineer Grav's profitable bot pipeline
+
+**Key events**:
+- **Built E4 TokenFactory AFF Generate mode** — added `multiGenerate()` integration, route auditor, batch gas estimation
+- **RPCPool bug discovered**: Multi-provider `send_raw()` causes "replacement transaction underpriced" when first provider accepts TX but second rejects as duplicate. Fixed by using single-RPC direct path for critical TXs.
+- **MAINNET TX `0x9867...` (block 26,007,782)**: `multiGenerate(100)` succeeded (4,005,067 gas) — but 300 AFF minted to AFFECTION contract's self-balance, NOT to Joey. **Critical finding**: `_mintToCap()` always mints to `address(this)`.
+- **AFF Generate mode DISABLED** — `AFF_GENERATE_ENABLED = False` in token_factory.py
+- **Reverse-engineered Grav's 3-bot AFFECTION pipeline** via on-chain Transfer event analysis:
+  - Minter bot (`0x217a...`, 27,657 TXs) → acquires PI/G5 via pDAI
+  - Custom contract (`0x32d3...`) → calls `BuyWithPI()`/`BuyWithG5()`, forwards AFF to tx.origin
+  - Seller bot (`0xa767...`) → swaps AFF on PulseX V2 pair
+  - Total: 3,248,259 AFF farmed, 405,684 pDAI spent across 5,745 batches
+  - Pipeline was profitable when AFF > 1 pDAI on DEX; currently at ~0.36 pDAI (unprofitable)
+- **Verified all BuyWith function selectors** and confirmed `msg.sender` delivery pattern
+- **Current route profitability**: All BuyWith routes net-negative. PI route: -64%. G5 route: -57%.
+
+**Losses this session**: ~3,357 PLS gas (multiGenerate TX that increased AFFECTION public supply)
+
+**Balance**: ~1,988,164 PLS, 169 GIBS, 97.18 AFF, 263.15 WM (nonce 114)
+
 ---
 
 ## Key Bugs & Lessons Learned
@@ -720,6 +864,9 @@ LAU creation, Beat analysis, SHIO acquisition, wallet encryption. See earlier en
 - **V1 vs V2 AFFECTION**: DYSNOMIA v1 constructor calls `AddMarketRate(AFFECTION, ...)` internally. V2/QING does NOT — requires manual call by owner
 - **PulseChain gas units**: `eth_gasPrice` returns Impulses (wei-equiv). Divide by 10^9 for Beats. Display confusion caused stuck TX on publicnode
 - **RPC strategy**: `rpc-pulsechain.g4mm4.io` or `rpc.pulsechain.com` for reads; `rpc.pulsechain.com` for TX submit. `pulsechainstats.com` is read-only (no TX)
+- **`_mintToCap()` mints to self**: ALL DYSNOMIA tokens mint to `address(this)`, not to `msg.sender` or `tx.origin`. Must use `Purchase()` or `BuyWith*()` to extract. `Generate()` and `multiGenerate()` alone do NOT deliver tokens to the caller.
+- **RPCPool "replacement TX underpriced"**: When RPCPool tries multiple Tier 1 providers for `send_raw()`, the second provider may reject the same TX as "replacement transaction underpriced" if the first already accepted it. For critical single TXs, use a single RPC endpoint via `Web3.HTTPProvider()` directly to avoid this race.
+- **multiGenerate() is a public good**: Calling `multiGenerate(N)` spends your gas to increase AFFECTION's self-balance supply — anyone can then buy it via `BuyWith*`. This is a donation, not a profit operation.
 
 ---
 
@@ -780,6 +927,12 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 - `scripts/tx_lau_arb.py` — Execute arb loop
 - `agent/wm_minter.py` — TGSv5 WM batch-mint agent
 
+### Python (research / analysis)
+- `scripts/test_aff_mint.py` — AFFECTION multiGenerate mainnet test harness (full 7-step)
+- `scripts/test_aff_direct.py` — Direct single-RPC AFF mint test (bypasses RPCPool race)
+- `scripts/analyze_aff_bots.py` — Grav's bot pipeline Transfer event scanner
+- `scripts/analyze_aff_bots_v2.py` — Extended pipeline analysis with payment token tracing
+
 ### Data files
 - `scripts/Joystick/data/recon_results.json` — Full treasury recon (39K lines, 1.26 MB)
 - `scripts/Joystick/data/claim_verification.json` — Claim() eth_call simulation results
@@ -795,6 +948,9 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 - **Enteh** — 25-26 successful Beat calls, skips CHEON.Su() entirely
 - **RatKing** (`0x530c8cE7...`) — Fornax whale (25K)
 - **GIBS LP arb bots** found the 9,852 PLS/GIBS implied price on thin pools and immediately arbed back toward parity — Joey earns fees on both sides
+- **Grav's AFFECTION pipeline** — 3-bot system: Minter (`0x217a76D9...`, 27,657 nonce), Buyer/savings (`0x1B79F904...`, 13,702 nonce), Seller (`0xa767a0D5...`, 27,393 nonce). Farmed 3.25M AFF via pDAI→PI/G5→BuyWith→DEX sell. Custom intermediary contract at `0x32d390e9...`. Active around blocks 21M-21.1M, currently idle.
+- **AFF/WPLS V2 sell pair**: `0x155172653e94a7e5f0e04126803dcb6896796fbb` (PulseX V2 factory, token0=AFF, token1=WPLS)
+- **pDAI/WPLS V2 pair**: `0xae8429918fdbf9a5867e3243697637dc56aa76a1` (PulseX V2)
 
 ---
 
@@ -817,17 +973,19 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 | **10 GIBS LP pairs deployed** | (86 txs, nonce 25→111) | ~25,984,143 |
 | **TGSv8 test: swapNativeForTokens** | | ~26,002,xxx |
 | **TGSv8 test: withdraw** | | ~26,002,xxx |
+| **multiGenerate(100) — AFF to contract** | `0x9867...` | 26,007,782 |
 
 ---
 
 ## What's Next
 
-1. **Expand E4 TokenFactory with AFF Generate()** — center-stage priority. `multiGenerate(100)` = ~11K PLS/TX. Claude Code prompt ready.
-2. **Run E4 first AFF cycle** — multiGenerate(100) → swap 300 AFF → ~15,450 PLS gross
-3. **Run E2 first DSS cycle** — `chatAndClaim` at 223 PLS/GIBS
-4. **E3 dual-mode monitoring** — WM currently(as of this writing) unprofitable (23 PLS cost vs 17 PLS value), scan for crossover
+1. **Run E2 first DSS cycle** — `chatAndClaim` at 223 PLS/GIBS. Highest-confidence income engine. No blockers.
+2. **Monitor AFF/pDAI price ratio** — BuyWith routes become profitable when AFF > ~118 PLS (currently ~50 PLS). E4 auto-monitors.
+3. **E4 AFF BuyWith path** — when prices align: acquire cheapest payment token (MATH or G5) on DEX, call `BuyWithMATH()` / `BuyWithG5()` directly from EOA. No custom contract needed for basic flow.
+4. **E3 dual-mode monitoring** — WM currently unprofitable (23 PLS cost vs 17 PLS value), scan for crossover
 5. **Monitor GIBS LP pairs** — arb activity ongoing, fees accumulating
 6. **E8 Web Weaver design** — deploy V3 sibling tokens as ammo for MXDAI/S&㉿500 families
+7. **Helios AFFECTION wiki deep dive** — scrape affection.gitbook.io/docs for additional routes and mechanics not yet discovered
 
-**Last Updated**: 2026-03-12 (block 26,002,400)
-**Status**: FULLY OPERATIONAL. 10 GIBS LP pairs live. E2 unlocked at 10x break-even. Treasury recon complete.
+**Last Updated**: 2026-03-12 (block 26,007,782)
+**Status**: OPERATIONAL. 10 GIBS LP pairs live. E2 unlocked at 10x break-even. E4 AFF Generate DISABLED (mints to contract, BuyWith routes unprofitable). Treasury recon + Grav pipeline recon complete.
