@@ -5,7 +5,7 @@ Orchestrates all income engines with an active-intelligence Strategist:
   Engine 1 — Arb:          Purchase → DEX arb (AFFECTION/pDAI routes)
   Engine 2 — DSS:          chatAndClaimWithMultiplier → GIBS → PLS
   Engine 3 — Beat:         META.Beat() territory metrics
-  Engine 4 — TokenFactory: TGSV8 token creation & swap
+  Engine 4 — TokenFactory: AFFECTION Generate() gas-mint + WM batch mint + token mint/sell
   Engine 5 — LAU:          ABUPRU Faung advancement + EmitSniper
 
 Per-cycle flow:

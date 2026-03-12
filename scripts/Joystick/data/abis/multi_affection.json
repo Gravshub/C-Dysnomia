@@ -1,0 +1,8 @@
+[
+  {"inputs":[],"stateMutability":"nonpayable","type":"constructor"},
+  {"inputs":[{"internalType":"address","name":"_address","type":"address"},
+             {"internalType":"uint256","name":"_loops","type":"uint256"}],
+   "name":"multiBuyWith","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"_loops","type":"uint256"}],
+   "name":"multiGenerate","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]

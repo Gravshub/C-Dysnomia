@@ -20,7 +20,7 @@ from .config import (
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, GIBS_QING,
     FORNAX, FOMALHAUTE, CHO, WM,
     PULSEX_V1_ROUTER, PULSEX_V1_FACTORY, PULSEX_V2_FACTORY, NINEMM_FACTORY,
-    MULTICALL3,
+    MULTICALL3, MULTI_AFFECTION,
 )
 from .rpc_provider import build_default_pools, RPCAllProvidersDown
 
@@ -78,6 +78,7 @@ CHEON_ABI     = load_abi("cheon")
 DSS_ABI       = load_abi("dss")
 MULTICALL3_ABI = load_abi("multicall3")
 TGSV8_ABI     = load_abi("tgsv8")
+MULTI_AFF_ABI = load_abi("multi_affection")
 
 # ── Contract factory helpers ──────────────────────────────────────────────
 def erc20(address: str) -> Any:
@@ -105,6 +106,14 @@ def tgsv8_contract(w3=None) -> Any:
         raise EnvironmentError("TGSV8_ADDRESS not set in .env")
     w3 = w3 or w3_read
     return w3.eth.contract(address=Web3.to_checksum_address(TGSV8), abi=TGSV8_ABI)
+
+def multi_affection_contract(w3=None) -> Any:
+    """Multi AFFECTION batch minter (Helios's deployed contract)."""
+    _w3 = w3 or w3_read
+    return _w3.eth.contract(
+        address=Web3.to_checksum_address(MULTI_AFFECTION),
+        abi=MULTI_AFF_ABI,
+    )
 
 # ── safe() — error-tolerant view call with RPC failover ─────────────────
 def safe(contract, fn: str, *args) -> Any | None:
