@@ -397,7 +397,7 @@ AFFECTION (`0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D`) has multiple buy-in pat
 
 `Generate()` calls `_mintToCap()` 3 times — but **mints AFF to the AFFECTION contract's own `balanceOf(address(this))`**, NOT to the caller. To extract AFF, you must use `BuyWith*()` or `Purchase()` which transfer from the contract's self-balance to `msg.sender`. See "AFFECTION Verified Mechanics" below for full details.
 
-### Arb Routes (Helios documented)
+### Arb Routes
 
 The arb exploits the price difference between contract fixed rates and DEX market prices. Profit range: 5% to 250% per trade.
 
@@ -490,7 +490,7 @@ Add a `batchBuyAffection(paymentToken, amount)` function that wraps BuyWith* cal
 | pDAI | DAI | `0x6B175474E89094C44Da98b954EedeAC495271d0F` | — |
 | pUSDC | USDC | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | — |
 
-**Full spreadsheet**: [Google Sheets](https://docs.google.com/spreadsheets/d/18bPzn_T0EMv1reTz5ct6OZIomLu7fEOmAncSsSsyRlk/edit?gid=0#gid=0)
+**Token spreadsheet**: [Google Sheets](https://docs.google.com/spreadsheets/d/18bPzn_T0EMv1reTz5ct6OZIomLu7fEOmAncSsSsyRlk/edit?gid=0#gid=0)
 
 ### Helios Bot Framework Reference
 
@@ -993,7 +993,7 @@ GIBS_QING owners: GIBS_LAU contract + CHO contract. MAP renounced itself.
 
 ## On-Chain Intelligence Notes
 
-- **Noumenon** (`0xEbE9B8673d...`) — 2,473+ txs, active gifter, gifted Joey 100 AFFECTION
+- **Noumenon** (`0xEbE9B8673d...`) — 2,473+ txs, active in the VOID chat, deep atropa_pulsechain Dysnomia knowledge
 - **MAP** has 272+ QINGs — venue ecosystem is active
 - **Active bot**: `0xb1c9b8d6...` → `0xc078C8DaE2...` running chatAndClaim-style loop
 - **Enteh** — 25-26 successful Beat calls, skips CHEON.Su() entirely
