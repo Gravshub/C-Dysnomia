@@ -7,6 +7,9 @@ Orchestrates all income engines with an active-intelligence Strategist:
   Engine 3 — Beat:         META.Beat() territory metrics
   Engine 4 — TokenFactory: AFFECTION Generate() gas-mint + WM batch mint + token mint/sell
   Engine 5 — LAU:          ABUPRU Faung advancement + EmitSniper
+  Engine 6 — DaVINCI:      Treasury sniping via recon data
+  Engine 7 — BACKBONE:     Spine runner (V2 Federal mint-claim loop)
+  Engine 8 — PHR3AK:       Token web manipulation (DEPLOY/ARM/STITCH)
 
 Per-cycle flow:
   0. Multicall balance snapshot (1 RPC call)
@@ -64,6 +67,7 @@ from .engines.token_factory import TokenFactoryEngine
 from .engines.lau import LAUEngine
 from .engines.treasury_sniper import TreasurySniperEngine
 from .engines.spine_runner import SpineRunnerEngine
+from .engines.phreak import PhreakEngine
 from .loops.terraform import TerraformLoop
 from .oracle.route_auditor import route_summary
 
@@ -96,6 +100,7 @@ class DysnomiaBot:
             LAUEngine(),
             TreasurySniperEngine(),
             SpineRunnerEngine(),
+            PhreakEngine(),
         ]
 
         # Active intelligence layer — evaluates, recommends, tracks P&L
