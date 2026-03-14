@@ -76,6 +76,10 @@ PULSEX_V1_ROUTER  = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fE
 PULSEX_V1_FACTORY = Web3.to_checksum_address("0x1715a3E4A142d8b698131108995174F37aEBA10D")
 PULSEX_V2_FACTORY = Web3.to_checksum_address("0x29eA7545DEf87022BAdc76323F373EA1e707C523")
 NINEMM_FACTORY    = Web3.to_checksum_address("0xE26E7F6b5A43A667dBA42Cd9C829d5C75A8093b1")
+NINEINCH_FACTORY  = Web3.to_checksum_address("0x7a8FC9dEA0B3316b76686F2Cf58E1b3c02890F8D")
+
+# ── Burn address (verified EOA, 158B PLS already burned) ─────────────────────
+BURN_ADDRESS = Web3.to_checksum_address("0x0000000000000000000000000000000000000369")
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA11")
