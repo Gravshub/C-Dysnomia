@@ -129,22 +129,31 @@ def patch_wallet(fund_joey):
     On Anvil, we impersonate Joey so signatures don't matter, but the module
     still needs a valid account object.
 
-    Solution: Create a mock account that has Joey's address and can sign
-    (Anvil ignores signatures when impersonating).
+    Solution: Override JOEY_WALLET in config BEFORE importing wallet so the
+    address check passes. Then swap the account's address back to the real Joey
+    address so all downstream code uses the right address via impersonation.
     """
     from eth_account import Account
     from unittest.mock import MagicMock
 
-    # Import wallet after env is set
+    # Get the address that the Anvil default key resolves to
+    fake_acct = Account.from_key(_ANVIL_DEFAULT_KEY)
+    anvil_addr = fake_acct.address  # 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+    # Override JOEY_WALLET to match the Anvil key so wallet.py validation passes
+    from scripts.Joystick.core import config
+    _real_joey = config.JOEY_WALLET
+    config.JOEY_WALLET = anvil_addr
+
+    # Now import wallet — _load_account() will pass since key matches JOEY_WALLET
     from scripts.Joystick.core import wallet
 
-    # Create a fake account object
-    fake_acct = Account.from_key(_ANVIL_DEFAULT_KEY)
+    # Restore the real Joey address in config
+    config.JOEY_WALLET = _real_joey
 
     # Build a wrapper that has Joey's address but signs with the test key
     mock_acct = MagicMock(wraps=fake_acct)
     mock_acct.address = JOEY_ADDR
-    # sign_transaction needs to work — delegate to the real account
     mock_acct.sign_transaction = fake_acct.sign_transaction
 
     wallet.account = mock_acct
