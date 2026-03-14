@@ -19,7 +19,6 @@ Usage:
 import os
 import sys
 import time
-import subprocess
 import logging
 
 import pytest
@@ -111,6 +110,9 @@ def fund_joey(w3, anvil_url):
     set_balance(JOEY_ADDR, 2_000_000 * 10**18, anvil_url)
     impersonate(JOEY_ADDR, anvil_url)
 
+    # Fund TGSv8 with some PLS for native operations
+    set_balance(TGSV8_ADDR, 10_000 * 10**18, anvil_url)
+
     # Verify
     bal = w3.eth.get_balance(w3.to_checksum_address(JOEY_ADDR))
     assert bal >= 1_000_000 * 10**18, f"Joey funding failed: {bal / 1e18} PLS"
@@ -176,3 +178,58 @@ def isolate(anvil_url, joystick_ready):
     snap_id = snapshot(anvil_url)
     yield snap_id
     revert(snap_id, anvil_url)
+
+
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │  Engine fixtures (deferred imports to avoid import-time RPC calls)       │
+# └──────────────────────────────────────────────────────────────────────────┘
+
+@pytest.fixture
+def E1():
+    from scripts.Joystick.engines.arb import ArbEngine
+    return ArbEngine()
+
+@pytest.fixture
+def E2():
+    from scripts.Joystick.engines.dss import DSSEngine
+    return DSSEngine()
+
+@pytest.fixture
+def E3():
+    from scripts.Joystick.engines.beat import BeatEngine
+    return BeatEngine(with_cheon=True)
+
+@pytest.fixture
+def E4():
+    from scripts.Joystick.engines.token_factory import TokenFactoryEngine
+    return TokenFactoryEngine()
+
+@pytest.fixture
+def E5():
+    from scripts.Joystick.engines.lau import LAUEngine
+    return LAUEngine()
+
+@pytest.fixture
+def E6():
+    from scripts.Joystick.engines.treasury_sniper import TreasurySniperEngine
+    return TreasurySniperEngine()
+
+@pytest.fixture
+def E7():
+    from scripts.Joystick.engines.spine_runner import SpineRunnerEngine
+    return SpineRunnerEngine()
+
+@pytest.fixture
+def E8():
+    from scripts.Joystick.engines.phreak import PhreakEngine
+    return PhreakEngine()
+
+@pytest.fixture
+def all_engines(E1, E2, E3, E4, E5, E6, E7, E8):
+    return [E1, E2, E3, E4, E5, E6, E7, E8]
+
+@pytest.fixture
+def bot():
+    """Create a DysnomiaBot instance (dry_run=True for safety)."""
+    from scripts.Joystick.bot import DysnomiaBot
+    return DysnomiaBot(dry_run=True, interactive=False)
