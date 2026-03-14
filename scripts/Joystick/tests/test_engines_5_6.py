@@ -21,8 +21,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 os.environ.setdefault("TGSV8_ADDRESS", "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32")
 os.environ.setdefault("PULSECHAIN_RPC", "http://127.0.0.1:8545")
 os.environ.setdefault("PULSECHAIN_READ_RPC", "http://127.0.0.1:8545")
-# Don't set DYSNOMIA_PRIVATE_KEY — let wallet.py fall through to read-only mode
+# Remove DYSNOMIA_PRIVATE_KEY if set (e.g. by conftest) — let wallet.py fall through to read-only mode
+os.environ.pop("DYSNOMIA_PRIVATE_KEY", None)
 
+# Force reimport of wallet if it was already loaded with wrong key
+if "scripts.Joystick.core.wallet" in sys.modules:
+    del sys.modules["scripts.Joystick.core.wallet"]
+if "scripts.Joystick.core.executor" in sys.modules:
+    del sys.modules["scripts.Joystick.core.executor"]
 
 from scripts.Joystick.engines.treasury_sniper import TreasurySniperEngine, TreasuryTarget
 from scripts.Joystick.engines.spine_runner import SpineRunnerEngine, Spine, BATCH_ITERATIONS
