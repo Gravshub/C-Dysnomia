@@ -1,0 +1,25 @@
+{
+  "deb_true_v2": [
+    {
+      "address": "0x52b4F56d87765E7A9567E35bea97de13C3386554",
+      "symbol": "OZZY",
+      "parent": "0xaAE18Cd46C45d343BbA1eab46716B4D69d799734",
+      "note": "Only current Deb=true V2. Monitor for new ones from Maria."
+    }
+  ],
+  "burn_address": "0x0000000000000000000000000000000000000369",
+  "default_keep_pct": 20,
+  "max_impact_pct": 10.0,
+  "split_threshold_pct": 3.33,
+  "deploy_queue": [],
+  "stitch_candidates": [],
+  "factories": {
+    "pulsex_v1": "0x1715a3E4A142d8b698131108995174F37aEBA10D",
+    "pulsex_v2": "0x29eA7545DEf87022BAdc76323F373EA1e707C523",
+    "9inch_v2": "0x7a8FC9dEA0B3316b76686F2Cf58E1b3c02890F8D",
+    "9mm_v2": "0xE3f48A2E5C41C527eb53Afa9B8288214A0b6F3f0"
+  },
+  "v2_federal_minter": "0xc15c5F699Daf5e1135732139f05D2c05b3EF4354",
+  "debenture_monitor_interval_s": 600,
+  "arm_default_pls": 100
+}
