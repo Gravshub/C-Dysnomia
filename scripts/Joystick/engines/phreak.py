@@ -186,13 +186,14 @@ def _build_token_graph() -> dict:
     """
     graph = {}
 
-    if not os.path.exists(_RECON_PATH):
+    from ..oracle.data_store import DataStore
+    recon = DataStore.get().recon_data()
+    if not recon:
         log.debug("E8: recon_results.json not found — empty graph")
         return graph
 
     try:
-        with open(_RECON_PATH) as f:
-            recon = json.load(f)
+        pass  # recon already loaded via DataStore
     except Exception as e:
         log.warning("E8: failed to load recon_results.json: %s", e)
         return graph
@@ -1046,14 +1047,12 @@ class PhreakEngine(EngineBase):
         self._last_deb_monitor = now
         new_deb_true = []
 
-        if not os.path.exists(_V2FED_PATH):
+        from ..oracle.data_store import DataStore
+        v2fed_tokens = DataStore.get().v2_federal_tokens()
+        if not v2fed_tokens:
             return []
 
-        try:
-            with open(_V2FED_PATH) as f:
-                v2data = json.load(f)
-        except Exception:
-            return []
+        v2data = {"tokens": v2fed_tokens}
 
         tgs = tgsv8_contract()
         known_addrs = {d.address.lower() for d in cfg.deb_true_v2}
@@ -1077,9 +1076,8 @@ class PhreakEngine(EngineBase):
 
                 # Try to get parent from recon
                 try:
-                    if os.path.exists(_RECON_PATH):
-                        with open(_RECON_PATH) as f:
-                            recon = json.load(f)
+                    recon = DataStore.get().recon_data()
+                    if recon:
                         entry = recon.get("results", {}).get(addr.lower(), {})
                         chain_parent = entry.get("chain_data", {}).get("parent")
                         if chain_parent and chain_parent != ZERO_ADDR:
