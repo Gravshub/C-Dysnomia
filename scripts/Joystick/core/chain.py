@@ -180,10 +180,13 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
     return decoded
 
 # ── Balance snapshot (Multicall3 powered) ─────────────────────────────────
-def snapshot_balances() -> dict:
+def snapshot_balances(extra_wallets: list[str] | None = None) -> dict:
     """
     Read all key balances in ONE RPC call.
     Returns dict with keys: pls, affection, gibs, wm, fornax, fomalhaute, cho
+
+    If extra_wallets is provided, also includes pls_minter, pls_seller etc.
+    for each additional wallet address.
     """
     aff_c  = erc20(AFFECTION)
     gibs_c = erc20(GIBS_LAU)
@@ -203,7 +206,7 @@ def snapshot_balances() -> dict:
 
     pls = _read_pool.call(lambda w3: w3.eth.get_balance(JOEY_WALLET))
 
-    return {
+    snap = {
         "pls":        pls,
         "affection":  results[0] or 0,
         "gibs":       results[1] or 0,
@@ -212,3 +215,16 @@ def snapshot_balances() -> dict:
         "fomalhaute": results[4] or 0,
         "cho":        results[5] or 0,
     }
+
+    # Extra wallet PLS balances (for multi-wallet mode)
+    if extra_wallets:
+        role_names = ["minter", "seller"]
+        for i, addr in enumerate(extra_wallets):
+            key = f"pls_{role_names[i]}" if i < len(role_names) else f"pls_extra_{i}"
+            try:
+                snap[key] = _read_pool.call(
+                    lambda w3, a=addr: w3.eth.get_balance(a))
+            except Exception:
+                snap[key] = 0
+
+    return snap
