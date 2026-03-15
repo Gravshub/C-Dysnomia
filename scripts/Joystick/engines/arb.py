@@ -282,11 +282,28 @@ class ArbEngine(EngineBase):
 
     def _cross_dex_candidates(self) -> list[tuple[str, str]]:
         """
-        Build list of (token_address, label) for tokens likely to have
-        pairs on both V1 and V2 DEXes.
+        Build list of (token_address, label) for tokens with pairs on BOTH
+        V1 and V2 DEXes against WPLS.
 
-        Sources: HUB_TOKENS + SEED_LAUS + scan_tokens() cached results.
+        Uses pair_registry.json via DataStore — zero RPC calls.
+        Falls back to live scan only if registry is empty/missing.
         """
+        from ..oracle.data_store import DataStore
+
+        store = DataStore.get()
+        dual = store.dual_dex_tokens(base_token=WPLS)
+
+        if dual:
+            candidates = [(addr, sym) for addr, sym, _v1, _v2 in dual]
+            log.debug("CrossDex: %d dual-DEX candidates from pair_registry", len(candidates))
+            return candidates
+
+        # Fallback: live scan (original logic, only if cache is empty)
+        log.info("CrossDex: pair_registry empty — falling back to live factory scan")
+        return self._cross_dex_candidates_live()
+
+    def _cross_dex_candidates_live(self) -> list[tuple[str, str]]:
+        """Original live factory scan — only used as fallback when pair_registry is empty."""
         from ..core.chain import factory_contract
 
         seen = set()
@@ -329,7 +346,7 @@ class ArbEngine(EngineBase):
 
             candidates.append((addr_cs, label))
 
-        log.debug("CrossDex: %d dual-DEX candidates found", len(candidates))
+        log.debug("CrossDex: %d dual-DEX candidates found (live scan)", len(candidates))
         return candidates
 
     def _simulate_cross_pair(self, gas_price: int) -> dict | None:

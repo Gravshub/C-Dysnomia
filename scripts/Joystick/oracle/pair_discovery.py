@@ -26,6 +26,7 @@ from ..core.config import (
     WPLS, AFFECTION, HUB_TOKENS,
     PULSEX_V1_FACTORY, PULSEX_V2_FACTORY,
     MULTICALL3, GRAPH_CACHE_TTL, RESERVE_CACHE_TTL,
+    PAIR_GRAPH_CACHE_PATH,
 )
 from ..core.chain import w3_read, safe, factory_contract
 
@@ -429,7 +430,20 @@ def save_pair_graph(graph: PairGraph) -> None:
 
 
 def load_pair_graph() -> Optional[PairGraph]:
-    """Load pair graph from cache if still valid."""
+    """Load pair graph from cache. Checks PAIR_GRAPH_CACHE_PATH env first, then default."""
+    # Priority 1: External cache path (pre-generated, skip TTL check)
+    if PAIR_GRAPH_CACHE_PATH and os.path.exists(PAIR_GRAPH_CACHE_PATH):
+        try:
+            with open(PAIR_GRAPH_CACHE_PATH) as f:
+                data = json.load(f)
+            graph = PairGraph.from_dict(data)
+            log.info("Pair graph loaded from PAIR_GRAPH_CACHE_PATH: %d edges, %d tokens",
+                     graph.edge_count, graph.token_count)
+            return graph
+        except Exception as exc:
+            log.warning("Failed to load from PAIR_GRAPH_CACHE_PATH: %s", exc)
+
+    # Priority 2: Default cache with TTL
     if not os.path.exists(REGISTRY_CACHE):
         return None
     try:
@@ -528,6 +542,17 @@ def discover_pairs(
     _filter_dust(graph)
 
     save_pair_graph(graph)
+
+    # Also update external cache if configured
+    if PAIR_GRAPH_CACHE_PATH:
+        try:
+            tmp = PAIR_GRAPH_CACHE_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(graph.to_dict(), f)
+            os.replace(tmp, PAIR_GRAPH_CACHE_PATH)
+            log.info("External pair cache updated: %s", PAIR_GRAPH_CACHE_PATH)
+        except Exception as exc:
+            log.warning("Failed to update external cache: %s", exc)
 
     log.info("Discovery complete: %d pairs, %d tokens", graph.edge_count, graph.token_count)
     return graph

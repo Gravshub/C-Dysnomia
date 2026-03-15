@@ -307,8 +307,8 @@ class TokenFactoryEngine(EngineBase):
         best = None
         mint_amount = int(1e18)  # 1 AFFECTION
 
-        v1_factory = factory_contract(PULSEX_V1_FACTORY)
-        v2_factory = factory_contract(PULSEX_V2_FACTORY)
+        from ..oracle.data_store import DataStore
+        store = DataStore.get()
 
         for child in children[:50]:  # Cap scan to 50 tokens
             if child == ZERO:
@@ -319,10 +319,8 @@ class TokenFactoryEngine(EngineBase):
             if not debenture:
                 continue
 
-            # Check DEX pair exists
-            v1_pair = safe(v1_factory, "getPair", child, WPLS)
-            v2_pair = safe(v2_factory, "getPair", child, WPLS)
-            if (not v1_pair or v1_pair == ZERO) and (not v2_pair or v2_pair == ZERO):
+            # Check DEX pair exists (cache lookup, zero RPC)
+            if not store.has_pair(child, WPLS):
                 continue
 
             # Get best DEX output
