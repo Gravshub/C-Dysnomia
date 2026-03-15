@@ -45,7 +45,15 @@ class DSSEngine(EngineBase):
     name = "DSS"
 
     def _get_gibs_pair(self) -> str | None:
-        """Return GIBS/WPLS pair address if it exists, else None."""
+        """Return GIBS/WPLS pair address from cache, or live query as fallback."""
+        from ..oracle.data_store import DataStore
+
+        store = DataStore.get()
+        pair = store.lookup_pair(GIBS_LAU, WPLS)
+        if pair:
+            return pair
+
+        # Fallback: live query (first run before pair_registry exists)
         factory = factory_contract(PULSEX_V1_FACTORY)
         pair_addr = safe(factory, "getPair", GIBS_LAU, WPLS)
         if not pair_addr or pair_addr == "0x" + "0" * 40:
