@@ -37,6 +37,7 @@ def send_tx(
     gas_mult: float = GAS_MULT,
     value: int = 0,
     skip_simulate: bool = False,
+    wallet_ctx=None,
 ) -> TxReceipt | None:
     """
     Universal TX sender. Always simulates before sending.
@@ -49,6 +50,8 @@ def send_tx(
         value:         Native PLS value to send with TX (for payable functions)
         skip_simulate: Skip eth_call pre-check (use only if .call() would fail
                        due to msg.value or state requirements)
+        wallet_ctx:    Optional WalletConfig for multi-wallet support.
+                       If None, uses Joey's wallet (backward compat).
 
     Returns:
         TxReceipt on success, None on dry_run
@@ -57,12 +60,20 @@ def send_tx(
         GasTooHigh if gas price exceeds ceiling
         AssertionError if TX reverts on-chain
     """
-    log.info("→ %s", label)
+    # Resolve wallet context
+    if wallet_ctx is not None:
+        tx_from = wallet_ctx.address
+        tx_account = wallet_ctx.account
+    else:
+        tx_from = JOEY_WALLET
+        tx_account = wallet.account
+
+    log.info("→ %s [%s]", label, tx_from[:10])
 
     # Step 1: eth_call simulation (free — always run unless skip_simulate)
     if not skip_simulate:
         try:
-            result = simulate(fn_call)
+            result = simulate(fn_call, from_address=tx_from)
             log.debug("  Simulation OK: %s", result)
         except SimulationFailed as exc:
             log.error("  Simulation FAILED: %s", exc)
@@ -72,7 +83,7 @@ def send_tx(
         log.info("  [dry-run] TX not sent: %s", label)
         return None
 
-    if wallet.account is None:
+    if tx_account is None:
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
 
     # Step 2: Gas price ceiling
@@ -84,15 +95,24 @@ def send_tx(
         )
 
     # Step 3: estimate_gas (abort if fails)
-    gas_est = estimate_gas(fn_call)
+    gas_est = estimate_gas(fn_call, from_address=tx_from)
     gas_limit = int(gas_est * gas_mult)
     cost_pls = gas_est * gas_price / 1e18
     log.info("  Gas: %d  Gwei: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
 
     # Step 4: Build TX with local nonce
+    # Use wallet_ctx's nonce if available, else fall back to Joey's global nonce
+    if wallet_ctx is not None:
+        from .wallet_manager import WalletNonce as _WN
+        # wallet_ctx doesn't carry its own nonce tracker — use the global one
+        # The WalletManager handles nonce tracking externally
+        nonce = wallet.next_nonce()  # fallback
+    else:
+        nonce = wallet.next_nonce()
+
     tx_params: dict[str, Any] = {
-        "from":     JOEY_WALLET,
-        "nonce":    wallet.next_nonce(),
+        "from":     tx_from,
+        "nonce":    nonce,
         "gas":      gas_limit,
         "gasPrice": gas_price,
         "chainId":  CHAIN_ID,
@@ -103,7 +123,7 @@ def send_tx(
     tx = fn_call.build_transaction(tx_params)
 
     # Step 5: Sign, submit via pool (auto-retry + failover + privacy tier)
-    signed  = wallet.account.sign_transaction(tx)
+    signed  = tx_account.sign_transaction(tx)
     pool = get_submit_pool()
     tx_hash_hex = pool.send_raw(signed.raw_transaction)
     if tx_hash_hex is None:
@@ -164,13 +184,15 @@ def approve_if_needed(
     label: str,
     *,
     dry_run: bool = False,
+    wallet_ctx=None,
 ) -> TxReceipt | None:
     """
     Approve spender to spend amount of token_contract.
     Skips the TX if allowance is already sufficient (idempotent).
     """
     from .chain import safe
-    current = safe(token_contract, "allowance", JOEY_WALLET, spender) or 0
+    owner_addr = wallet_ctx.address if wallet_ctx else JOEY_WALLET
+    current = safe(token_contract, "allowance", owner_addr, spender) or 0
     if current >= amount:
         log.debug("  Allowance sufficient (%.4f) — skipping approve", current / 1e18)
         return None
@@ -178,4 +200,5 @@ def approve_if_needed(
         token_contract.functions.approve(spender, amount),
         f"Approve {label}",
         dry_run=dry_run,
+        wallet_ctx=wallet_ctx,
     )

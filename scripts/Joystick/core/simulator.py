@@ -96,16 +96,21 @@ def decode_revert(error: Exception) -> str:
 
 
 # ── simulate() ───────────────────────────────────────────────────────────────
-def simulate(fn_call, gas: int = 5_000_000) -> Any:
+def simulate(fn_call, gas: int = 5_000_000, from_address: str | None = None) -> Any:
     """
     Run fn_call as a free eth_call (no gas spent, no on-chain effect).
     Raises SimulationFailed with a decoded human-readable reason on revert.
     Returns the decoded return value on success.
 
     Always called before estimate_gas() and send_tx() to catch reverts early.
+
+    Args:
+        from_address: Override the sender address for simulation.
+                      Defaults to JOEY_WALLET for backward compat.
     """
+    sender = from_address or JOEY_WALLET
     try:
-        return fn_call.call({"from": JOEY_WALLET, "gas": gas})
+        return fn_call.call({"from": sender, "gas": gas})
     except ContractLogicError as exc:
         reason = decode_revert(exc)
         log.debug("Simulation failed: %s", reason)
@@ -115,13 +120,17 @@ def simulate(fn_call, gas: int = 5_000_000) -> Any:
 
 
 # ── estimate_gas() ────────────────────────────────────────────────────────────
-def estimate_gas(fn_call) -> int:
+def estimate_gas(fn_call, from_address: str | None = None) -> int:
     """
     Estimate gas for fn_call. Raises SimulationFailed if estimation fails
     (which almost always means the TX would revert on-chain).
+
+    Args:
+        from_address: Override the sender address. Defaults to JOEY_WALLET.
     """
+    sender = from_address or JOEY_WALLET
     try:
-        return fn_call.estimate_gas({"from": JOEY_WALLET})
+        return fn_call.estimate_gas({"from": sender})
     except ContractLogicError as exc:
         reason = decode_revert(exc)
         raise SimulationFailed(f"Gas estimation failed (would revert): {reason}") from exc

@@ -1,22 +1,29 @@
 """
-strategist.py — Active Intelligence Layer for Joystick Bot
+strategist.py — Active Intelligence Layer V2 for Joystick Bot
 
 The Strategist sits between the balance snapshot and engine execution in bot.py.
-It evaluates all engines, tracks cumulative P&L, and produces a Recommendation
-that the bot either auto-executes or presents to the operator for approval.
+It evaluates all engines, tracks cumulative P&L, and produces a CycleRecommendation
+with up to 3 actions (one per wallet: Joey, Minter, Seller).
+
+V2 Improvements:
+  Phase A: Auto-discover engine roster (no hardcoded display list)
+  Phase B: Removed stale DSS PAIR_UNCONFIRMED flag
+  Phase C: SimResult dataclass integration
+  Phase D: Rotation penalty (prevent engine monopolization)
+  Phase E: GasOracle integration
+  Phase F: Cross-engine dependency map (unlock bonuses)
 
 Architecture:
   bot.py cycle:
     1. Balance snapshot (Multicall3)
-    2. Strategist.evaluate(balances, engines)   <-- HERE
-       -> reads all engine.is_ready() + roi()
-       -> checks P&L history, fund allocation
-       -> returns Recommendation(engine, rationale, confidence)
-    3. If interactive: print recommendation, wait for approval
-       If auto: execute if confidence > threshold
-    4. Engine.execute()
-    5. Strategist.record(result)                <-- HERE
-    6. Compound profits
+    2. Parallel simulate (all 8 engines via ThreadPoolExecutor)
+    3. Strategist.evaluate(balances, sim_results)   <-- HERE
+       -> partitions by wallet_role
+       -> scores each candidate
+       -> returns CycleRecommendation with 3 Recommendations
+    4. Parallel wallet execution
+    5. Strategist.record(result)                    <-- HERE
+    6. Sweep check
 
 Persistent state: data/strategist_state.json — survives restarts.
 
@@ -24,10 +31,8 @@ Usage:
     from .core.strategist import Strategist
 
     strat = Strategist(engines, interactive=True)
-    rec = strat.evaluate(balances)
-    if rec.approved:
-        result = rec.engine.execute(dry_run=False)
-        strat.record(rec.engine.name, result)
+    rec = strat.evaluate(balances, sim_results, gas_oracle)
+    # rec.joey, rec.minter, rec.seller — each a Recommendation or None
 """
 import json
 import logging
@@ -39,7 +44,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..engines.base import EngineBase, EngineResult
+    from ..engines.base import EngineBase, EngineResult, SimResult
+    from .gas_oracle import GasOracle
 
 log = logging.getLogger("joystick.strategist")
 
@@ -48,6 +54,20 @@ _STATE_FILE = _JOYSTICK_DIR / "data" / "strategist_state.json"
 
 # Validator goal — 32 million PLS
 VALIDATOR_GOAL_PLS = 32_000_000
+
+# Strategic engines — always valid to run regardless of profit or rotation
+STRATEGIC_ENGINES = {"Beat", "LAU"}
+
+# ── Cross-Engine Dependency Map (Phase F) ─────────────────────────────────────
+# When an engine+mode unlocks another engine, score the unlock bonus.
+UNLOCK_MAP: dict[tuple[str, str], list[str]] = {
+    ("PHR3AK", "arm"):    ["SpineRunner"],   # ARM acquires OZZY → E7 unlocked
+    ("PHR3AK", "deploy"): ["Arb"],           # new V4 pair → new arb edge
+    ("PHR3AK", "stitch"): ["Arb"],           # new LP pair → new arb edge
+}
+
+# Default unlock bonus for engines with no historical data
+DEFAULT_UNLOCK_BONUS = 2.0
 
 
 # ── Data types ────────────────────────────────────────────────────────────────
@@ -61,16 +81,35 @@ class Confidence(Enum):
 
 @dataclass
 class Recommendation:
-    """Single-cycle recommendation from the Strategist."""
-    engine: "EngineBase | None"   # None = skip cycle
+    """Single-wallet recommendation from the Strategist."""
+    engine: "EngineBase | None"   # None = skip this wallet
     rationale: str                # Human-readable explanation
     confidence: str               # "HIGH", "MEDIUM", "LOW", "SKIP"
+    wallet_role: str = ""         # "joey", "minter", "seller"
     roi: float = 0.0             # Expected ROI multiplier
     profit_est: float = 0.0      # Estimated profit in PLS
     gas_est: float = 0.0         # Estimated gas cost in PLS
     pool_impact_pct: float = 0.0 # Estimated slippage/pool impact 0.0-100.0
     risk_notes: list[str] = field(default_factory=list)
     approved: bool = False        # Set True after operator approval or auto-approve
+
+
+@dataclass
+class CycleRecommendation:
+    """Multi-wallet recommendation output from Strategist V2."""
+    joey:     Recommendation | None
+    minter:   Recommendation | None
+    seller:   Recommendation | None
+    rationale: str = ""
+
+    @property
+    def active_count(self) -> int:
+        return sum(1 for r in [self.joey, self.minter, self.seller]
+                   if r and r.approved)
+
+    def all_recommendations(self) -> list[Recommendation]:
+        """Return all non-None recommendations."""
+        return [r for r in [self.joey, self.minter, self.seller] if r is not None]
 
 
 @dataclass
@@ -116,11 +155,17 @@ class EngineStats:
         return EngineStats(**{k: d[k] for k in EngineStats.__dataclass_fields__ if k in d})
 
 
-# ── Strategist ────────────────────────────────────────────────────────────────
+# ── Strategist V2 ────────────────────────────────────────────────────────────
 
 class Strategist:
     """
-    Active intelligence layer. Evaluates engines, tracks P&L, recommends actions.
+    Active intelligence layer V2. Multi-wallet brain.
+
+    Evaluates engines, partitions by wallet_role, picks the best action
+    per wallet each cycle. Returns CycleRecommendation with up to 3 actions.
+
+    Backward compat: evaluate() without sim_results falls back to inline simulate().
+    Single-wallet mode: all engines assigned to Joey.
 
     Modes:
       interactive=True:  Prints recommendation, waits for operator Y/N
@@ -130,65 +175,135 @@ class Strategist:
     AUTO_THRESHOLD = "MEDIUM"  # Auto-approve at this confidence or above
     CONFIDENCE_ORDER = {"SKIP": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
 
-    def __init__(self, engines: list["EngineBase"], interactive: bool = False):
+    def __init__(
+        self,
+        engines: list["EngineBase"],
+        interactive: bool = False,
+        gas_oracle: "GasOracle | None" = None,
+        multi_wallet: bool = False,
+    ):
         self.engines = engines
         self.interactive = interactive
+        self.gas_oracle = gas_oracle
+        self.multi_wallet = multi_wallet
         self.stats: dict[str, EngineStats] = {}
         self.session_start = time.time()
         self.cycles_run = 0
         self.total_session_profit = 0.0
         self._load_state()
 
-    # ── Core evaluate method ──────────────────────────────────────────────────
+    # ── Core evaluate method (V2 — multi-wallet) ─────────────────────────────
 
-    def evaluate(self, balances: dict) -> Recommendation:
+    def evaluate(
+        self,
+        balances: dict,
+        sim_results: "dict[str, SimResult] | None" = None,
+        gas_oracle: "GasOracle | None" = None,
+    ) -> CycleRecommendation:
         """
-        Evaluate all engines and return a single Recommendation.
+        Evaluate all engines and return a CycleRecommendation with up to 3 actions.
 
-        Called once per cycle, after balance snapshot, before engine execution.
+        If sim_results is provided (from parallel_simulate), uses pre-computed data.
+        Otherwise falls back to inline simulate() calls (backward compat).
         """
         self.cycles_run += 1
         pls_bal = balances.get("pls", 0) / 1e18
+        oracle = gas_oracle or self.gas_oracle
 
-        # Gather candidates: ready, not disabled, with simulation data
-        candidates = []
+        from .config import CYCLE_DELAY
+
+        # Gather candidates with simulation data
+        scored_by_role: dict[str, list] = {"joey": [], "minter": [], "seller": []}
+
         for engine in self.engines:
             if engine.is_disabled():
                 continue
             if not engine.is_ready():
                 continue
 
-            try:
-                profit_wei, gas_wei = engine.simulate()
-                profit_pls = profit_wei / 1e18
-                gas_pls = gas_wei / 1e18
-                roi = profit_wei / gas_wei if gas_wei > 0 else 0.0
-            except Exception:
-                profit_pls, gas_pls, roi = 0.0, 0.0, 0.0
+            # Get simulation data
+            if sim_results and engine.name in sim_results:
+                sim = sim_results[engine.name]
+                if not sim.success:
+                    continue
+                profit_pls = sim.profit_wei / 1e18
+                gas_pls = sim.gas_wei / 1e18
+                roi = sim.roi
+                pool_impact = sim.pool_impact_pct
+                mode = sim.mode
+            else:
+                # Fallback: inline simulate
+                try:
+                    profit_wei, gas_wei = engine.simulate()
+                    profit_pls = profit_wei / 1e18
+                    gas_pls = gas_wei / 1e18
+                    roi = profit_wei / gas_wei if gas_wei > 0 else 0.0
+                    pool_impact = getattr(engine, '_last_pool_impact_pct', 0.0)
+                    mode = ""
+                except Exception:
+                    continue
 
             stats = self.stats.get(engine.name, EngineStats())
-            candidates.append((engine, profit_pls, gas_pls, roi, stats))
 
-        if not candidates:
-            return Recommendation(
-                engine=None,
-                rationale="No engines ready this cycle",
-                confidence="SKIP",
-            )
-
-        # Score and rank candidates
-        scored = []
-        for engine, profit_pls, gas_pls, roi, stats in candidates:
+            # Score this candidate
             score, confidence, risks = self._score_candidate(
-                engine, profit_pls, gas_pls, roi, stats, pls_bal
+                engine, profit_pls, gas_pls, roi, stats, pls_bal,
+                pool_impact=pool_impact, mode=mode, oracle=oracle,
+                cycle_delay=CYCLE_DELAY,
             )
-            scored.append((score, engine, profit_pls, gas_pls, roi, confidence, risks))
+
+            # Determine wallet role
+            if self.multi_wallet:
+                role = engine.wallet_role
+            else:
+                role = "joey"  # Single-wallet: everything goes to Joey
+
+            scored_by_role.setdefault(role, []).append(
+                (score, engine, profit_pls, gas_pls, roi, confidence, risks, pool_impact)
+            )
+
+        # Pick best candidate per wallet role
+        joey_rec = self._pick_best(scored_by_role.get("joey", []), "joey", pls_bal)
+        minter_rec = self._pick_best(scored_by_role.get("minter", []), "minter", pls_bal)
+        seller_rec = self._pick_best(scored_by_role.get("seller", []), "seller", pls_bal)
+
+        # Build overall rationale
+        active = [r for r in [joey_rec, minter_rec, seller_rec] if r and r.engine]
+        if active:
+            names = [f"{r.wallet_role}:{r.engine.name}" for r in active]
+            rationale = f"Cycle {self.cycles_run}: {', '.join(names)}"
+        else:
+            rationale = f"Cycle {self.cycles_run}: No engines ready"
+
+        # Approval
+        for rec in [joey_rec, minter_rec, seller_rec]:
+            if rec and rec.engine:
+                if self.interactive:
+                    rec.approved = self._prompt_operator(rec)
+                else:
+                    rec.approved = self._auto_approve(rec)
+
+        return CycleRecommendation(
+            joey=joey_rec,
+            minter=minter_rec if self.multi_wallet else None,
+            seller=seller_rec if self.multi_wallet else None,
+            rationale=rationale,
+        )
+
+    def _pick_best(
+        self,
+        scored: list,
+        wallet_role: str,
+        pls_bal: float,
+    ) -> Recommendation | None:
+        """Pick the best scoring candidate for a wallet role."""
+        if not scored:
+            return None
 
         scored.sort(key=lambda x: x[0], reverse=True)
         best = scored[0]
-        _, engine, profit_pls, gas_pls, roi, confidence, risks = best
+        score, engine, profit_pls, gas_pls, roi, confidence, risks, pool_impact = best
 
-        # Build rationale
         runner_up = scored[1][1].name if len(scored) > 1 else "none"
         rationale = self._build_rationale(
             engine, profit_pls, gas_pls, roi, confidence,
@@ -196,27 +311,21 @@ class Strategist:
             runner_up, pls_bal,
         )
 
-        rec = Recommendation(
+        return Recommendation(
             engine=engine,
             rationale=rationale,
             confidence=confidence,
+            wallet_role=wallet_role,
             roi=roi,
             profit_est=profit_pls,
             gas_est=gas_pls,
+            pool_impact_pct=pool_impact,
             risk_notes=risks,
         )
 
-        # Approval
-        if self.interactive:
-            rec.approved = self._prompt_operator(rec)
-        else:
-            rec.approved = self._auto_approve(rec)
-
-        return rec
-
     # ── Record outcome ────────────────────────────────────────────────────────
 
-    def record(self, engine_name: str, result: "EngineResult") -> None:
+    def record(self, engine_name: str, result: "EngineResult", wallet_role: str = "") -> None:
         """Record engine execution result into persistent stats."""
         if engine_name not in self.stats:
             self.stats[engine_name] = EngineStats()
@@ -242,7 +351,7 @@ class Strategist:
 
         self._save_state()
 
-    # ── Scoring internals ─────────────────────────────────────────────────────
+    # ── Scoring internals (V2 — all 6 phases) ────────────────────────────────
 
     def _score_candidate(
         self,
@@ -252,16 +361,28 @@ class Strategist:
         roi: float,
         stats: EngineStats,
         pls_balance: float,
+        *,
+        pool_impact: float = 0.0,
+        mode: str = "",
+        oracle: "GasOracle | None" = None,
+        cycle_delay: int = 30,
     ) -> tuple[float, str, list[str]]:
         """
         Score a candidate engine. Returns (score, confidence, risk_notes).
 
-        Score components:
-          - ROI weight (primary)
-          - Win rate bonus (historical reliability)
-          - Recency penalty (don't spam the same engine)
-          - Strategic bonus (Beat/LAU run even at 0 profit)
-          - Risk penalties
+        V2 scoring phases:
+          1. ROI weight (primary)
+          2. Win rate bonus
+          3. Consecutive failure penalty
+          4. Strategic engine floor
+          5. PLS balance check
+          6. Gas affordability check
+          7. Profit/loss check
+          8. Pool impact penalty (Phase C — from SimResult)
+          9. Rotation penalty (Phase D)
+          10. GasOracle integration (Phase E)
+          11. Cross-engine unlock bonus (Phase F)
+          12. New engine flag
         """
         risks = []
         score = 0.0
@@ -281,7 +402,7 @@ class Strategist:
             risks.append("RECENT_FAILURE")
 
         # 4. Strategic engines get a floor score (Beat, LAU advance game state)
-        if engine.name in ("Beat", "LAU") and score < 1.0:
+        if engine.name in STRATEGIC_ENGINES and score < 1.0:
             score = max(score, 1.0)
             if profit_pls <= gas_pls:
                 risks.append("Strategic run (no direct profit)")
@@ -297,12 +418,11 @@ class Strategist:
             score -= 1.0
 
         # 7. Profit/loss check
-        if profit_pls <= gas_pls and engine.name not in ("Beat", "LAU"):
+        if profit_pls <= gas_pls and engine.name not in STRATEGIC_ENGINES:
             risks.append("Unprofitable (profit <= gas)")
             score -= 5.0
 
-        # 8. Pool impact penalty (from simulate data — engines can expose this)
-        pool_impact = getattr(engine, '_last_pool_impact_pct', 0.0)
+        # 8. Pool impact penalty (Phase C — from SimResult data)
         if pool_impact > 5.0:
             risks.append("THIN_POOL")
             score -= 2.0
@@ -310,16 +430,41 @@ class Strategist:
             risks.append("POOL_IMPACT_MODERATE")
             score -= 0.5
 
-        # 9. Engine-specific flags
-        if engine.name == "DSS":
-            risks.append("PAIR_UNCONFIRMED")  # DSS should block in is_ready() but defensive
+        # 9. Rotation penalty (Phase D) — prevent engine monopolization
+        if stats.last_run_epoch > 0:
+            secs_since_last = time.time() - stats.last_run_epoch
+            if (secs_since_last < cycle_delay * 3
+                    and engine.name not in STRATEGIC_ENGINES):
+                score -= 1.0
+                risks.append("RECENT_RUN")
 
-        # 10. New token / unproven engine flag
+        # 10. GasOracle integration (Phase E) — defer non-urgent when gas is falling
+        if oracle and oracle.should_wait():
+            confidence_high = score >= 5.0
+            if not confidence_high and engine.name not in STRATEGIC_ENGINES:
+                risks.append("GAS_FALLING")
+
+        # 11. Cross-engine unlock bonus (Phase F)
+        unlock_key = (engine.name, mode) if mode else None
+        if unlock_key and unlock_key in UNLOCK_MAP:
+            blocked_engines = UNLOCK_MAP[unlock_key]
+            for blocked_name in blocked_engines:
+                blocked_stats = self.stats.get(blocked_name, EngineStats())
+                if blocked_stats.total_successes > 0:
+                    bonus = (blocked_stats.avg_profit_pls / max(gas_pls, 0.001)) * 0.5
+                else:
+                    bonus = DEFAULT_UNLOCK_BONUS
+                score += bonus
+                risks.append(f"UNLOCK:{blocked_name}")
+
+        # 12. New engine flag
         if stats.total_runs == 0:
             risks.append("NEW_ENGINE")
 
         # Confidence mapping
-        if score >= 5.0 and len([r for r in risks if r in ("THIN_POOL", "RECENT_FAILURE", "BELOW_GAS_BUFFER")]) == 0:
+        critical_risks = {"THIN_POOL", "RECENT_FAILURE", "BELOW_GAS_BUFFER"}
+        has_critical = len([r for r in risks if r in critical_risks]) > 0
+        if score >= 5.0 and not has_critical:
             confidence = "HIGH"
         elif score >= 2.0:
             confidence = "MEDIUM"
@@ -333,6 +478,11 @@ class Strategist:
             confidence = "MEDIUM"
         if pool_impact > 5.0 and confidence == "MEDIUM":
             confidence = "LOW"
+
+        # Phase E: GAS_FALLING downgrades non-HIGH, non-strategic to SKIP
+        if "GAS_FALLING" in risks and confidence not in ("HIGH",):
+            if engine.name not in STRATEGIC_ENGINES:
+                confidence = "SKIP"
 
         return score, confidence, risks
 
@@ -350,7 +500,7 @@ class Strategist:
         """Build a human-readable rationale string."""
         net = profit_pls - gas_pls
         parts = [
-            f"Recommend: {engine.name} [{confidence}]",
+            f"Recommend: {engine.display_name} [{confidence}]",
             f"  Est. profit: {profit_pls:.4f} PLS | Gas: {gas_pls:.4f} PLS | Net: {net:.4f} PLS | ROI: {roi:.2f}x",
         ]
 
@@ -384,7 +534,7 @@ class Strategist:
         """Print recommendation and wait for operator Y/N."""
         print()
         print("=" * 60)
-        print("  STRATEGIST RECOMMENDATION")
+        print(f"  STRATEGIST RECOMMENDATION [{rec.wallet_role.upper()}]")
         print("=" * 60)
         print(rec.rationale)
         if rec.risk_notes:
@@ -396,7 +546,7 @@ class Strategist:
             return False
 
         try:
-            answer = input("  Execute? [Y/n/q] ").strip().lower()
+            answer = input(f"  Execute {rec.wallet_role}? [Y/n/q] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return False
@@ -450,15 +600,18 @@ class Strategist:
     def summary(self) -> str:
         """
         Formatted P&L summary table for --status output.
+        Phase A: Auto-discovers engines from self.engines (no hardcoded list).
         Returns a multi-line string.
         """
         lines = []
         w = 60
         lines.append(f"{'━' * w}")
-        lines.append(f" JOYSTICK P&L SUMMARY")
+        lines.append(f" JOYSTICK P&L SUMMARY (V2)")
         lines.append(f"{'━' * w}")
+        wallet_mode = "Multi-Wallet" if self.multi_wallet else "Single-Wallet"
         lines.append(f" Mode: {'Interactive' if self.interactive else 'Auto'}  |  "
-                      f"Threshold: {self.AUTO_THRESHOLD}  |  Cycles: {self.cycles_run}")
+                      f"Threshold: {self.AUTO_THRESHOLD}  |  Cycles: {self.cycles_run}  |  "
+                      f"{wallet_mode}")
         lines.append(f"{'─' * w}")
 
         # Header row
@@ -468,24 +621,18 @@ class Strategist:
         )
         lines.append(f"{'─' * w}")
 
-        # Canonical engine order
-        engine_order = ["Arb", "DSS", "Beat", "TokenFactory", "LAU"]
-        engine_display = {
-            "Arb": "Engine 1 Arb",
-            "DSS": "Engine 2 DSS",
-            "Beat": "Engine 3 Beat",
-            "TokenFactory": "Engine 4 Factory",
-            "LAU": "Engine 5 LAU",
-        }
-
+        # Phase A: Auto-discover from self.engines
         total_calls = 0
         total_successes = 0
         total_profit = 0.0
         total_gas = 0.0
 
-        for name in engine_order:
+        seen_names = set()
+        for engine in self.engines:
+            name = engine.name
+            seen_names.add(name)
             s = self.stats.get(name, EngineStats())
-            display = engine_display.get(name, name)
+            display = engine.display_name
             win_str = f"{s.win_rate:.0%}" if s.total_runs > 0 else "—%"
             lines.append(
                 f" {display:<18} {s.total_runs:>5}  {win_str:>5}  "
@@ -497,9 +644,9 @@ class Strategist:
             total_profit += s.total_profit_pls
             total_gas += s.total_gas_pls
 
-        # Also show any engines not in the canonical list
+        # Also show any tracked engines not currently in the roster (historical)
         for name, s in sorted(self.stats.items()):
-            if name not in engine_order:
+            if name not in seen_names:
                 win_str = f"{s.win_rate:.0%}" if s.total_runs > 0 else "—%"
                 lines.append(
                     f" {name:<18} {s.total_runs:>5}  {win_str:>5}  "

@@ -1,43 +1,46 @@
 """
-bot.py — Joystick: Dysnomia Self-Regulating Arbitrage Bot
+bot.py — Joystick V2: Dysnomia Self-Regulating Arbitrage Bot
 
-Orchestrates all income engines with an active-intelligence Strategist:
-  Engine 1 — Arb:          Purchase → DEX arb (AFFECTION/pDAI routes)
-  Engine 2 — DSS:          chatAndClaimWithMultiplier → GIBS → PLS
-  Engine 3 — Beat:         META.Beat() territory metrics
-  Engine 4 — TokenFactory: AFFECTION Generate() gas-mint + WM batch mint + token mint/sell
-  Engine 5 — LAU:          ABUPRU Faung advancement + EmitSniper
-  Engine 6 — DaVINCI:      Treasury sniping via recon data
-  Engine 7 — BACKBONE:     Spine runner (V2 Federal mint-claim loop)
-  Engine 8 — PHR3AK:       Token web manipulation (DEPLOY/ARM/STITCH)
+3-wallet parallel pipeline with async orchestration:
+  Engine 1 — Arb (RAZOR):     Purchase → DEX arb (AFFECTION/pDAI routes)     [Seller]
+  Engine 2 — DSS (CEREAL):    chatAndClaimWithMultiplier → GIBS → PLS        [Joey]
+  Engine 3 — Beat (MERIDIAN): META.Beat() territory metrics                  [Joey]
+  Engine 4 — Factory:         AFFECTION Generate() + WM batch mint           [Minter]
+  Engine 5 — LAU (ABUPRU):    ABUPRU Faung advancement + EmitSniper          [Joey]
+  Engine 6 — DaVINCI:         Treasury sniping via recon data                [Minter]
+  Engine 7 — BACKBONE:        Spine runner (V2 Federal mint-claim loop)      [Minter]
+  Engine 8 — PHR3AK:          Token web manipulation (DEPLOY/ARM/STITCH)     [Minter]
 
-Per-cycle flow:
-  0. Multicall balance snapshot (1 RPC call)
-  1. Gas guard — abort if PLS < 100K floor, emergency-sell to refill
-  2. Nonce reset — fresh nonce from chain
-  3. Strategist.evaluate() — scores all engines, returns Recommendation
-  4. Interactive: ask operator for approval | Auto: approve if confidence >= MEDIUM
-  5. Execute approved engine (one per cycle to avoid nonce contention)
-  6. Strategist.record() — persist P&L and engine stats
-  7. Compound profits: 25% stays as PLS, 75% → AFFECTION for next arb
-  8. Run eligible gameplay loops (Terraform, etc.)
+Per-cycle flow (V2):
+  0. Multicall balance snapshot (all 3 wallets, 1 RPC call)
+  1. Gas guard — abort if PLS < 100K floor
+  2. Nonce reset for all wallets
+  3. Parallel simulate — all 8 engines via ThreadPoolExecutor (~300ms)
+  4. Strategist V2 evaluate — returns CycleRecommendation (up to 3 actions)
+  5. Parallel wallet execution — asyncio.gather() across wallets
+  6. Record results, sell queue update, sweep check
+  7. Gameplay loops (Terraform, etc.)
 
 Usage:
   python -m scripts.Joystick.bot                    # auto mode
   python -m scripts.Joystick.bot --interactive      # ask before each action
   python -m scripts.Joystick.bot --dry-run          # simulate only, no TXs
   python -m scripts.Joystick.bot --once             # run one cycle and exit
-  python -m scripts.Joystick.bot --status           # print engine/strategist status and exit
-  python -m scripts.Joystick.bot --beat-only        # run Beat engine only (debugging)
+  python -m scripts.Joystick.bot --status           # print engine/strategist status
+  python -m scripts.Joystick.bot --wallet-status    # show 3-wallet balances + auth
+  python -m scripts.Joystick.bot --single-wallet    # force single-wallet mode
+  python -m scripts.Joystick.bot --beat-only        # run Beat engine only
+  python -m scripts.Joystick.bot --lau-only         # run LAU engine only
 
 Env:
   DYSNOMIA_PRIVATE_KEY   Joey's wallet key
-  PULSECHAIN_RPC         Override RPC (default: https://rpc.pulsechain.com)
+  MINTER_PRIVATE_KEY     Minter wallet key (optional — enables multi-wallet)
+  SELLER_PRIVATE_KEY     Seller wallet key (optional — enables multi-wallet)
   CYCLE_DELAY            Seconds between cycles (default: 30)
   PLS_GAS_FLOOR          Min PLS to keep (default: 100000 PLS)
-  PROFIT_SPLIT           Fraction kept as PLS (default: 0.25)
 """
 import argparse
+import asyncio
 import logging
 import logging.handlers
 import os
@@ -59,7 +62,9 @@ from .core.gas_guard import GasGuard
 from .core.gas_oracle import GasOracle
 from .core.simulator import SimulationFailed, GasTooHigh
 from .core.event_logger import events as _events
-from .core.strategist import Strategist
+from .core.strategist import Strategist, CycleRecommendation
+from .core.concurrency import SimExecutor
+from .core.wallet_manager import WalletManager, WalletRole
 from .engines.arb   import ArbEngine
 from .engines.dss   import DSSEngine
 from .engines.beat  import BeatEngine
@@ -76,22 +81,31 @@ log = logging.getLogger("joystick")
 
 class DysnomiaBot:
     """
-    The Joystick orchestrator.
+    The Joystick V2 orchestrator.
 
-    Adding a new engine:   self.engines.append(NewEngine())
-    Adding a new loop:     self.loops.append(NewLoop())
-    No other changes required — Strategist picks the best engine each cycle.
+    3-wallet parallel pipeline with async simulation and execution.
+    Falls back to single-wallet mode if worker keys are not configured.
     """
 
-    def __init__(self, dry_run: bool = False, interactive: bool = False):
+    def __init__(
+        self,
+        dry_run: bool = False,
+        interactive: bool = False,
+        force_single_wallet: bool = False,
+    ):
         self.dry_run    = dry_run
         self.cycle      = 0
         self.gas_guard  = GasGuard()
         self.gas_oracle = GasOracle()
         self.delay      = AdaptiveDelay()
 
+        # Multi-wallet manager (gracefully degrades to single-wallet)
+        self.wallet_mgr = WalletManager()
+        self.multi_wallet = self.wallet_mgr.is_multi_wallet and not force_single_wallet
+        if force_single_wallet and self.wallet_mgr.is_multi_wallet:
+            log.info("--single-wallet: forcing single-wallet mode")
+
         # Engine priority is determined by Strategist scoring each cycle.
-        # List order only matters as a tiebreaker within equal scores.
         self.engines = [
             ArbEngine(),
             DSSEngine(),
@@ -103,8 +117,26 @@ class DysnomiaBot:
             PhreakEngine(),
         ]
 
-        # Active intelligence layer — evaluates, recommends, tracks P&L
-        self.strategist = Strategist(self.engines, interactive=interactive)
+        # Active intelligence layer V2
+        self.strategist = Strategist(
+            self.engines,
+            interactive=interactive,
+            gas_oracle=self.gas_oracle,
+            multi_wallet=self.multi_wallet,
+        )
+
+        # Parallel simulation executor
+        self.sim_executor = SimExecutor()
+
+        # Sell queue (tracks TGSv8 token balances for Seller)
+        self.sell_queue = None
+        try:
+            from .core.config import TGSV8
+            if TGSV8:
+                from .core.sell_queue import SellQueue
+                self.sell_queue = SellQueue(TGSV8)
+        except Exception:
+            pass
 
         # Gameplay loops run after engines (lower priority, positional)
         self.loops = [
@@ -116,27 +148,39 @@ class DysnomiaBot:
     def run_forever(self) -> None:
         """Main loop. Ctrl-C to stop gracefully."""
         mode = "interactive" if self.strategist.interactive else "auto"
-        log.info("Joystick starting. Wallet: %s  Mode: %s  Dry-run: %s",
-                 JOEY_WALLET, mode, self.dry_run)
+        wallet_mode = "multi-wallet" if self.multi_wallet else "single-wallet"
+        log.info("Joystick V2 starting. Wallet: %s  Mode: %s  Wallets: %s  Dry-run: %s",
+                 JOEY_WALLET, mode, wallet_mode, self.dry_run)
         _events.log("bot.start", data={
             "wallet": JOEY_WALLET,
             "mode": mode,
+            "wallet_mode": wallet_mode,
             "dry_run": self.dry_run,
             "engines": [e.name for e in self.engines],
             "loops": [l.name for l in self.loops],
         })
+
+        # Use asyncio event loop for the main cycle
+        try:
+            asyncio.run(self._async_run_forever())
+        except KeyboardInterrupt:
+            log.info("Interrupted — stopping.")
+            _events.log("bot.stop", notes="KeyboardInterrupt")
+        finally:
+            self.sim_executor.shutdown()
+
+    async def _async_run_forever(self) -> None:
+        """Async main loop."""
         while True:
             try:
-                outcome = self.run_cycle()
+                outcome = await self._async_run_cycle()
             except KeyboardInterrupt:
-                log.info("Interrupted — stopping.")
-                _events.log("bot.stop", notes="KeyboardInterrupt")
-                break
+                raise
             except GasTooHigh as exc:
                 self.delay.after_gas_high()
                 log.warning("Gas too high: %s — sleeping %.0fs",
                             exc, self.delay.seconds)
-                self.delay.wait()
+                await asyncio.sleep(self.delay.seconds)
                 continue
             except Exception as exc:
                 log.error("Cycle %d uncaught: %s", self.cycle, exc, exc_info=True)
@@ -147,24 +191,39 @@ class DysnomiaBot:
                 self.delay.after_profit()
             elif outcome == "skip":
                 self.delay.after_skip()
-            else:  # "failure", "strategic"
+            else:
                 self.delay.after_failure()
 
             self.cycle += 1
             log.info("Cycle %d done — sleeping %.0fs", self.cycle - 1, self.delay.seconds)
-            self.delay.wait()
+            await asyncio.sleep(self.delay.seconds)
 
     def run_cycle(self) -> str:
-        """Single bot cycle. Returns outcome: 'profit', 'skip', 'failure', or 'strategic'."""
+        """Synchronous wrapper for backward compat with --once."""
+        return asyncio.run(self._async_run_cycle())
+
+    async def _async_run_cycle(self) -> str:
+        """Single bot cycle (async). Returns outcome: 'profit', 'skip', 'failure', or 'strategic'."""
         log.info("━━━ Cycle %d ━━━", self.cycle)
 
         # 0. Balance snapshot (Multicall3: 1 RPC call)
-        snap = snapshot_balances()
+        extra_wallets = []
+        if self.multi_wallet:
+            if self.wallet_mgr.minter:
+                extra_wallets.append(self.wallet_mgr.minter.address)
+            if self.wallet_mgr.seller:
+                extra_wallets.append(self.wallet_mgr.seller.address)
+
+        snap = snapshot_balances(extra_wallets=extra_wallets or None)
         log.info(
             "PLS=%.1f  AFF=%.4f  GIBS=%.1f  WM=%.4f  Fornax=%.4f",
             snap["pls"] / 1e18, snap["affection"] / 1e18,
             snap["gibs"] / 1e18, snap["wm"] / 1e18, snap["fornax"] / 1e18,
         )
+        if self.multi_wallet:
+            for key in ["pls_minter", "pls_seller"]:
+                if key in snap:
+                    log.info("  %s=%.1f", key, snap[key] / 1e18)
         _events.log_balance_snapshot(snap)
 
         # 0b. Gas oracle update (rolling window)
@@ -176,9 +235,6 @@ class DysnomiaBot:
             gas_status["trend"], gas_status["ceiling_gwei"],
         )
 
-        # Gas above ceiling — raise GasTooHigh so run() uses the existing
-        # adaptive delay path (after_gas_high → 2x backoff, not after_skip
-        # which would cause exponential backoff every cycle)
         if self.gas_oracle.is_above_ceiling():
             raise GasTooHigh(
                 f"Gas {gas_status['current_gwei']:.0f} Gwei > "
@@ -197,30 +253,41 @@ class DysnomiaBot:
                 log.warning("[dry-run] Gas below floor — would trigger emergency refill")
                 return "failure"
 
-        # 2. Reset nonce for fresh cycle
+        # 2. Reset nonces for all wallets
         reset_nonce()
+        if self.multi_wallet:
+            self.wallet_mgr.reset_all_nonces()
 
         engines_status = [e.status_line() for e in self.engines]
 
-        # 3. Strategist evaluates all engines and returns a recommendation
-        rec = self.strategist.evaluate(snap)
+        # 3. Parallel simulate — all engines via ThreadPoolExecutor
+        sim_results = await self.sim_executor.parallel_simulate(self.engines)
+
+        # 4. Strategist V2 evaluates and returns CycleRecommendation
+        cycle_rec = self.strategist.evaluate(snap, sim_results, self.gas_oracle)
+
+        # Advisory: log if gas is falling
+        if self.gas_oracle.should_wait():
+            log.info("GasOracle: gas is falling — non-urgent engines may benefit from waiting")
+
+        cycle_outcome = "skip"
         engine_ran = ""
         result_notes = ""
         cycle_success = True
 
-        cycle_outcome = "skip"
+        # 5. Execute recommendations
+        # In multi-wallet mode, we could run in parallel.
+        # For now, execute sequentially per wallet for safety.
+        for rec in cycle_rec.all_recommendations():
+            if rec.engine is None or not rec.approved:
+                reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
+                log.info("Strategist [%s]: %s", rec.wallet_role, reason)
+                continue
 
-        # Advisory: log if gas is falling (non-urgent engines may benefit from waiting)
-        if self.gas_oracle.should_wait():
-            log.info("GasOracle: gas is falling — non-urgent engines may benefit from waiting")
-
-        if rec.engine is None or not rec.approved:
-            reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
-            log.info("Strategist: %s", reason)
-        else:
             engine = rec.engine
-            log.info("▶ %s [%s]: est profit %.4f PLS (gas %.4f PLS, ROI %.2fx)",
-                     engine.name, rec.confidence, rec.profit_est, rec.gas_est, rec.roi)
+            log.info("▶ %s [%s] → %s: est profit %.4f PLS (gas %.4f PLS, ROI %.2fx)",
+                     engine.display_name, rec.confidence, rec.wallet_role,
+                     rec.profit_est, rec.gas_est, rec.roi)
 
             # Measure realized PLS profit via balance delta
             pls_before = pls_balance()
@@ -228,8 +295,8 @@ class DysnomiaBot:
             result = engine.execute(dry_run=self.dry_run)
             _events.log_engine_result(engine.name, result, cycle_num=self.cycle)
 
-            # Record into both engine circuit breaker AND strategist P&L
-            self.strategist.record(engine.name, result)
+            # Record into strategist P&L
+            self.strategist.record(engine.name, result, wallet_role=rec.wallet_role)
 
             if result.success:
                 engine.record_success()
@@ -237,46 +304,57 @@ class DysnomiaBot:
                 pls_after = pls_balance()
                 realized_profit = max(0, pls_after - pls_before)
 
-                log.info("✓ %s: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
-                         engine.name, result.net_pls, realized_profit / 1e18,
+                log.info("✓ %s [%s]: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
+                         engine.display_name, rec.wallet_role,
+                         result.net_pls, realized_profit / 1e18,
                          len(result.tx_hashes), result.notes)
 
-                if realized_profit > 0 and not self.dry_run:
+                if realized_profit > 0 and not self.dry_run and not self.multi_wallet:
+                    # Only auto-compound in single-wallet mode
                     self.compound(realized_profit)
+                    cycle_outcome = "profit"
+                elif realized_profit > 0:
                     cycle_outcome = "profit"
                 else:
                     cycle_outcome = "strategic"
             else:
                 engine.record_failure()
-                log.error("✗ %s failed: %s", engine.name, result.notes)
+                log.error("✗ %s [%s] failed: %s", engine.display_name,
+                          rec.wallet_role, result.notes)
                 cycle_success = False
                 cycle_outcome = "failure"
 
-            # Structured cycle log line (TASK 5)
+            # Structured cycle log line
             now = datetime.now()
             ts_str = now.strftime("%H:%M:%S")
             dt_str = now.strftime("%m/%d/%Y")
             tx_short = result.tx_hashes[0][:10] + "..." if result.tx_hashes else "none"
             if result.success:
                 log.info(
-                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [SUCCESS] "
+                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [%s] [SUCCESS] "
                     "profit=+%.2f PLS | gas=%.1f PLS | net=+%.2f PLS | roi=%.2fx | tx=%s",
-                    self.cycle, ts_str, dt_str, engine.name,
+                    self.cycle, ts_str, dt_str, engine.display_name, rec.wallet_role,
                     result.profit_pls, result.gas_pls, result.net_pls,
                     rec.roi, tx_short,
                 )
             else:
                 log.info(
-                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [FAILED]  "
+                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [%s] [FAILED]  "
                     "profit=0 PLS | gas=0 PLS | reason=%s",
-                    self.cycle, ts_str, dt_str, engine.name,
+                    self.cycle, ts_str, dt_str, engine.display_name, rec.wallet_role,
                     result.notes[:100],
                 )
 
             engine_ran = engine.name
             result_notes = result.notes
 
-        # 5. Gameplay loops (after engine — lower priority)
+        # 6. Sweep check (multi-wallet mode)
+        if self.multi_wallet and not self.dry_run:
+            if self.wallet_mgr.check_sweep():
+                log.info("Sweep threshold exceeded — sweeping Seller PLS to Joey")
+                self.wallet_mgr.execute_sweep(dry_run=self.dry_run)
+
+        # 7. Gameplay loops (after engines — lower priority)
         for loop in self.loops:
             if loop.is_throttled():
                 continue
@@ -298,12 +376,12 @@ class DysnomiaBot:
                         notes=result.notes,
                     )
 
-        # 6. Periodic RPC health log (every 100 cycles)
+        # 8. Periodic RPC health log (every 100 cycles)
         if self.cycle > 0 and self.cycle % 100 == 0:
             for r in get_read_pool().health_report():
                 log.info("RPC[read] %s: %sms err=%s%%", r["name"], r["latency_ms"], r["error_rate"])
 
-        # 7. Cycle summary event
+        # 9. Cycle summary event
         _events.log_cycle(
             cycle_num=self.cycle,
             balances=snap,
@@ -320,6 +398,7 @@ class DysnomiaBot:
         Route profits: 25% stays as PLS (gas reserve + validator fund).
                        75% → buy AFFECTION for next arb cycle.
         Respects PLS_GAS_FLOOR — will reduce or skip to avoid breaching.
+        Only used in single-wallet mode.
         """
         compound_wei = int(profit_pls_wei * (1.0 - PROFIT_SPLIT))
         if compound_wei < 10**16:  # < 0.01 PLS — not worth the gas
@@ -361,7 +440,9 @@ class DysnomiaBot:
         """Print engine, strategist, and wallet status without running anything."""
         snap = snapshot_balances()
         print(f"\n{'━'*60}")
-        print(f"  Joystick Status — {JOEY_WALLET}")
+        print(f"  Joystick V2 Status — {JOEY_WALLET}")
+        wallet_mode = "Multi-Wallet" if self.multi_wallet else "Single-Wallet"
+        print(f"  Mode: {wallet_mode}")
         print(f"{'━'*60}")
         print(f"  PLS:        {fmt_pls(snap['pls'])}")
         print(f"  AFFECTION:  {snap['affection'] / 1e18:.4f}")
@@ -384,9 +465,18 @@ class DysnomiaBot:
         print()
         print(f"  Gas Oracle: {self.gas_oracle}")
         print()
-        # P&L summary table from Strategist
+        # P&L summary table from Strategist V2
         print(self.strategist.summary())
         print()
+
+    def print_wallet_status(self) -> None:
+        """Print 3-wallet balances, auth status, and nonces."""
+        print(f"\n{'━'*60}")
+        print(f"  Joystick V2 — Wallet Status")
+        print(f"{'━'*60}")
+        for line in self.wallet_mgr.wallet_status_lines():
+            print(line)
+        print(f"{'━'*60}\n")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -422,7 +512,7 @@ def main() -> None:
     _setup_logging()
 
     parser = argparse.ArgumentParser(
-        description="Joystick — Dysnomia self-regulating arbitrage bot"
+        description="Joystick V2 — Dysnomia 3-wallet parallel arbitrage bot"
     )
     parser.add_argument("--dry-run",   action="store_true",
                         help="Simulate all operations — no TXs sent")
@@ -440,6 +530,10 @@ def main() -> None:
                         help="Print event log statistics and recent events")
     parser.add_argument("--rpc-status", action="store_true",
                         help="Print RPC provider health and exit")
+    parser.add_argument("--single-wallet", action="store_true",
+                        help="Force single-wallet mode even if worker keys are set")
+    parser.add_argument("--wallet-status", action="store_true",
+                        help="Show 3-wallet balances, auth status, nonces")
     args = parser.parse_args()
 
     if args.rpc_status:
@@ -449,7 +543,15 @@ def main() -> None:
         rpc_health()
         return
 
-    bot = DysnomiaBot(dry_run=args.dry_run, interactive=args.interactive)
+    bot = DysnomiaBot(
+        dry_run=args.dry_run,
+        interactive=args.interactive,
+        force_single_wallet=args.single_wallet,
+    )
+
+    if args.wallet_status:
+        bot.print_wallet_status()
+        return
 
     if args.log_status:
         from .core.event_logger import EventLogger
@@ -491,7 +593,6 @@ def main() -> None:
                     data={"dry_run": args.dry_run})
         print(f"LAU ready: {engine.is_ready()}")
         if not engine.is_ready():
-            # Try running anyway for diagnostics
             print("LAU not ready — attempting simulate for diagnostics...")
             try:
                 profit, gas = engine.simulate()

@@ -78,3 +78,35 @@ def pls_balance() -> int:
 def fmt_pls(wei: int) -> str:
     """Format wei as human-readable PLS string."""
     return f"{wei / 1e18:.4f} PLS"
+
+
+# ── Per-wallet nonce tracker (used by WalletManager) ──────────────────────────
+class WalletNonce:
+    """
+    Per-wallet nonce tracker for multi-wallet mode.
+    Same pattern as the module-level _nonce but per-instance.
+    Used by wallet_manager.py — not by existing engine code.
+    """
+
+    def __init__(self, address: str, submit_pool=None):
+        self.address = address
+        self._submit_pool = submit_pool or get_submit_pool()
+        self._nonce: int | None = None
+
+    def reset(self) -> None:
+        self._nonce = None
+
+    def next(self) -> int:
+        if self._nonce is None:
+            self._nonce = self._submit_pool.call(
+                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+            log.debug("WalletNonce(%s) fetched: %d", self.address[:10], self._nonce)
+        n = self._nonce
+        self._nonce += 1
+        return n
+
+    def peek(self) -> int:
+        if self._nonce is None:
+            self._nonce = self._submit_pool.call(
+                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+        return self._nonce

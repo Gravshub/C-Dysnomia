@@ -1,7 +1,8 @@
 """
-base.py — EngineBase and EngineResult abstractions.
+base.py — EngineBase, EngineResult, and SimResult abstractions.
 
-Every engine (arb, dss, beat, token_factory, lau, treasury_sniper, spine_runner) inherits from EngineBase and implements:
+Every engine (arb, dss, beat, token_factory, lau, treasury_sniper, spine_runner, phreak)
+inherits from EngineBase and implements:
   is_ready()  — prerequisite check, read-only, no TX
   simulate()  — (expected_profit_wei, expected_gas_wei) via eth_call
   execute()   — full TX sequence, returns EngineResult
@@ -21,6 +22,51 @@ from dataclasses import dataclass, field
 from ..core.event_logger import events as _events
 
 log = logging.getLogger(__name__)
+
+# ── Display name mapping ──────────────────────────────────────────────────────
+ENGINE_DISPLAY_NAMES: dict[str, str] = {
+    "Arb":            "E1 RAZOR",
+    "DSS":            "E2 CEREAL",
+    "Beat":           "E3 MERIDIAN",
+    "TokenFactory":   "E4 FACTORY",
+    "LAU":            "E5 ABUPRU",
+    "TreasurySniper": "E6 DaVINCI",
+    "SpineRunner":    "E7 BACKBONE",
+    "PHR3AK":         "E8 PHR3AK",
+}
+
+# ── Default wallet role mapping ───────────────────────────────────────────────
+ENGINE_WALLET_ROLES: dict[str, str] = {
+    "Arb":            "seller",
+    "DSS":            "joey",
+    "Beat":           "joey",
+    "TokenFactory":   "minter",
+    "LAU":            "joey",
+    "TreasurySniper": "minter",
+    "SpineRunner":    "minter",
+    "PHR3AK":         "minter",
+}
+
+
+@dataclass
+class SimResult:
+    """Structured simulation result from an engine."""
+    success:          bool   = True
+    profit_wei:       int    = 0
+    gas_wei:          int    = 0
+    pool_impact_pct:  float  = 0.0
+    mode:             str    = ""         # e.g. "arm", "deploy", "stitch"
+    confidence:       float  = 1.0        # engine self-assessed 0.0-1.0
+    notes:            str    = ""
+    wallet_role:      str    = ""         # "joey" | "minter" | "seller"
+
+    @property
+    def roi(self) -> float:
+        return self.profit_wei / self.gas_wei if self.gas_wei > 0 else 0.0
+
+    @staticmethod
+    def failed(reason: str) -> "SimResult":
+        return SimResult(success=False, notes=reason)
 
 
 @dataclass
@@ -144,7 +190,33 @@ class EngineBase(ABC):
             },
         )
 
+    @property
+    def display_name(self) -> str:
+        """Return E{N} {CODENAME} display name for this engine."""
+        return ENGINE_DISPLAY_NAMES.get(self.name, self.name)
+
+    @property
+    def wallet_role(self) -> str:
+        """Default wallet role for this engine's primary action."""
+        return ENGINE_WALLET_ROLES.get(self.name, "joey")
+
+    def sim_result(self) -> SimResult:
+        """Normalize simulate() output to SimResult. Handles legacy tuple returns."""
+        try:
+            result = self.simulate()
+            if isinstance(result, SimResult):
+                return result
+            profit, gas = result  # legacy (int, int) return
+            return SimResult(
+                profit_wei=profit,
+                gas_wei=gas,
+                wallet_role=self.wallet_role,
+                pool_impact_pct=getattr(self, '_last_pool_impact_pct', 0.0),
+            )
+        except Exception as e:
+            return SimResult.failed(str(e))
+
     def status_line(self) -> str:
         """One-line engine status for logging."""
         state = "DISABLED" if self.is_disabled() else ("READY" if self.is_ready() else "NOT READY")
-        return f"{self.name}: {state} (failures={self.failure_count})"
+        return f"{self.display_name} ({self.name}): {state} (failures={self.failure_count})"
