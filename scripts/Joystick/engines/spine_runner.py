@@ -198,10 +198,13 @@ class SpineRunnerEngine(EngineBase):
 
         spines = []
 
-        if os.path.exists(self._v2fed_path):
+        from ..oracle.data_store import DataStore
+        store = DataStore.get()
+        v2fed_tokens = store.v2_federal_tokens()
+
+        if v2fed_tokens:
             try:
-                with open(self._v2fed_path) as f:
-                    v2data = json.load(f)
+                v2data = {"tokens": v2fed_tokens}
                 for tok in v2data.get("tokens", []):
                     if tok.get("debenture") is not True:
                         continue
@@ -249,11 +252,11 @@ class SpineRunnerEngine(EngineBase):
 
     def _get_parent_from_recon(self, child_addr: str) -> Optional[str]:
         """Look up parent address from recon_results.json."""
-        if not os.path.exists(self._recon_path):
+        from ..oracle.data_store import DataStore
+        recon = DataStore.get().recon_data()
+        if not recon:
             return None
         try:
-            with open(self._recon_path) as f:
-                recon = json.load(f)
             entry = recon.get("results", {}).get(child_addr.lower(), {})
             parent = entry.get("chain_data", {}).get("parent")
             if parent and parent != "0x" + "0" * 40:
@@ -264,11 +267,11 @@ class SpineRunnerEngine(EngineBase):
 
     def _find_spend_token(self, child_addr: str, parent_addr: str) -> Optional[str]:
         """Find a valid Debenture=True token to use as the spendToken."""
-        if not os.path.exists(self._recon_path):
+        from ..oracle.data_store import DataStore
+        recon = DataStore.get().recon_data()
+        if not recon:
             return None
         try:
-            with open(self._recon_path) as f:
-                recon = json.load(f)
             for addr, entry in recon.get("results", {}).items():
                 cd = entry.get("chain_data", {})
                 if (cd.get("parent", "").lower() == parent_addr.lower()

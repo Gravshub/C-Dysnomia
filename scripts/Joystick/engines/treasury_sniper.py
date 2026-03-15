@@ -170,11 +170,10 @@ class TreasurySniperEngine(EngineBase):
         if now - self._last_load < RECON_CACHE_TTL and self._targets:
             return
 
-        try:
-            with open(self._recon_path) as f:
-                recon = json.load(f)
-        except Exception as e:
-            log.warning("E5: failed to load recon_results.json: %s", e)
+        from ..oracle.data_store import DataStore
+        recon = DataStore.get().recon_data(max_age=RECON_CACHE_TTL)
+        if not recon:
+            log.warning("E5: failed to load recon_results.json")
             return
 
         targets = []
