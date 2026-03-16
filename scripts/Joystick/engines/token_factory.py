@@ -1,34 +1,40 @@
 """
-token_factory.py — Engine 4: AFFECTION Generate() gas-mint + WM Batch Minter + Token Mint/Sell
+token_factory.py — Engine 4: Dual-Mode AFFECTION + WM Mint Engine
 
-Dual-mode token factory with priority:
-  1. AFFECTION Generate() — DISABLED: _mintToCap mints to AFFECTION contract,
-     not caller. Needs multiBuyWith() + payment tokens or custom contract.
-  2. Token mint/sell       — mint existing tokens via parent → sell on DEX
-  3. WM batch mint         — strategic WM accumulation via TGSv8.mintWM(N)
+Parallel evaluation of two independent mint paths every cycle:
+  1. AFFECTION via multiBuyWith — PLS → payment token → multiBuyWith → AFF → PLS
+  2. WM via TGSv8.mintWM(N) — strategic WM accumulation
+
+The engine prices all 5 AFFECTION payment routes (MATH, PI, G5, Fa, Faung),
+picks the cheapest, compares against WM economics, and executes whichever
+(or both) are profitable.
+
+multiBuyWith(address, loops) is the ONLY path that delivers AFF to the caller.
+multiGenerate() alone mints AFF to the AFFECTION contract's self-balance.
+
+is_ready():  Multi AFFECTION contract available OR TGSV8 deployed + authorized
+simulate():  Evaluate all AFF routes + WM, return best combined SimResult
+execute():   Run profitable modes (or force-test on command)
 
 Also exports LPStrategy dataclass and optimize_lp_ratio() for use by
 the mint test tool script.
-
-is_ready():  Multi AFFECTION contract available OR TGSV8 deployed + authorized
-simulate():  Evaluate AFF Generate profitability → token mint/sell → mintWM
-execute():   multiGenerate(N) → swap AFF→WPLS, or token mint/sell, or mintWM
 """
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from web3 import Web3
 
-from .base import EngineBase, EngineResult
+from .base import EngineBase, EngineResult, SimResult
 from ..core.config import (
     JOEY_WALLET, AFFECTION, WM, WPLS, TGSV8,
     PULSEX_V1_FACTORY, PULSEX_V2_FACTORY,
     PULSEX_V1_ROUTER, PULSEX_V2_ROUTER,
     MULTI_AFFECTION,
     GAS_PRICE_CEIL, GAS_MULT, MAX_SLIPPAGE,
+    AFF_G5, AFF_PI, AFF_MATH, AFF_FA, AFF_FAUNG,
 )
 from ..core.chain import (
     w3_read, w3_submit, erc20, safe, multicall,
@@ -170,43 +176,119 @@ def print_ratio_analysis(scenarios: list[dict]):
         print("\n  No profitable scenario found at current parameters.")
 
 
+# ── Route Data Classes ───────────────────────────────────────────────────────
+
+@dataclass
+class AffectionMintRoute:
+    """One BuyWith path: PLS → payment token → multiBuyWith → AFF → PLS."""
+    name: str                    # "G5", "PI", "MATH", "Fa", "Faung"
+    payment_token: str           # checksum address
+    per_loop_wei: int            # payment tokens consumed per loop
+    buy_fn: str                  # "BuyWithG5", etc.
+    loops: int                   # number of loops
+    aff_output: int              # loops * 3 (in whole tokens)
+    aff_output_wei: int          # loops * 3 * 1e18
+    payment_total_wei: int       # per_loop_wei * loops
+    payment_cost_pls: int        # PLS to acquire payment tokens (via getAmountsOut)
+    aff_value_pls: int           # PLS from selling AFF (via getAmountsOut)
+    gas_est: int                 # estimated gas units
+    gas_cost_pls: int            # gas_est * gas_price (in wei)
+    total_cost_pls: int          # payment_cost_pls + gas_cost_pls (in wei)
+    net_profit_pls: int          # aff_value_pls - total_cost_pls (in wei)
+    roi_pct: float               # (net / total_cost) * 100
+    sell_dex: str                # "V1" or "V2"
+    buy_dex: str                 # "V1" or "V2" (for acquiring payment token)
+    timestamp: float             # time.time() when evaluated
+
+    @property
+    def profitable(self) -> bool:
+        return self.net_profit_pls > 0
+
+    def to_log_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "payment_cost_pls": round(self.payment_cost_pls / 1e18, 2),
+            "aff_value_pls": round(self.aff_value_pls / 1e18, 2),
+            "gas_pls": round(self.gas_cost_pls / 1e18, 2),
+            "net": round(self.net_profit_pls / 1e18, 2),
+            "roi": round(self.roi_pct, 1),
+        }
+
+
+@dataclass
+class WmMintRoute:
+    """WM minting via TGSv8.mintWM(N)."""
+    count: int                   # N tokens to mint
+    wm_value_pls: int            # PLS value of N WM on DEX (in wei)
+    gas_est: int
+    gas_cost_pls: int            # in wei
+    net_profit_pls: int          # wm_value - gas_cost (in wei)
+    roi_pct: float
+    sell_dex: str
+    timestamp: float
+
+    @property
+    def profitable(self) -> bool:
+        return self.net_profit_pls > 0
+
+    def to_log_dict(self) -> dict:
+        return {
+            "count": self.count,
+            "value_pls": round(self.wm_value_pls / 1e18, 2),
+            "gas_pls": round(self.gas_cost_pls / 1e18, 2),
+            "net": round(self.net_profit_pls / 1e18, 2),
+            "roi": round(self.roi_pct, 1),
+        }
+
+
+@dataclass
+class DualSimResult:
+    """Combined simulation result for both AFF and WM paths."""
+    aff_routes: list[AffectionMintRoute] = field(default_factory=list)
+    best_aff: AffectionMintRoute | None = None
+    wm_route: WmMintRoute | None = None
+    mode: str = "none"  # "aff_only" | "wm_only" | "dual" | "none"
+    gas_price: int = 0
+    block: int = 0
+
+
+# ── Static route definitions ────────────────────────────────────────────────
+
+_AFF_ROUTE_DEFS = [
+    {"name": "MATH",  "addr": AFF_MATH,  "per_loop_wei": int(3e18),    "buy_fn": "BuyWithMATH"},
+    {"name": "PI",    "addr": AFF_PI,    "per_loop_wei": int(0.01e18), "buy_fn": "BuyWithPI"},
+    {"name": "G5",    "addr": AFF_G5,    "per_loop_wei": int(0.6e18),  "buy_fn": "BuyWithG5"},
+    {"name": "Fa",    "addr": AFF_FA,    "per_loop_wei": int(12e18),   "buy_fn": "BuyWithFa"},
+    {"name": "Faung", "addr": AFF_FAUNG, "per_loop_wei": int(6e18),    "buy_fn": "BuyWithFaung"},
+]
+
+
 # ── Token Factory Engine ─────────────────────────────────────────────────────
 
 class TokenFactoryEngine(EngineBase):
     """
-    Engine 4: AFFECTION Generate() gas-mint + WM batch minting + token mint/sell.
+    Engine 4: Dual-mode AFFECTION + WM mint engine.
 
-    Priority:
-      1. AFFECTION Generate() — gas-only mint via Multi AFFECTION contract (262% ROI)
-      2. Token mint/sell       — direct profit from existing tokens
-      3. WM strategic accumulation — no direct profit
+    Evaluates all 5 AFFECTION payment routes and WM minting every cycle.
+    Executes whichever (or both) are profitable.
     """
     name = "TokenFactory"
     MAX_FAILURES = 3
     DISABLE_SECS = 600
 
-    # Start conservative — seeded working balance was 7
-    DEFAULT_MINT_COUNT = 7
+    # Default parameters
+    DEFAULT_WM_COUNT = 7
+    DEFAULT_AFF_LOOPS = 100        # production batch size
+    TEST_AFF_LOOPS = 10            # force-test batch size
+    TEST_WM_COUNT = 2              # force-test WM count
+    TEST_BUDGET_CEIL_PLS = 10_000  # max PLS for force-test (whole tokens)
 
-    # AFFECTION Generate() parameters
-    AFF_MINTS_PER_LOOP = 3          # Generate() mints 3 AFF per call
-    AFF_DEFAULT_BATCH = 100         # optimal batch size (lowest per-AFF gas)
-    AFF_MAX_BATCH = 200             # hard cap
-    AFF_MIN_ROI_PCT = 20.0          # skip if ROI below this
-    AFF_MAX_POOL_IMPACT_PCT = 2.0   # max % of pool reserves to sell in one TX
+    AFF_MINTS_PER_LOOP = 3         # multiBuyWith delivers 3 AFF per loop
+    AFF_MAX_POOL_IMPACT_PCT = 2.0  # max % of pool reserves to trade in one TX
+    AFF_MIN_ROI_PCT = 5.0          # skip if ROI below this (production)
 
-    # ── CRITICAL FINDING (block 26,007,782) ──────────────────────────────
-    # multiGenerate() is NOT profitable standalone:
-    #   - _mintToCap() mints AFF to address(this) = AFFECTION contract itself
-    #   - multiGenerate() just calls Generate() N times — AFF stays in contract
-    #   - Only multiBuyWith() transfers AFF to msg.sender, but requires payment tokens
-    #   - At current prices, payment token cost exceeds AFF DEX value
-    #
-    # AFF Generate mode is DISABLED until one of:
-    #   a) multiBuyWith() path implemented with payment token acquisition
-    #   b) Custom contract deployed that calls Generate() + transfers AFF out
-    #   c) Payment token prices drop enough for multiBuyWith() to be profitable
-    AFF_GENERATE_ENABLED = False
+    # Force-test mode: set via env var FORCE_AFF_TEST=1 or --force-test CLI flag
+    FORCE_TEST = os.getenv("FORCE_AFF_TEST", "0") == "1"
 
     def __init__(self):
         super().__init__()
@@ -217,6 +299,7 @@ class TokenFactoryEngine(EngineBase):
         self._cached_target = None
         self._cache_time = 0
         self._cache_ttl = 300  # 5 minute target cache
+        self._last_dual_sim: DualSimResult | None = None
 
     def _get_tgsv8(self, for_submit: bool = False):
         """Lazy-load TGSV8 contract."""
@@ -241,14 +324,13 @@ class TokenFactoryEngine(EngineBase):
         return self._multi_aff
 
     def is_ready(self) -> bool:
-        # AFF Generate mode works independently of TGSv8 (when enabled)
-        if self.AFF_GENERATE_ENABLED:
-            try:
-                multi = self._get_multi_aff()
-                if multi is not None:
-                    return True
-            except Exception:
-                pass
+        # Multi AFFECTION is always available (no auth needed for multiBuyWith)
+        try:
+            multi = self._get_multi_aff()
+            if multi is not None:
+                return True
+        except Exception:
+            pass
 
         if not TGSV8:
             log.debug("TokenFactory: TGSV8_ADDRESS not set")
@@ -274,383 +356,543 @@ class TokenFactoryEngine(EngineBase):
             log.debug("TokenFactory is_ready error: %s", exc)
             return False
 
-    def _find_mint_target(self) -> dict | None:
+    # ── Route evaluation ─────────────────────────────────────────────────────
+
+    def _evaluate_all_aff_routes(
+        self, loops: int, gas_price: int
+    ) -> list[AffectionMintRoute]:
         """
-        Find the most profitable token to mint via TGSV8.
-        Returns dict with keys: child, amount, expected_out, gas_cost, net_profit
-        or None if nothing profitable.
+        Price all 5 AFFECTION payment routes.
+        Returns sorted list (best first) of AffectionMintRoute.
         """
-        # Use cached target if fresh
-        if self._cached_target and (time.time() - self._cache_time) < self._cache_ttl:
-            return self._cached_target
+        aff_output = loops * self.AFF_MINTS_PER_LOOP
+        aff_output_wei = aff_output * 10**18
+        now = time.time()
 
-        tgsv8 = self._get_tgsv8()
-        if tgsv8 is None:
-            return None
+        # Get AFF sell price (check both DEXes)
+        best_aff_out = 0
+        best_sell_dex = "V2"
+        for label, fn in [("V1", get_amounts_out), ("V2", get_amounts_out_v2)]:
+            result = fn(aff_output_wei, [AFFECTION, WPLS])
+            if result and result[-1] > best_aff_out:
+                best_aff_out = result[-1]
+                best_sell_dex = label
 
-        # Check registry for known tokens
-        reg_len = safe(tgsv8, "registryLen") or 0
-        if reg_len == 0:
-            log.debug("TokenFactory: Empty registry — no tokens to mint")
-            return None
+        if best_aff_out == 0:
+            log.debug("AFF: No DEX output for %d AFF on either DEX", aff_output)
+            return []
 
-        # Get children of AFFECTION (tokens mintable with AFFECTION as parent)
-        children = safe(tgsv8, "getChildren", AFFECTION)
-        if not children:
-            log.debug("TokenFactory: No AFFECTION children found")
-            return None
-
-        gas_price = w3_read.eth.gas_price
-        if gas_price > GAS_PRICE_CEIL:
-            return None
-
-        best = None
-        mint_amount = int(1e18)  # 1 AFFECTION
-
-        from ..oracle.data_store import DataStore
-        store = DataStore.get()
-
-        for child in children[:50]:  # Cap scan to 50 tokens
-            if child == ZERO:
-                continue
-
-            # Check if mintable
-            debenture = safe(tgsv8, "checkDebenture", child)
-            if not debenture:
-                continue
-
-            # Check DEX pair exists (cache lookup, zero RPC)
-            if not store.has_pair(child, WPLS):
-                continue
-
-            # Get best DEX output
-            try:
-                result = tgsv8.functions.getBestAmountsOut(
-                    mint_amount, [child, WPLS]
-                ).call()
-                v1_out, v2_out, best_dex, best_out = result
-            except Exception:
-                continue
-
-            if best_out == 0:
-                continue
-
-            # Estimate gas for mint + swap
-            try:
-                mint_gas = tgsv8.functions.mintTokens(child, mint_amount).estimate_gas(
-                    {"from": JOEY_WALLET}
-                )
-                swap_gas = tgsv8.functions.swapExact(
-                    child, WPLS, mint_amount, 0, best_dex
-                ).estimate_gas({"from": JOEY_WALLET})
-            except Exception:
-                continue
-
-            total_gas = int((mint_gas + swap_gas) * GAS_MULT)
-            gas_cost_wei = total_gas * gas_price
-
-            net = best_out - gas_cost_wei
-            if net <= 0:
-                continue
-
-            candidate = {
-                "child": child,
-                "amount": mint_amount,
-                "expected_out": best_out,
-                "gas_cost": gas_cost_wei,
-                "net_profit": net,
-                "best_dex": best_dex,
-                "mint_gas": mint_gas,
-                "swap_gas": swap_gas,
-            }
-
-            if best is None or net > best["net_profit"]:
-                best = candidate
-
-        self._cached_target = best
-        self._cache_time = time.time()
-        return best
-
-    def _evaluate_aff_generate(self) -> dict | None:
-        """
-        Evaluate AFFECTION multiGenerate() profitability.
-
-        Returns dict with keys:
-            batch, aff_minted, aff_minted_wei, gas_est, gas_cost_wei,
-            gross_output_wei, net_profit_wei, roi_pct, sell_dex
-        Or None if not profitable.
-
-        NOTE: Currently disabled — Generate() mints AFF to the AFFECTION
-        contract itself (via _mintToCap), not to the caller. multiGenerate()
-        alone does not deliver AFF to Joey's EOA. Requires multiBuyWith()
-        with a payment token, or a custom contract with explicit transfer.
-        See AFF_GENERATE_ENABLED flag.
-        """
-        if not self.AFF_GENERATE_ENABLED:
-            return None
-
-        try:
-            multi = self._get_multi_aff()
-        except Exception:
-            return None
-        if multi is None:
-            return None
-
-        gas_price = w3_read.eth.gas_price
-        if gas_price > GAS_PRICE_CEIL:
-            return None
-
-        batch = self.AFF_DEFAULT_BATCH
-        aff_minted = batch * self.AFF_MINTS_PER_LOOP
-        aff_minted_wei = aff_minted * 10**18
-
-        # Pool impact check — reduce batch if selling would exceed impact cap
+        # Pool impact check on AFF sell side
         for factory_label in ("V2", "V1"):
             reserves = get_reserves(AFFECTION, WPLS, factory_label)
             if reserves and reserves[0] > 0:
-                max_sell = int(reserves[0] * self.AFF_MAX_POOL_IMPACT_PCT / 100)
-                if aff_minted_wei > max_sell:
-                    batch = max(1, int(max_sell / 10**18 / self.AFF_MINTS_PER_LOOP))
-                    aff_minted = batch * self.AFF_MINTS_PER_LOOP
-                    aff_minted_wei = aff_minted * 10**18
-                break  # use first available pool for impact check
+                impact = aff_output_wei / reserves[0] * 100
+                if impact > self.AFF_MAX_POOL_IMPACT_PCT:
+                    log.debug("AFF sell impact %.1f%% > %.1f%% cap — skipping",
+                              impact, self.AFF_MAX_POOL_IMPACT_PCT)
+                    return []
+                break
 
-        # Gas estimate via eth_estimateGas (accurate, includes all internal calls)
+        routes = []
+        for rdef in _AFF_ROUTE_DEFS:
+            payment_total = rdef["per_loop_wei"] * loops
+
+            # Price payment token acquisition: PLS → payment token
+            best_buy_cost = 0
+            best_buy_dex = "V2"
+            for label, fn in [("V1", get_amounts_out), ("V2", get_amounts_out_v2)]:
+                # Reverse: how much PLS to get payment_total of the token?
+                # Use getAmountsOut with [WPLS, token] to see how much token we get for X PLS
+                # Instead: getAmountsOut(payment_total, [token, WPLS]) tells us PLS value
+                result = fn(payment_total, [rdef["addr"], WPLS])
+                if result and result[-1] > 0:
+                    # This is PLS value of the payment tokens
+                    cost = result[-1]
+                    if best_buy_cost == 0 or cost < best_buy_cost:
+                        best_buy_cost = cost
+                        best_buy_dex = label
+
+            if best_buy_cost == 0:
+                log.debug("AFF route %s: no DEX pair for payment token", rdef["name"])
+                continue
+
+            # Pool impact on payment token buy side
+            skip = False
+            for factory_label in ("V2", "V1"):
+                reserves = get_reserves(rdef["addr"], WPLS, factory_label)
+                if reserves and reserves[0] > 0:
+                    impact = payment_total / reserves[0] * 100
+                    if impact > self.AFF_MAX_POOL_IMPACT_PCT:
+                        log.debug("AFF route %s: buy impact %.1f%% > cap",
+                                  rdef["name"], impact)
+                        skip = True
+                    break
+            if skip:
+                continue
+
+            # Estimate gas for multiBuyWith
+            try:
+                multi = self._get_multi_aff()
+                gas_est = multi.functions.multiBuyWith(
+                    Web3.to_checksum_address(rdef["addr"]), loops
+                ).estimate_gas({"from": JOEY_WALLET})
+            except Exception as exc:
+                log.debug("AFF route %s: gas estimate failed: %s", rdef["name"], exc)
+                # Use a conservative default for pricing purposes
+                gas_est = 4_000_000 + loops * 40_000
+
+            # Total gas includes: swap PLS→token + approve + multiBuyWith + swap AFF→PLS
+            # Approximate the swap/approve overhead
+            swap_gas_overhead = 200_000  # 2 swaps + 1 approve typical
+            total_gas = int((gas_est + swap_gas_overhead) * GAS_MULT)
+            gas_cost = total_gas * gas_price
+
+            # Payment cost: we need to BUY payment tokens, so cost is PLS we spend
+            # best_buy_cost is what the payment tokens are WORTH in PLS (sell direction)
+            # Buying costs more due to swap fee. Approximate with 0.3% fee each way:
+            # Cost to buy = payment_value * (1000/997) ≈ payment_value * 1.003
+            payment_cost_pls = int(best_buy_cost * 1000 / 997)
+
+            total_cost = payment_cost_pls + gas_cost
+            net_profit = best_aff_out - total_cost
+            roi = (net_profit / total_cost * 100) if total_cost > 0 else 0
+
+            routes.append(AffectionMintRoute(
+                name=rdef["name"],
+                payment_token=rdef["addr"],
+                per_loop_wei=rdef["per_loop_wei"],
+                buy_fn=rdef["buy_fn"],
+                loops=loops,
+                aff_output=aff_output,
+                aff_output_wei=aff_output_wei,
+                payment_total_wei=payment_total,
+                payment_cost_pls=payment_cost_pls,
+                aff_value_pls=best_aff_out,
+                gas_est=gas_est,
+                gas_cost_pls=gas_cost,
+                total_cost_pls=total_cost,
+                net_profit_pls=net_profit,
+                roi_pct=roi,
+                sell_dex=best_sell_dex,
+                buy_dex=best_buy_dex,
+                timestamp=now,
+            ))
+
+        routes.sort(key=lambda r: r.net_profit_pls, reverse=True)
+        return routes
+
+    def _evaluate_wm_mint(self, count: int, gas_price: int) -> WmMintRoute | None:
+        """Evaluate WM minting via TGSv8.mintWM(N)."""
+        tgsv8 = self._get_tgsv8()
+        if tgsv8 is None:
+            return None
+
+        now = time.time()
+
+        # Check WM DEX value
+        wm_amount_wei = count * 10**18
+        best_wm_out = 0
+        best_sell_dex = "V2"
+        for label, fn in [("V1", get_amounts_out), ("V2", get_amounts_out_v2)]:
+            result = fn(wm_amount_wei, [WM, WPLS])
+            if result and result[-1] > best_wm_out:
+                best_wm_out = result[-1]
+                best_sell_dex = label
+
+        # Gas estimate
         try:
-            gas_est = multi.functions.multiGenerate(batch).estimate_gas(
+            gas_est = tgsv8.functions.mintWM(count).estimate_gas(
                 {"from": JOEY_WALLET}
             )
         except Exception as exc:
-            log.debug("AFF multiGenerate(%d) gas estimate failed: %s", batch, exc)
-            return None
+            log.debug("WM mintWM(%d) gas estimate failed: %s", count, exc)
+            gas_est = count * 130_000
 
-        gas_cost_wei = int(gas_est * GAS_MULT * gas_price)
+        gas_cost = int(gas_est * GAS_MULT * gas_price)
+        net = best_wm_out - gas_cost
+        roi = (net / gas_cost * 100) if gas_cost > 0 else 0
 
-        # DEX output — check both V1 and V2, pick best
-        best_output = 0
-        best_dex = "V2"
+        return WmMintRoute(
+            count=count,
+            wm_value_pls=best_wm_out,
+            gas_est=gas_est,
+            gas_cost_pls=gas_cost,
+            net_profit_pls=net,
+            roi_pct=roi,
+            sell_dex=best_sell_dex,
+            timestamp=now,
+        )
 
-        v1_out = get_amounts_out(aff_minted_wei, [AFFECTION, WPLS])
-        if v1_out:
-            v1_pls = v1_out[-1]
-            if v1_pls > best_output:
-                best_output = v1_pls
-                best_dex = "V1"
+    def _build_dual_sim(self) -> DualSimResult:
+        """Build full dual-mode simulation."""
+        gas_price = w3_read.eth.gas_price
+        if gas_price > GAS_PRICE_CEIL:
+            return DualSimResult(gas_price=gas_price)
 
-        v2_out = get_amounts_out_v2(aff_minted_wei, [AFFECTION, WPLS])
-        if v2_out:
-            v2_pls = v2_out[-1]
-            if v2_pls > best_output:
-                best_output = v2_pls
-                best_dex = "V2"
+        loops = self.TEST_AFF_LOOPS if self.FORCE_TEST else self.DEFAULT_AFF_LOOPS
+        wm_count = self.TEST_WM_COUNT if self.FORCE_TEST else self.DEFAULT_WM_COUNT
 
-        if best_output == 0:
-            log.debug("AFF: No DEX output for %d AFF", aff_minted)
-            return None
+        try:
+            block = w3_read.eth.block_number
+        except Exception:
+            block = 0
 
-        net_profit_wei = best_output - gas_cost_wei
-        roi_pct = (net_profit_wei / gas_cost_wei * 100) if gas_cost_wei > 0 else 0
+        aff_routes = self._evaluate_all_aff_routes(loops, gas_price)
+        best_aff = aff_routes[0] if aff_routes else None
 
-        if roi_pct < self.AFF_MIN_ROI_PCT:
-            log.debug("AFF: ROI %.1f%% below min %.1f%% — skipping",
-                       roi_pct, self.AFF_MIN_ROI_PCT)
-            return None
+        wm_route = self._evaluate_wm_mint(wm_count, gas_price)
 
-        return {
-            "batch": batch,
-            "aff_minted": aff_minted,
-            "aff_minted_wei": aff_minted_wei,
-            "gas_est": gas_est,
-            "gas_cost_wei": gas_cost_wei,
-            "gross_output_wei": best_output,
-            "net_profit_wei": net_profit_wei,
-            "roi_pct": roi_pct,
-            "sell_dex": best_dex,
-        }
+        # Determine mode
+        aff_go = best_aff is not None and (best_aff.profitable or self.FORCE_TEST)
+        wm_go = wm_route is not None and (wm_route.profitable or self.FORCE_TEST)
+
+        if aff_go and wm_go:
+            mode = "dual"
+        elif aff_go:
+            mode = "aff_only"
+        elif wm_go:
+            mode = "wm_only"
+        else:
+            mode = "none"
+
+        result = DualSimResult(
+            aff_routes=aff_routes,
+            best_aff=best_aff,
+            wm_route=wm_route,
+            mode=mode,
+            gas_price=gas_price,
+            block=block,
+        )
+        self._last_dual_sim = result
+        return result
+
+    # ── EngineBase interface ──────────────────────────────────────────────────
 
     def simulate(self) -> tuple[int, int]:
         """
-        Priority:
-          1. AFFECTION Generate() — highest ROI gas-only mint
-          2. Token mint/sell — direct profit from existing tokens
-          3. WM strategic accumulation — no direct profit
+        Evaluate all routes and return (best_profit_wei, best_gas_wei).
         """
-        # 1. AFF Generate
-        aff = self._evaluate_aff_generate()
-        if aff is not None:
+        dual = self._build_dual_sim()
+
+        # Log route monitor
+        self._log_route_monitor(dual)
+
+        if dual.mode == "none" and not self.FORCE_TEST:
+            # Fall back to legacy token mint/sell scan
+            target = self._find_mint_target()
+            if target is not None:
+                log.info(
+                    "TokenFactory target: %s net=%.4f PLS",
+                    target["child"][:10], target["net_profit"] / 1e18,
+                )
+                return target["expected_out"], target["gas_cost"]
+            raise SimulationFailed("TokenFactory: no profitable route")
+
+        # Report the best available route
+        best_profit = 0
+        best_gas = 0
+
+        if dual.best_aff and (dual.best_aff.profitable or self.FORCE_TEST):
             log.info(
-                "TokenFactory AFF mode: batch=%d, mint=%d AFF, net=%.1f PLS (%.0f%% ROI)",
-                aff["batch"], aff["aff_minted"],
-                aff["net_profit_wei"] / 1e18, aff["roi_pct"],
+                "TokenFactory AFF %s: %d loops → %d AFF, "
+                "cost=%.1f PLS, value=%.1f PLS, net=%.1f PLS (%.1f%% ROI)",
+                dual.best_aff.name, dual.best_aff.loops, dual.best_aff.aff_output,
+                dual.best_aff.total_cost_pls / 1e18,
+                dual.best_aff.aff_value_pls / 1e18,
+                dual.best_aff.net_profit_pls / 1e18,
+                dual.best_aff.roi_pct,
             )
-            return aff["gross_output_wei"], aff["gas_cost_wei"]
+            best_profit = dual.best_aff.aff_value_pls
+            best_gas = dual.best_aff.total_cost_pls
 
-        # 2. Token mint/sell (existing logic)
-        target = self._find_mint_target()
-        if target is not None:
+        if dual.wm_route:
             log.info(
-                "TokenFactory target: %s net=%.4f PLS",
-                target["child"][:10], target["net_profit"] / 1e18,
+                "TokenFactory WM: mintWM(%d), value=%.1f PLS, gas=%.1f PLS, "
+                "net=%.1f PLS (%.1f%% ROI)",
+                dual.wm_route.count,
+                dual.wm_route.wm_value_pls / 1e18,
+                dual.wm_route.gas_cost_pls / 1e18,
+                dual.wm_route.net_profit_pls / 1e18,
+                dual.wm_route.roi_pct,
             )
-            return target["expected_out"], target["gas_cost"]
+            # If WM is better than AFF (or AFF not available)
+            if dual.wm_route.net_profit_pls > (dual.best_aff.net_profit_pls if dual.best_aff else 0):
+                best_profit = dual.wm_route.wm_value_pls
+                best_gas = dual.wm_route.gas_cost_pls
 
-        # 3. WM strategic accumulation (existing logic)
-        tgsv8 = self._get_tgsv8()
-        if tgsv8 is None:
-            raise SimulationFailed("TokenFactory: TGSV8 unavailable")
+        if best_profit == 0 and best_gas == 0:
+            if self.FORCE_TEST and dual.best_aff:
+                return dual.best_aff.aff_value_pls, dual.best_aff.total_cost_pls
+            raise SimulationFailed("TokenFactory: no viable route")
 
-        count = self.DEFAULT_MINT_COUNT
+        return best_profit, best_gas
+
+    def sim_result(self) -> SimResult:
+        """Override to provide dual-mode sim result with mode info."""
         try:
-            from ..core.simulator import simulate as sim_call
-            sim_call(tgsv8.functions.mintWM(count))
-        except SimulationFailed as e:
-            raise SimulationFailed(f"TokenFactory: mintWM({count}) would revert: {e}")
-
-        gas_price = w3_read.eth.gas_price
-        gas_est = int(count * 130_000 * gas_price * GAS_MULT)  # ~130K gas per RHO
-        log.info("TokenFactory: mintWM(%d) est gas=%.4f PLS", count, gas_est / 1e18)
-
-        return 0, gas_est  # Strategic — no direct profit
+            profit, gas = self.simulate()
+            dual = self._last_dual_sim
+            mode = dual.mode if dual else "unknown"
+            return SimResult(
+                profit_wei=profit,
+                gas_wei=gas,
+                wallet_role=self.wallet_role,
+                mode=f"factory_{mode}",
+                notes=f"mode={mode}",
+            )
+        except Exception as e:
+            return SimResult.failed(str(e))
 
     def execute(self, dry_run: bool = False) -> EngineResult:
-        # 1. Try AFF Generate (highest ROI)
-        aff = self._evaluate_aff_generate()
-        if aff is not None:
-            return self._execute_aff_generate(aff, dry_run)
+        # Re-evaluate fresh (or use cached sim)
+        dual = self._last_dual_sim
+        if dual is None or time.time() - (dual.best_aff.timestamp if dual.best_aff else 0) > 30:
+            dual = self._build_dual_sim()
 
-        # 2. Try token mint/sell
-        target = self._find_mint_target()
-        if target is not None:
-            return self._execute_mint_sell(target, dry_run)
+        tx_hashes = []
+        total_profit = 0
+        total_gas = 0
+        notes_parts = []
 
-        # 3. Fall back to mintWM
-        return self._execute_mint_wm(dry_run)
+        # Execute AFF if profitable (or force-test)
+        if dual.best_aff and (dual.best_aff.profitable or self.FORCE_TEST):
+            if self.FORCE_TEST:
+                # Budget check
+                est_cost_pls = dual.best_aff.total_cost_pls / 1e18
+                if est_cost_pls > self.TEST_BUDGET_CEIL_PLS:
+                    return EngineResult(
+                        success=False, profit_wei=0, gas_wei=0,
+                        notes=f"Force-test budget exceeded: {est_cost_pls:.0f} > "
+                              f"{self.TEST_BUDGET_CEIL_PLS} PLS",
+                    )
 
-    def _execute_aff_generate(self, aff: dict, dry_run: bool) -> EngineResult:
+            result = self._execute_aff_mint(dual.best_aff, dry_run)
+            tx_hashes.extend(result.tx_hashes)
+            total_profit += result.profit_wei
+            total_gas += result.gas_wei
+            notes_parts.append(f"AFF_{dual.best_aff.name}: {result.notes}")
+
+            if not result.success:
+                return result  # AFF failure stops the cycle
+
+        # Execute WM if profitable (or force-test)
+        if dual.wm_route and (dual.wm_route.profitable or self.FORCE_TEST):
+            result = self._execute_mint_wm(
+                dual.wm_route.count if self.FORCE_TEST else self.DEFAULT_WM_COUNT,
+                dry_run,
+            )
+            tx_hashes.extend(result.tx_hashes)
+            total_gas += result.gas_wei
+            notes_parts.append(f"WM: {result.notes}")
+
+        # If nothing was executed, try legacy token mint/sell
+        if not tx_hashes and not dry_run:
+            target = self._find_mint_target()
+            if target is not None:
+                return self._execute_mint_sell(target, dry_run)
+
+            # Last resort: strategic WM mint
+            return self._execute_mint_wm(self.DEFAULT_WM_COUNT, dry_run)
+
+        # Reset force-test after one cycle
+        if self.FORCE_TEST:
+            self.FORCE_TEST = False
+            os.environ.pop("FORCE_AFF_TEST", None)
+
+        return EngineResult(
+            success=True,
+            profit_wei=total_profit,
+            gas_wei=total_gas,
+            tx_hashes=tx_hashes,
+            notes=" | ".join(notes_parts) if notes_parts else "no action",
+        )
+
+    # ── AFF mint execution ───────────────────────────────────────────────────
+
+    def _execute_aff_mint(
+        self, route: AffectionMintRoute, dry_run: bool
+    ) -> EngineResult:
         """
-        Mint AFFECTION via multiGenerate(N) then swap AFF → WPLS on DEX.
-
-        TX sequence:
-          1. multiGenerate(batch) — AFF mints to tx.origin (Joey's EOA)
-          2. approve(AFF, router, amount) — if needed
-          3. router.swapExactTokensForTokens(AFF → WPLS)
+        Full AFF mint pipeline via Joey's EOA:
+          TX1: Swap PLS → payment token on best DEX
+          TX2: Approve payment token → Multi AFFECTION contract
+          TX3: multiBuyWith(payment_addr, loops) → receive AFF
+          TX4: Swap AFF → WPLS on best DEX
         """
-        batch = aff["batch"]
-        aff_minted_wei = aff["aff_minted_wei"]
-
         if dry_run:
             log.info(
-                "[dry-run] TokenFactory AFF: multiGenerate(%d) → %d AFF "
-                "→ swap → ~%.1f PLS profit",
-                batch, aff["aff_minted"], aff["net_profit_wei"] / 1e18,
+                "[dry-run] TokenFactory AFF %s: %d loops → %d AFF, "
+                "est net=%.1f PLS (%.1f%% ROI)",
+                route.name, route.loops, route.aff_output,
+                route.net_profit_pls / 1e18, route.roi_pct,
             )
             return EngineResult(
                 success=True,
-                profit_wei=aff["gross_output_wei"],
-                gas_wei=aff["gas_cost_wei"],
-                notes=f"dry-run: multiGenerate({batch}) → {aff['aff_minted']} AFF",
+                profit_wei=route.aff_value_pls,
+                gas_wei=route.gas_cost_pls,
+                notes=f"dry-run: multiBuyWith({route.name}, {route.loops}) → {route.aff_output} AFF",
             )
 
         tx_hashes = []
         total_gas_cost = 0
 
         try:
-            # ── Step 1: multiGenerate ──────────────────────────────────
-            multi_submit = self._get_multi_aff(for_submit=True)
+            from ..core.executor import send_tx as _send_tx, approve_if_needed
 
-            # Check Joey's AFF balance before
-            aff_erc20 = erc20(AFFECTION)
-            aff_before = safe(aff_erc20, "balanceOf", JOEY_WALLET) or 0
+            gas_price = w3_submit.eth.gas_price
 
-            from ..core.executor import send_tx as _send_tx
-            receipt = _send_tx(
-                multi_submit.functions.multiGenerate(batch),
-                f"multiGenerate({batch}) → {aff['aff_minted']} AFF",
-            )
-            if not receipt:
-                return EngineResult(
-                    success=False, profit_wei=0, gas_wei=0,
-                    notes="multiGenerate: no receipt",
-                )
-
-            gas_used = receipt["gasUsed"]
-            gas_price = receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
-            total_gas_cost += gas_used * gas_price
-            tx_hashes.append(f"0x{receipt['transactionHash'].hex()}")
-
-            # Verify AFF arrived at Joey's EOA
-            aff_after = safe(aff_erc20, "balanceOf", JOEY_WALLET) or 0
-            aff_received = aff_after - aff_before
-
-            if aff_received <= 0:
-                log.warning(
-                    "multiGenerate(%d): AFF balance did NOT increase! "
-                    "before=%d after=%d — Generate() may send to contract "
-                    "not tx.origin. Need Path B deploy.",
-                    batch, aff_before, aff_after,
-                )
-                return EngineResult(
-                    success=False, profit_wei=0, gas_wei=total_gas_cost,
-                    tx_hashes=tx_hashes,
-                    notes=f"AFF not received at EOA "
-                          f"(before={aff_before} after={aff_after})",
-                )
-
-            log.info(
-                "multiGenerate(%d) → received %d AFF (%.2f)",
-                batch, aff_received, aff_received / 1e18,
-            )
-
-            # ── Step 2: Swap AFF → WPLS ───────────────────────────────
-            router_addr = (PULSEX_V1_ROUTER if aff["sell_dex"] == "V1"
+            # ── TX1: Swap PLS → payment token ─────────────────────────────
+            router_addr = (PULSEX_V1_ROUTER if route.buy_dex == "V1"
                            else PULSEX_V2_ROUTER)
-
-            # Approve AFF to router (idempotent — skips if allowance sufficient)
-            aff_submit = w3_submit.eth.contract(
-                address=Web3.to_checksum_address(AFFECTION),
-                abi=aff_erc20.abi,
-            )
-            from ..core.executor import approve_if_needed
-            approve_receipt = approve_if_needed(
-                aff_submit, router_addr, aff_received,
-                f"AFF → {aff['sell_dex']} router",
-            )
-            if approve_receipt:
-                total_gas_cost += approve_receipt["gasUsed"] * gas_price
-                tx_hashes.append(
-                    f"0x{approve_receipt['transactionHash'].hex()}"
-                )
-
-            # Swap
             swap_router = w3_submit.eth.contract(
                 address=Web3.to_checksum_address(router_addr),
                 abi=ROUTER_ABI,
             )
-            min_out = int(aff["gross_output_wei"] * (1 - MAX_SLIPPAGE))
-            path = [
+            deadline = w3_read.eth.get_block("latest")["timestamp"] + 300
+
+            # Calculate PLS amount to spend (with slippage buffer)
+            pls_to_spend = int(route.payment_cost_pls * (1 + MAX_SLIPPAGE))
+
+            # Minimum payment tokens to accept
+            min_payment = int(route.payment_total_wei * (1 - MAX_SLIPPAGE))
+
+            path_buy = [
+                Web3.to_checksum_address(WPLS),
+                Web3.to_checksum_address(route.payment_token),
+            ]
+
+            receipt = _send_tx(
+                swap_router.functions.swapExactETHForTokens(
+                    min_payment, path_buy, JOEY_WALLET, deadline,
+                ),
+                f"Swap PLS → {route.name} ({route.buy_dex})",
+                value=pls_to_spend,
+                skip_simulate=True,  # payable
+            )
+            if not receipt:
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=0,
+                    notes=f"TX1 failed: PLS → {route.name}",
+                )
+            tx_hashes.append(f"0x{receipt['transactionHash'].hex()}")
+            total_gas_cost += receipt["gasUsed"] * gas_price
+
+            # Check actual payment token balance received
+            payment_erc20 = erc20(route.payment_token)
+            payment_bal = safe(payment_erc20, "balanceOf", JOEY_WALLET) or 0
+            log.info("After swap: %s balance = %.4f",
+                     route.name, payment_bal / 1e18)
+
+            if payment_bal < route.payment_total_wei:
+                log.warning(
+                    "Insufficient %s after swap: have %d, need %d",
+                    route.name, payment_bal, route.payment_total_wei,
+                )
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=total_gas_cost,
+                    tx_hashes=tx_hashes,
+                    notes=f"Insufficient {route.name} after swap",
+                )
+
+            # ── TX2: Approve payment token → Multi AFFECTION ──────────────
+            payment_submit = w3_submit.eth.contract(
+                address=Web3.to_checksum_address(route.payment_token),
+                abi=payment_erc20.abi,
+            )
+            max_uint = 2**256 - 1
+            approve_receipt = approve_if_needed(
+                payment_submit,
+                MULTI_AFFECTION,
+                max_uint,
+                f"{route.name} → Multi AFFECTION",
+            )
+            if approve_receipt:
+                tx_hashes.append(f"0x{approve_receipt['transactionHash'].hex()}")
+                total_gas_cost += approve_receipt["gasUsed"] * gas_price
+
+            # ── TX3: multiBuyWith → receive AFF ───────────────────────────
+            aff_erc20 = erc20(AFFECTION)
+            aff_before = safe(aff_erc20, "balanceOf", JOEY_WALLET) or 0
+
+            multi_submit = self._get_multi_aff(for_submit=True)
+            receipt = _send_tx(
+                multi_submit.functions.multiBuyWith(
+                    Web3.to_checksum_address(route.payment_token),
+                    route.loops,
+                ),
+                f"multiBuyWith({route.name}, {route.loops}) → {route.aff_output} AFF",
+            )
+            if not receipt:
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=total_gas_cost,
+                    tx_hashes=tx_hashes,
+                    notes="TX3 multiBuyWith failed",
+                )
+            tx_hashes.append(f"0x{receipt['transactionHash'].hex()}")
+            total_gas_cost += receipt["gasUsed"] * gas_price
+
+            # Verify AFF received
+            aff_after = safe(aff_erc20, "balanceOf", JOEY_WALLET) or 0
+            aff_received = aff_after - aff_before
+            log.info("multiBuyWith: AFF received = %.2f (expected %d)",
+                     aff_received / 1e18, route.aff_output)
+
+            if aff_received <= 0:
+                log.warning("multiBuyWith: NO AFF received! before=%d after=%d",
+                            aff_before, aff_after)
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=total_gas_cost,
+                    tx_hashes=tx_hashes,
+                    notes=f"AFF not received (before={aff_before} after={aff_after})",
+                )
+
+            # ── TX4: Swap AFF → WPLS ─────────────────────────────────────
+            sell_router_addr = (PULSEX_V1_ROUTER if route.sell_dex == "V1"
+                                else PULSEX_V2_ROUTER)
+
+            # Approve AFF to sell router
+            aff_submit = w3_submit.eth.contract(
+                address=Web3.to_checksum_address(AFFECTION),
+                abi=aff_erc20.abi,
+            )
+            approve_receipt = approve_if_needed(
+                aff_submit,
+                sell_router_addr,
+                aff_received,
+                f"AFF → {route.sell_dex} router",
+            )
+            if approve_receipt:
+                tx_hashes.append(f"0x{approve_receipt['transactionHash'].hex()}")
+                total_gas_cost += approve_receipt["gasUsed"] * gas_price
+
+            # Swap AFF → WPLS
+            sell_router = w3_submit.eth.contract(
+                address=Web3.to_checksum_address(sell_router_addr),
+                abi=ROUTER_ABI,
+            )
+            min_out = int(route.aff_value_pls * (1 - MAX_SLIPPAGE))
+            path_sell = [
                 Web3.to_checksum_address(AFFECTION),
                 Web3.to_checksum_address(WPLS),
             ]
             deadline = w3_read.eth.get_block("latest")["timestamp"] + 300
 
             swap_receipt = _send_tx(
-                swap_router.functions.swapExactTokensForTokens(
-                    aff_received, min_out, path, JOEY_WALLET, deadline,
+                sell_router.functions.swapExactTokensForTokens(
+                    aff_received, min_out, path_sell, JOEY_WALLET, deadline,
                 ),
-                f"Swap {aff_received / 1e18:.1f} AFF → WPLS "
-                f"({aff['sell_dex']})",
+                f"Swap {aff_received / 1e18:.1f} AFF → WPLS ({route.sell_dex})",
             )
             if not swap_receipt:
                 return EngineResult(
                     success=False, profit_wei=0, gas_wei=total_gas_cost,
                     tx_hashes=tx_hashes,
-                    notes="AFF swap failed — AFF sitting in wallet",
+                    notes="AFF sell swap failed — AFF in wallet",
                 )
-
-            total_gas_cost += swap_receipt["gasUsed"] * gas_price
             tx_hashes.append(f"0x{swap_receipt['transactionHash'].hex()}")
+            total_gas_cost += swap_receipt["gasUsed"] * gas_price
 
-            # Parse actual WPLS received from swap Transfer events
+            # Parse actual WPLS received
             actual_wpls = 0
             for log_entry in swap_receipt.get("logs", []):
                 topics = log_entry.get("topics", [])
@@ -664,10 +906,22 @@ class TokenFactoryEngine(EngineBase):
                             and to_addr.lower() == JOEY_WALLET.lower()):
                         actual_wpls = int(log_entry["data"].hex(), 16)
 
+            # Log TX history
+            self._log_tx_history(
+                tx_hash=f"0x{swap_receipt['transactionHash'].hex()}",
+                action=f"multiBuyWith_{route.name}",
+                gas_used=swap_receipt["gasUsed"],
+                gas_price=gas_price,
+                tokens_in={route.name: route.payment_total_wei / 1e18},
+                tokens_out={"AFF": aff_received / 1e18},
+                pls_net=(actual_wpls - total_gas_cost) / 1e18,
+                block=swap_receipt.get("blockNumber", 0),
+            )
+
             log.info(
-                "AFF Generate complete: %d AFF → %.2f WPLS, "
+                "AFF mint complete: %d AFF → %.2f WPLS, "
                 "gas=%.2f PLS, net=%.2f PLS",
-                aff["aff_minted"], actual_wpls / 1e18,
+                route.aff_output, actual_wpls / 1e18,
                 total_gas_cost / 1e18,
                 (actual_wpls - total_gas_cost) / 1e18,
             )
@@ -677,20 +931,21 @@ class TokenFactoryEngine(EngineBase):
                 profit_wei=actual_wpls,
                 gas_wei=total_gas_cost,
                 tx_hashes=tx_hashes,
-                notes=f"AFF Generate: {aff['aff_minted']} AFF "
+                notes=f"AFF {route.name}: {route.aff_output} AFF "
                       f"→ {actual_wpls / 1e18:.2f} WPLS",
             )
 
         except Exception as exc:
-            log.error("AFF Generate execute failed: %s", exc)
+            log.error("AFF mint execute failed: %s", exc)
             return EngineResult(
                 success=False, profit_wei=0, gas_wei=total_gas_cost,
                 tx_hashes=tx_hashes, notes=str(exc),
             )
 
-    def _execute_mint_wm(self, dry_run: bool) -> EngineResult:
+    # ── WM mint execution ────────────────────────────────────────────────────
+
+    def _execute_mint_wm(self, count: int, dry_run: bool) -> EngineResult:
         """Batch mint WM via TGSv8.mintWM(N)."""
-        count = self.DEFAULT_MINT_COUNT
         tgsv8 = self._get_tgsv8(for_submit=True)
         if tgsv8 is None:
             return EngineResult(success=False, profit_wei=0, gas_wei=0, notes="TGSV8 unavailable")
@@ -726,6 +981,18 @@ class TokenFactoryEngine(EngineBase):
                     count, gas_used, wm_after,
                 )
 
+                # Log TX history
+                self._log_tx_history(
+                    tx_hash=tx_hash,
+                    action=f"mintWM_{count}",
+                    gas_used=gas_used,
+                    gas_price=gas_price,
+                    tokens_in={},
+                    tokens_out={"WM": count},
+                    pls_net=-gas_cost / 1e18,
+                    block=receipt.get("blockNumber", 0),
+                )
+
                 return EngineResult(
                     success=True, profit_wei=0, gas_wei=gas_cost,
                     tx_hashes=[tx_hash],
@@ -736,6 +1003,96 @@ class TokenFactoryEngine(EngineBase):
         except Exception as exc:
             log.error("TokenFactory mintWM failed: %s", exc)
             return EngineResult(success=False, profit_wei=0, gas_wei=0, notes=str(exc))
+
+    # ── Legacy token mint/sell ───────────────────────────────────────────────
+
+    def _find_mint_target(self) -> dict | None:
+        """
+        Find the most profitable token to mint via TGSV8.
+        Returns dict with keys: child, amount, expected_out, gas_cost, net_profit
+        or None if nothing profitable.
+        """
+        if self._cached_target and (time.time() - self._cache_time) < self._cache_ttl:
+            return self._cached_target
+
+        tgsv8 = self._get_tgsv8()
+        if tgsv8 is None:
+            return None
+
+        reg_len = safe(tgsv8, "registryLen") or 0
+        if reg_len == 0:
+            return None
+
+        children = safe(tgsv8, "getChildren", AFFECTION)
+        if not children:
+            return None
+
+        gas_price = w3_read.eth.gas_price
+        if gas_price > GAS_PRICE_CEIL:
+            return None
+
+        best = None
+        mint_amount = int(1e18)
+
+        from ..oracle.data_store import DataStore
+        store = DataStore.get()
+
+        for child in children[:50]:
+            if child == ZERO:
+                continue
+
+            debenture = safe(tgsv8, "checkDebenture", child)
+            if not debenture:
+                continue
+
+            if not store.has_pair(child, WPLS):
+                continue
+
+            try:
+                result = tgsv8.functions.getBestAmountsOut(
+                    mint_amount, [child, WPLS]
+                ).call()
+                v1_out, v2_out, best_dex, best_out = result
+            except Exception:
+                continue
+
+            if best_out == 0:
+                continue
+
+            try:
+                mint_gas = tgsv8.functions.mintTokens(child, mint_amount).estimate_gas(
+                    {"from": JOEY_WALLET}
+                )
+                swap_gas = tgsv8.functions.swapExact(
+                    child, WPLS, mint_amount, 0, best_dex
+                ).estimate_gas({"from": JOEY_WALLET})
+            except Exception:
+                continue
+
+            total_gas = int((mint_gas + swap_gas) * GAS_MULT)
+            gas_cost_wei = total_gas * gas_price
+
+            net = best_out - gas_cost_wei
+            if net <= 0:
+                continue
+
+            candidate = {
+                "child": child,
+                "amount": mint_amount,
+                "expected_out": best_out,
+                "gas_cost": gas_cost_wei,
+                "net_profit": net,
+                "best_dex": best_dex,
+                "mint_gas": mint_gas,
+                "swap_gas": swap_gas,
+            }
+
+            if best is None or net > best["net_profit"]:
+                best = candidate
+
+        self._cached_target = best
+        self._cache_time = time.time()
+        return best
 
     def _execute_mint_sell(self, target: dict, dry_run: bool) -> EngineResult:
         """Mint token via TGSV8.mintTokens → swap on DEX."""
@@ -759,7 +1116,6 @@ class TokenFactoryEngine(EngineBase):
         total_gas = 0
 
         try:
-            # Ensure TGSV8 has AFFECTION
             aff_in_tgsv8 = safe(self._get_tgsv8(), "bal", AFFECTION) or 0
             if aff_in_tgsv8 < target["amount"]:
                 from ..core.executor import approve_if_needed
@@ -780,7 +1136,6 @@ class TokenFactoryEngine(EngineBase):
                     tx_hashes.append(f"0x{dep_receipt['transactionHash'].hex()}")
                     total_gas += dep_receipt["gasUsed"]
 
-            # Mint tokens
             from ..core.executor import send_tx as _send_tx
             mint_receipt = _send_tx(
                 tgsv8.functions.mintTokens(target["child"], target["amount"]),
@@ -790,8 +1145,7 @@ class TokenFactoryEngine(EngineBase):
                 tx_hashes.append(f"0x{mint_receipt['transactionHash'].hex()}")
                 total_gas += mint_receipt["gasUsed"]
 
-            # Swap to WPLS
-            min_out = int(target["expected_out"] * 0.95)  # 5% slippage tolerance
+            min_out = int(target["expected_out"] * 0.95)
             swap_receipt = _send_tx(
                 tgsv8.functions.swapExact(
                     target["child"], WPLS, target["amount"],
@@ -821,3 +1175,66 @@ class TokenFactoryEngine(EngineBase):
                 tx_hashes=tx_hashes,
                 notes=str(exc),
             )
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+
+    def _log_route_monitor(self, dual: DualSimResult) -> None:
+        """Write route monitor entry to data/route_monitor.jsonl."""
+        from ..core.event_logger import events as _events
+
+        routes_data = [r.to_log_dict() for r in dual.aff_routes]
+        wm_data = dual.wm_route.to_log_dict() if dual.wm_route else None
+
+        action = "none"
+        if dual.mode != "none":
+            action = dual.mode
+        if self.FORCE_TEST:
+            action = "force_test"
+
+        data = {
+            "block": dual.block,
+            "gas_price_gwei": round(dual.gas_price / 1e9, 0) if dual.gas_price else 0,
+            "aff_price_pls": round(dual.best_aff.aff_value_pls / dual.best_aff.aff_output / 1e18, 2)
+            if dual.best_aff and dual.best_aff.aff_output > 0 else 0,
+            "routes": routes_data,
+            "wm": wm_data,
+            "best_aff_route": dual.best_aff.name if dual.best_aff else "none",
+            "action_taken": action,
+        }
+
+        _events.log(
+            "engine.tokenfactory.route_monitor",
+            engine="TokenFactory",
+            data=data,
+            block=dual.block,
+        )
+
+    def _log_tx_history(
+        self,
+        tx_hash: str,
+        action: str,
+        gas_used: int,
+        gas_price: int,
+        tokens_in: dict,
+        tokens_out: dict,
+        pls_net: float,
+        block: int,
+    ) -> None:
+        """Write TX history entry."""
+        from ..core.event_logger import events as _events
+
+        _events.log(
+            "engine.tokenfactory.tx",
+            engine="TokenFactory",
+            tx_hash=tx_hash,
+            gas_used=gas_used,
+            gas_price=gas_price,
+            block=block,
+            data={
+                "action": action,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "pls_net": round(pls_net, 4),
+                "wallet": JOEY_WALLET,
+            },
+        )
