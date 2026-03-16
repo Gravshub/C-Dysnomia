@@ -95,7 +95,7 @@ def send_tx(
         )
 
     # Step 3: estimate_gas (abort if fails)
-    gas_est = estimate_gas(fn_call, from_address=tx_from)
+    gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
     gas_limit = int(gas_est * gas_mult)
     cost_pls = gas_est * gas_price / 1e18
     log.info("  Gas: %d  Gwei: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)

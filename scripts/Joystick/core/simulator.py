@@ -120,17 +120,21 @@ def simulate(fn_call, gas: int = 5_000_000, from_address: str | None = None) -> 
 
 
 # ── estimate_gas() ────────────────────────────────────────────────────────────
-def estimate_gas(fn_call, from_address: str | None = None) -> int:
+def estimate_gas(fn_call, from_address: str | None = None, value: int = 0) -> int:
     """
     Estimate gas for fn_call. Raises SimulationFailed if estimation fails
     (which almost always means the TX would revert on-chain).
 
     Args:
         from_address: Override the sender address. Defaults to JOEY_WALLET.
+        value: Native PLS value for payable functions (in wei).
     """
     sender = from_address or JOEY_WALLET
+    params: dict = {"from": sender}
+    if value > 0:
+        params["value"] = value
     try:
-        return fn_call.estimate_gas({"from": sender})
+        return fn_call.estimate_gas(params)
     except ContractLogicError as exc:
         reason = decode_revert(exc)
         raise SimulationFailed(f"Gas estimation failed (would revert): {reason}") from exc
