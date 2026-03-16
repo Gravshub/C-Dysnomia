@@ -742,6 +742,9 @@ class TokenFactoryEngine(EngineBase):
             gas_price = w3_submit.eth.gas_price
 
             # ── TX1: Swap PLS → payment token ─────────────────────────────
+            # swapExactETHForTokens: spend exact PLS, receive >= min tokens.
+            # Query getAmountsOut(PLS→token) to find how much token we get
+            # for payment_cost_pls of PLS, then add slippage buffer.
             router_addr = (PULSEX_V1_ROUTER if route.buy_dex == "V1"
                            else PULSEX_V2_ROUTER)
             swap_router = w3_submit.eth.contract(
@@ -750,22 +753,39 @@ class TokenFactoryEngine(EngineBase):
             )
             deadline = w3_read.eth.get_block("latest")["timestamp"] + 300
 
-            # Calculate PLS amount to spend (with slippage buffer)
-            pls_to_spend = int(route.payment_cost_pls * (1 + MAX_SLIPPAGE))
-
-            # Minimum payment tokens to accept
-            min_payment = int(route.payment_total_wei * (1 - MAX_SLIPPAGE))
-
             path_buy = [
                 Web3.to_checksum_address(WPLS),
                 Web3.to_checksum_address(route.payment_token),
             ]
 
+            # Spend enough PLS to get the required payment tokens.
+            # payment_cost_pls is the sell-side value of those tokens;
+            # buying costs more due to price impact. Add 5% buffer.
+            pls_to_spend = int(route.payment_cost_pls * 1.05)
+
+            # Verify we'd get enough tokens for this PLS amount
+            buy_fn = get_amounts_out if route.buy_dex == "V1" else get_amounts_out_v2
+            preview = buy_fn(pls_to_spend, path_buy)
+            if not preview or preview[-1] < route.payment_total_wei:
+                # Need more PLS — double the buffer
+                pls_to_spend = int(route.payment_cost_pls * 1.15)
+                preview = buy_fn(pls_to_spend, path_buy)
+                if not preview or preview[-1] < route.payment_total_wei:
+                    return EngineResult(
+                        success=False, profit_wei=0, gas_wei=0,
+                        notes=f"Cannot buy enough {route.name}: "
+                              f"need {route.payment_total_wei / 1e18:.4f}, "
+                              f"get {(preview[-1] if preview else 0) / 1e18:.4f}",
+                    )
+
+            # Min tokens to accept (what we actually need)
+            min_payment = int(route.payment_total_wei * (1 - MAX_SLIPPAGE))
+
             receipt = _send_tx(
                 swap_router.functions.swapExactETHForTokens(
                     min_payment, path_buy, JOEY_WALLET, deadline,
                 ),
-                f"Swap PLS → {route.name} ({route.buy_dex})",
+                f"Swap {pls_to_spend / 1e18:.1f} PLS → {route.name} ({route.buy_dex})",
                 value=pls_to_spend,
                 skip_simulate=True,  # payable
             )
