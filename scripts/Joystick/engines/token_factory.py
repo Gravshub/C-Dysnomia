@@ -741,67 +741,68 @@ class TokenFactoryEngine(EngineBase):
 
             gas_price = w3_submit.eth.gas_price
 
-            # ── TX1: Swap PLS → payment token ─────────────────────────────
-            # swapExactETHForTokens: spend exact PLS, receive >= min tokens.
-            # Query getAmountsOut(PLS→token) to find how much token we get
-            # for payment_cost_pls of PLS, then add slippage buffer.
-            router_addr = (PULSEX_V1_ROUTER if route.buy_dex == "V1"
-                           else PULSEX_V2_ROUTER)
-            swap_router = w3_submit.eth.contract(
-                address=Web3.to_checksum_address(router_addr),
-                abi=ROUTER_ABI,
-            )
-            deadline = w3_read.eth.get_block("latest")["timestamp"] + 300
+            # ── TX1: Swap PLS → payment token (skip if already have enough) ─
+            payment_erc20 = erc20(route.payment_token)
+            existing_bal = safe(payment_erc20, "balanceOf", JOEY_WALLET) or 0
+            need_tokens = route.payment_total_wei
 
-            path_buy = [
-                Web3.to_checksum_address(WPLS),
-                Web3.to_checksum_address(route.payment_token),
-            ]
+            if existing_bal >= need_tokens:
+                log.info("Already have %.4f %s (need %.4f) — skipping swap",
+                         existing_bal / 1e18, route.name, need_tokens / 1e18)
+            else:
+                shortfall = need_tokens - existing_bal
+                router_addr = (PULSEX_V1_ROUTER if route.buy_dex == "V1"
+                               else PULSEX_V2_ROUTER)
+                swap_router = w3_submit.eth.contract(
+                    address=Web3.to_checksum_address(router_addr),
+                    abi=ROUTER_ABI,
+                )
+                deadline = w3_read.eth.get_block("latest")["timestamp"] + 300
 
-            # Spend enough PLS to get the required payment tokens.
-            # payment_cost_pls is the sell-side value of those tokens;
-            # buying costs more due to price impact. Add 5% buffer.
-            pls_to_spend = int(route.payment_cost_pls * 1.05)
+                path_buy = [
+                    Web3.to_checksum_address(WPLS),
+                    Web3.to_checksum_address(route.payment_token),
+                ]
 
-            # Verify we'd get enough tokens for this PLS amount
-            buy_fn = get_amounts_out if route.buy_dex == "V1" else get_amounts_out_v2
-            preview = buy_fn(pls_to_spend, path_buy)
-            if not preview or preview[-1] < route.payment_total_wei:
-                # Need more PLS — double the buffer
-                pls_to_spend = int(route.payment_cost_pls * 1.15)
+                # payment_cost_pls is the sell-side value; buying costs more.
+                # Scale PLS spend proportionally to the shortfall.
+                shortfall_ratio = shortfall / need_tokens if need_tokens > 0 else 1.0
+                pls_to_spend = int(route.payment_cost_pls * shortfall_ratio * 1.05)
+
+                buy_fn = get_amounts_out if route.buy_dex == "V1" else get_amounts_out_v2
                 preview = buy_fn(pls_to_spend, path_buy)
-                if not preview or preview[-1] < route.payment_total_wei:
+                if not preview or preview[-1] < shortfall:
+                    pls_to_spend = int(route.payment_cost_pls * shortfall_ratio * 1.15)
+                    preview = buy_fn(pls_to_spend, path_buy)
+                    if not preview or preview[-1] < shortfall:
+                        return EngineResult(
+                            success=False, profit_wei=0, gas_wei=0,
+                            notes=f"Cannot buy enough {route.name}: "
+                                  f"need {shortfall / 1e18:.4f}, "
+                                  f"get {(preview[-1] if preview else 0) / 1e18:.4f}",
+                        )
+
+                min_payment = int(shortfall * (1 - MAX_SLIPPAGE))
+
+                receipt = _send_tx(
+                    swap_router.functions.swapExactETHForTokens(
+                        min_payment, path_buy, JOEY_WALLET, deadline,
+                    ),
+                    f"Swap {pls_to_spend / 1e18:.1f} PLS → {route.name} ({route.buy_dex})",
+                    value=pls_to_spend,
+                    skip_simulate=True,  # payable
+                )
+                if not receipt:
                     return EngineResult(
                         success=False, profit_wei=0, gas_wei=0,
-                        notes=f"Cannot buy enough {route.name}: "
-                              f"need {route.payment_total_wei / 1e18:.4f}, "
-                              f"get {(preview[-1] if preview else 0) / 1e18:.4f}",
+                        notes=f"TX1 failed: PLS → {route.name}",
                     )
+                tx_hashes.append(f"0x{receipt['transactionHash'].hex()}")
+                total_gas_cost += receipt["gasUsed"] * gas_price
 
-            # Min tokens to accept (what we actually need)
-            min_payment = int(route.payment_total_wei * (1 - MAX_SLIPPAGE))
-
-            receipt = _send_tx(
-                swap_router.functions.swapExactETHForTokens(
-                    min_payment, path_buy, JOEY_WALLET, deadline,
-                ),
-                f"Swap {pls_to_spend / 1e18:.1f} PLS → {route.name} ({route.buy_dex})",
-                value=pls_to_spend,
-                skip_simulate=True,  # payable
-            )
-            if not receipt:
-                return EngineResult(
-                    success=False, profit_wei=0, gas_wei=0,
-                    notes=f"TX1 failed: PLS → {route.name}",
-                )
-            tx_hashes.append(f"0x{receipt['transactionHash'].hex()}")
-            total_gas_cost += receipt["gasUsed"] * gas_price
-
-            # Check actual payment token balance received
-            payment_erc20 = erc20(route.payment_token)
             payment_bal = safe(payment_erc20, "balanceOf", JOEY_WALLET) or 0
-            log.info("After swap: %s balance = %.4f",
-                     route.name, payment_bal / 1e18)
+            log.info("Payment token %s balance = %.4f (need %.4f)",
+                     route.name, payment_bal / 1e18, need_tokens / 1e18)
 
             if payment_bal < route.payment_total_wei:
                 log.warning(
