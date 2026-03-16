@@ -1,0 +1,46 @@
+{
+  "_comment": "Gas efficiency data derived from 975 multiBuyWith TXs in 2026. Use to calibrate TokenFactoryEngine batch sizing.",
+  "generated": "2026-03-15",
+  
+  "gas_per_aff_by_loop_size": {
+    "_note": "Derived from actual on-chain TXs. Gas per AFF = gas_cost_pls / (loops * 3). Lower is better.",
+    "5_loops":   {"samples": 2,  "avg_gas_per_aff": 34.0, "note": "Terrible — ramp-up test only"},
+    "10_loops":  {"samples": 6,  "avg_gas_per_aff": 28.5, "note": "Bad — Joey's test size, 4x worse than optimal"},
+    "100_loops": {"samples": 491, "avg_gas_per_aff": 16.1, "note": "Sweet spot — Operator Beta's standard. Consistent, predictable."},
+    "170_loops": {"samples": 3,  "avg_gas_per_aff": 15.2, "note": "Marginal improvement over 100"},
+    "220_loops": {"samples": 2,  "avg_gas_per_aff": 14.8, "note": "Good but rare"},
+    "300_loops": {"samples": 28, "avg_gas_per_aff": 13.2, "note": "Near-optimal. Used by Whale 3."},
+    "382_loops": {"samples": 200, "avg_gas_per_aff": 12.4, "note": "Operator Alpha's settled batch. Best observed."},
+    "500_loops": {"samples": 5,  "avg_gas_per_aff": 11.8, "note": "Highest observed. Diminishing returns."}
+  },
+
+  "recommended_batch_sizes": {
+    "test":       {"loops": 10,  "aff_out": 30,  "est_gas_pls": 1300, "gas_per_aff": 43},
+    "minimum":    {"loops": 100, "aff_out": 300, "est_gas_pls": 4800, "gas_per_aff": 16},
+    "optimal":    {"loops": 300, "aff_out": 900, "est_gas_pls": 11900,"gas_per_aff": 13},
+    "aggressive": {"loops": 500, "aff_out": 1500,"est_gas_pls": 17700,"gas_per_aff": 12}
+  },
+
+  "route_gas_comparison": {
+    "MATH": {
+      "avg_gas_per_buywith": 12800000,
+      "note": "942 samples. Most gas-efficient route. Deep MATH/WPLS liquidity."
+    },
+    "G5": {
+      "avg_gas_per_buywith": 14200000,
+      "note": "27 samples. ~10% more gas than MATH. G5 token contract may have heavier logic."
+    },
+    "PI": {
+      "avg_gas_per_buywith": 11500000,
+      "note": "6 samples. Slightly less gas but PI liquidity is thin — price impact risk."
+    }
+  },
+
+  "gas_price_windows": {
+    "observed_range_gwei": {"min": 256544, "max": 6001710},
+    "optimal_gwei": "< 500000 (only 8% of TXs were above 2M Gwei)",
+    "operator_alpha_avg_gwei": 970576,
+    "operator_beta_avg_gwei": 1160331,
+    "note": "PulseChain gas is volatile. Best window is typically low-activity hours (UTC 00:00-08:00)."
+  }
+}
