@@ -1,0 +1,164 @@
+{
+  "report": "AFFECTION Minting Intelligence Report",
+  "generated": "2026-03-15",
+  "period": "2026-01-01 → 2026-03-16",
+  "data_source": "BlockScout API — Multi AFFECTION contract 0xCF138a83D739eE98D7A54159E94e5BFaa4B61988",
+  "analyst": "|>JOYSTICK<|",
+
+  "summary": {
+    "total_txs_analyzed": 1243,
+    "total_multiBuyWith_calls": 975,
+    "total_multiGenerate_calls": 268,
+    "total_aff_minted": 642672,
+    "total_gas_spent_pls": 12107156,
+    "unique_wallets": 9,
+    "active_minters_with_output": 7,
+    "wallets_wasted_on_generate_only": 3,
+    "dominant_route": "MATH (96.7% of BuyWith calls)",
+    "route_distribution": {"MATH": 942, "G5": 27, "PI": 6},
+    "monthly_volume": {
+      "2026-01": {"aff": 613812, "gas_pls": 8325048, "txs": 939, "wallets": 4},
+      "2026-02": {"aff": 28800, "gas_pls": 1099071, "txs": 34, "wallets": 4},
+      "2026-03": {"aff": 60, "gas_pls": 797, "txs": 2, "wallets": 1}
+    },
+    "note": "Activity heavily concentrated in late January 2026. Near-zero since Feb 15."
+  },
+
+  "operators": {
+    "operator_alpha": {
+      "confidence": "HIGH — shared AFF destinations confirm single operator",
+      "worker_wallets": [
+        "0x24db019d2eb8f869698cd5f2ecfb1da9ff92666b",
+        "0x9ecef91ef71041d6ea0b655d9e65cd95e989c499"
+      ],
+      "main_wallet": "0xd1bebc94beff55c454dbf3b9b2be435d70be510a",
+      "destination_wallets": [
+        "0xcec3cdcbaad459a6d3c45927c252e5c61d6b0506",
+        "0x155172653e94a7e00a66e3002c80ebc57e8bd4d2",
+        "0xb7ac0922ff050254ec539c5e7a19acce462f13c2"
+      ],
+      "total_aff_minted": 489870,
+      "total_gas_pls": 9552993,
+      "routes_used": {"MATH": 445, "G5": 27},
+      "main_wallet_current_aff": 2075694,
+      "main_wallet_total_txs": 2250,
+      "main_wallet_pls": 600000,
+      "profile": "Sophisticated DeFi operator. 2,250+ TXs across 60+ contracts including PulseX V1/V2, Uniswap, addLiquidity, and dozens of Atropa tokens. Uses MATH route on worker wallet, distributes AFF to multiple destinations. Likely uses AFF for Purchase() ecosystem token minting and liquidity engineering, not just DEX sells.",
+      "tactics": [
+        "Worker wallet pattern: main funds worker → worker mines → AFF returns to main",
+        "Started small (5 loops) then scaled to 382 — classic testing ramp",
+        "90-TX burst sequences at 10s intervals — automated bot",
+        "Wasted 2.5M PLS on 259 multiGenerate() calls before learning",
+        "Gas price range 455K-2.5M Gwei — not particularly gas-sensitive"
+      ]
+    },
+    "operator_beta": {
+      "confidence": "MEDIUM — single worker + single destination, funded by separate address",
+      "worker_wallets": [
+        "0x87cf4843e102f776a32682543ab746645afeddfe"
+      ],
+      "main_wallet": "0x18c2972db0bd3958bcec1311b3b548c2974e5de6",
+      "funding_source": "0x994b3a262302d1dd7e2c7b3e4eaec8c4dc7bc3de",
+      "total_aff_minted": 146700,
+      "total_gas_pls": 2365560,
+      "routes_used": {"MATH": 489},
+      "main_wallet_current_aff": 1579139,
+      "main_wallet_is_contract": true,
+      "profile": "Dedicated MATH-route minter. Always exactly 100 loops — fixed bot config. 101-TX burst sequences. Sends all AFF to a custom contract (0x18c2...) with unknown function 0xbc25cf77. May be an automated sell/distribute contract.",
+      "tactics": [
+        "Fixed 100-loop batches — never varies",
+        "101-TX bursts at 10s intervals",
+        "Custom contract as destination — automated pipeline",
+        "Only 2 wasted multiGenerate calls — learned quickly"
+      ]
+    },
+    "joey": {
+      "wallet": "0x17367877af5a8d0eb33ba5689a880f696386e24d",
+      "total_aff_minted": 60,
+      "total_gas_pls": 4154,
+      "routes_used": {"MATH": 2},
+      "avg_gas_per_aff": 69.2,
+      "loop_sizes": [10, 10],
+      "note": "Two small test runs. Also wasted 3,357 PLS on a multiGenerate(100) call that produced 0 AFF. Current efficiency: worst among all minters due to small batch size."
+    }
+  },
+
+  "efficiency_rankings": {
+    "by_gas_per_aff_pls": [
+      {"wallet": "0xe26009a4...d0d0", "gas_per_aff": 13.2, "route": "MATH", "loops": 300, "note": "Single TX, optimal batch size"},
+      {"wallet": "0x87cf4843...ddfe (Op.Beta)", "gas_per_aff": 16.1, "route": "MATH", "loops": 100, "note": "Consistent, automated"},
+      {"wallet": "0x24db019d...666b (Op.Alpha)", "gas_per_aff": 18.3, "route": "MATH", "loops": "5-500", "note": "Variable, includes ramp-up overhead"},
+      {"wallet": "0x28d0a737...bd17", "gas_per_aff": 29.0, "route": "PI", "loops": 100, "note": "PI route more expensive"},
+      {"wallet": "0xb24d21eb...109f", "gas_per_aff": 34.9, "route": "PI", "loops": 220, "note": "PI route"},
+      {"wallet": "0x9ecef91e...c499 (Op.Alpha)", "gas_per_aff": 43.3, "route": "G5", "loops": 300, "note": "G5 route extremely expensive"},
+      {"wallet": "0x17367877...e24d (JOEY)", "gas_per_aff": 69.2, "route": "MATH", "loops": 10, "note": "Small batches = poor gas amortization"}
+    ],
+    "conclusion": "Optimal gas efficiency at 100-300 loops on MATH route: 13-18 PLS/AFF gas cost. Loop sizes below 50 are wasteful."
+  },
+
+  "tactical_intelligence": {
+    "route_selection": {
+      "finding": "MATH dominates at 96.7% of all BuyWith calls. PI used occasionally. G5 used only by Operator Alpha's second wallet (likely testing or when MATH was unavailable).",
+      "current_economics": {
+        "MATH": "3 MATH/loop × 39.65 PLS/MATH = 118.94 PLS/loop → 39.65 PLS/AFF payment cost",
+        "G5": "0.6 G5/loop × 573.10 PLS/G5 = 343.86 PLS/loop → 114.62 PLS/AFF payment cost",
+        "PI": "0.01 PI/loop × 2760.13 PLS/PI = 27.60 PLS/loop → 9.20 PLS/AFF payment cost",
+        "aff_sell_value": "44.97 PLS/AFF on PulseX V2",
+        "note": "PI appears cheapest per AFF but gas estimates failed — may have liquidity issues. MATH is the proven reliable route."
+      },
+      "profitability_now": "UNPROFITABLE on all routes. MATH: 44.97 - 39.65 - ~16 gas = -10.68 PLS/AFF. Need AFF price to rise ~30% or MATH price to drop ~25% for breakeven."
+    },
+    "batch_sizing": {
+      "finding": "100-300 loops is the sweet spot. Below 50, per-AFF gas overhead is punishing. Above 300, marginal gas savings diminish.",
+      "optimal": "100 loops (Operator Beta's choice) — 300 AFF output, predictable gas, good amortization",
+      "data": {
+        "10_loops": "~69 PLS/AFF gas (JOEY's test)",
+        "100_loops": "~16 PLS/AFF gas (Op. Beta average)",
+        "300_loops": "~13 PLS/AFF gas (best single TX observed)",
+        "382_loops": "~12 PLS/AFF gas (Op. Alpha at scale, but highly variable)"
+      }
+    },
+    "timing": {
+      "finding": "All heavy minting occurred in a 2-day window (Jan 26-27 2026). This correlates with when AFF/MATH price ratio was more favorable. Since then, near-zero activity.",
+      "implication": "These operators are WAITING for favorable conditions to resume. When the ratio shifts, expect rapid automated minting bursts.",
+      "burst_pattern": "10-second intervals between TXs during active periods. This is bot speed, not human."
+    },
+    "multiGenerate_trap": {
+      "finding": "268 of 1,243 TXs (21.6%) were pure multiGenerate() calls — ALL wasted gas.",
+      "total_wasted": "2,654,698 PLS across 5 wallets",
+      "explanation": "multiGenerate() calls AFFECTION.Generate() which mints AFF to the AFFECTION contract itself via _mintToCap(). The minted AFF is NOT transferred to the caller. Only multiBuyWith() delivers AFF to msg.sender.",
+      "joey_waste": "3,357 PLS on 1 multiGenerate(100) call"
+    },
+    "the_real_play": {
+      "finding": "Operator Alpha holds 2M+ AFF and interacts with 60+ contracts including addLiquidity, Atropa tokens (TBill, TeddyBear, FDIC, FED, BFF, pDAI), and multiple DEX routers.",
+      "hypothesis": "The high-value strategy is NOT 'mint AFF → sell on DEX'. It's 'mint AFF cheaply → use Purchase(token, amount) to mint ecosystem tokens at 1:1 → sell tokens that have higher DEX value than AFF'. With AFF at 44.97 PLS and many Atropa tokens trading higher, the arbitrage comes from the token web's price discrepancies, not from AFF itself.",
+      "supporting_evidence": [
+        "No large AFF→WPLS swap TXs found in DEX router calls",
+        "Heavy approve + transfer activity to individual Atropa token contracts",
+        "addLiquidity calls = creating new pairs (Heart's Law strategy)",
+        "2M+ AFF still held = not dumping, using strategically"
+      ]
+    }
+  },
+
+  "joystick_recommendations": {
+    "immediate": [
+      "Use MATH route exclusively (proven, deepest liquidity)",
+      "Batch at 100 loops minimum (10-loop tests are 4x more expensive per AFF)",
+      "NEVER call multiGenerate() alone — total gas waste",
+      "Monitor MATH/AFF price ratio daily — currently -10.68 PLS/AFF loss, needs ~30% shift"
+    ],
+    "when_profitable": [
+      "Use 100-loop batches (consistent, predictable gas ~4,800 PLS)",
+      "Burst at 10-second intervals when gas is low (<500K Gwei)",
+      "Separate worker wallet for mining, main wallet for selling/using",
+      "Consider Purchase() strategy: mint AFF → Purchase() into higher-value ecosystem tokens"
+    ],
+    "monitoring": [
+      "Track Operator Alpha (0xd1bebc...) — when they resume minting, conditions are favorable",
+      "Watch MATH/WPLS pool for price drops that improve the route economics",
+      "Watch AFF/WPLS pool for price increases",
+      "Log all route economics every cycle in route_monitor.jsonl"
+    ]
+  }
+}
