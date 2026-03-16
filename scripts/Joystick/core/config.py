@@ -98,6 +98,13 @@ PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEb
 # ── Multi-mint contracts (Helios) ────────────────────────────────────────
 MULTI_AFFECTION = Web3.to_checksum_address("0xCF138a83D739eE98D7A54159E94e5BFaa4B61988")
 
+# ── AFFECTION BuyWith payment tokens ─────────────────────────────────────
+AFF_G5    = Web3.to_checksum_address("0x2fc636E7fDF9f3E8d61033103052079781a6e7D2")  # GIMME FIVE
+AFF_PI    = Web3.to_checksum_address("0xA2262D7728C689526693aE893D0fD8a352C7073C")  # pINDEPENDENCE
+AFF_MATH  = Web3.to_checksum_address("0xB680F0cc810317933F234f67EB6A9E923407f05D")  # MATH v1.1
+AFF_FA    = Web3.to_checksum_address("0x232a27AB6941281b3f474Fe5fF7Cc89816fB675A")  # libConjecture
+AFF_FAUNG = Web3.to_checksum_address("0x73A19FaFb359faf519C9707b781dfdB88407d10d")  # libDynamic
+
 # ── Hub tokens for pair discovery (Tier 1 scan) ─────────────────────────────
 HUB_TOKENS = [
     WPLS,

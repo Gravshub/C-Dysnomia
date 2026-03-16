@@ -95,7 +95,7 @@ def send_tx(
         )
 
     # Step 3: estimate_gas (abort if fails)
-    gas_est = estimate_gas(fn_call, from_address=tx_from)
+    gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
     gas_limit = int(gas_est * gas_mult)
     cost_pls = gas_est * gas_price / 1e18
     log.info("  Gas: %d  Gwei: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
@@ -131,10 +131,11 @@ def send_tx(
         tx_hash_hex = signed.hash.hex()
     log.info("  TX: 0x%s", tx_hash_hex)
 
-    # Wait for receipt — try submitting provider first, then fall back via pool
+    # Wait for receipt — use read pool (reliable indexing) not submit pool
+    from .chain import get_read_pool
     tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
     try:
-        receipt = pool.call(
+        receipt = get_read_pool().call(
             lambda w3: w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=300)
         )
     except TimeExhausted:
