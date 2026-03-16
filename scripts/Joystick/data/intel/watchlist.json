@@ -1,0 +1,86 @@
+{
+  "_comment": "Wallets to monitor for AFF minting activity. When these resume, conditions are favorable.",
+  "generated": "2026-03-15",
+
+  "watchlist": [
+    {
+      "tag": "alpha_main",
+      "address": "0xd1bebc94beff55c454dbf3b9b2be435d70be510a",
+      "role": "Operator Alpha — main wallet (orchestrator/distributor)",
+      "current_aff": 2075694,
+      "current_pls": 600000,
+      "threat_level": "HIGH",
+      "monitor_for": ["multiBuyWith calls", "AFF transfers out", "Purchase() calls", "addLiquidity"],
+      "last_active": "2026-01-27"
+    },
+    {
+      "tag": "alpha_worker_1",
+      "address": "0x24db019d2eb8f869698cd5f2ecfb1da9ff92666b",
+      "role": "Operator Alpha — MATH minting worker",
+      "current_aff": 0,
+      "current_pls": 48964,
+      "threat_level": "MEDIUM",
+      "monitor_for": ["multiBuyWith calls to Multi AFFECTION"],
+      "last_active": "2026-01-27",
+      "note": "445 BuyWith TXs in one day, 90-TX bursts. Will light up when conditions improve."
+    },
+    {
+      "tag": "alpha_worker_2",
+      "address": "0x9ecef91ef71041d6ea0b655d9e65cd95e989c499",
+      "role": "Operator Alpha — G5 minting worker (secondary)",
+      "current_aff": 0,
+      "current_pls": 1274198,
+      "threat_level": "LOW",
+      "monitor_for": ["multiBuyWith calls"],
+      "last_active": "2026-02-15",
+      "note": "Only used G5 route (expensive). 1.27M PLS on hand — ready to deploy."
+    },
+    {
+      "tag": "beta_worker",
+      "address": "0x87cf4843e102f776a32682543ab746645afeddfe",
+      "role": "Operator Beta — MATH minting worker",
+      "current_aff": 0,
+      "current_pls": 988665,
+      "threat_level": "MEDIUM",
+      "monitor_for": ["multiBuyWith calls"],
+      "last_active": "2026-01-27",
+      "note": "489 BuyWith TXs, always 100 loops. 988K PLS ready. 101-TX bursts."
+    },
+    {
+      "tag": "beta_main",
+      "address": "0x18c2972db0bd3958bcec1311b3b548c2974e5de6",
+      "role": "Operator Beta — main contract (custom deployment)",
+      "current_aff": 1579139,
+      "is_contract": true,
+      "threat_level": "MEDIUM",
+      "monitor_for": ["incoming AFF transfers", "function 0xbc25cf77 calls"],
+      "last_active": "2026-01-27",
+      "note": "Custom contract (11.4KB), receives all of Beta's AFF. Unknown sell logic."
+    },
+    {
+      "tag": "alpha_distributor_1",
+      "address": "0x155172653e94a7e00a66e3002c80ebc57e8bd4d2",
+      "role": "Shared destination for Operators Alpha — AFF receiver",
+      "received_from_alpha_1": 385880,
+      "received_from_alpha_2": 227576,
+      "threat_level": "LOW",
+      "monitor_for": ["AFF outflows", "Purchase() calls"]
+    },
+    {
+      "tag": "alpha_distributor_2",
+      "address": "0xb7ac0922ff050254ec539c5e7a19acce462f13c2",
+      "role": "Shared destination for Operators Alpha — AFF receiver",
+      "received_from_alpha_1": 135070,
+      "received_from_alpha_2": 288293,
+      "threat_level": "LOW",
+      "monitor_for": ["AFF outflows", "Purchase() calls"]
+    }
+  ],
+
+  "alert_triggers": {
+    "multiBuyWith_spike": "Any watched wallet calls multiBuyWith → AFF minting conditions likely profitable",
+    "math_price_drop": "MATH/WPLS drops >15% → MATH route economics improve",
+    "aff_price_pump": "AFF/WPLS rises >20% → all routes become more attractive",
+    "alpha_main_aff_move": "0xd1bebc... transfers >10K AFF → strategy shift in progress"
+  }
+}
