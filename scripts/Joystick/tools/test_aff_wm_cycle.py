@@ -144,6 +144,10 @@ def run_test_cycle(engine: TokenFactoryEngine, dry_run: bool = False) -> None:
     print(f"  FORCED DIAGNOSTIC CYCLE")
     print(f"{'='*60}")
 
+    # Reset nonce to chain state before sending TXs
+    from ..core.wallet import reset_nonce
+    reset_nonce()
+
     # Wallet balance
     snap = snapshot_balances()
     print(f"  PLS:  {snap['pls'] / 1e18:,.1f}")
