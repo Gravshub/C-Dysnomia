@@ -174,8 +174,10 @@ class RPCPool:
 
     def send_raw(self, signed_tx) -> str:
         """
-        Submit a signed transaction with failover.
-        Prefers Tier 1 (privacy-first) providers for TX submission.
+        Submit a signed transaction by broadcasting to ALL Tier 1 providers.
+        This maximizes propagation — a TX accepted by one node but not others
+        can get stuck in limbo. Broadcasting to all ensures at least one
+        propagates to miners/validators.
 
         Returns: tx_hash hex string
         """
@@ -188,36 +190,44 @@ class RPCPool:
         if not ranked:
             raise RPCAllProvidersDown("No healthy submit providers")
 
+        hash_hex = None
         last_error = None
-        for provider in ranked:
-            for attempt in range(MAX_RETRIES + 1):
-                try:
-                    t0 = time.time()
-                    tx_hash = provider.w3.eth.send_raw_transaction(signed_tx)
-                    latency = time.time() - t0
-                    provider.record_success(latency)
-                    hash_hex = tx_hash.hex() if hasattr(tx_hash, 'hex') else tx_hash
-                    log.info("TX submitted via %s (%.0fms): %s",
-                             provider.name, latency * 1000, hash_hex)
-                    return hash_hex
-                except Exception as e:
-                    provider.record_failure()
-                    last_error = e
-                    err_str = str(e).lower()
-                    # Non-retryable errors — real, not transient
-                    if "nonce too low" in err_str:
-                        raise
-                    if "replacement transaction underpriced" in err_str:
-                        raise
-                    if "already known" in err_str:
-                        log.info("TX already in mempool (submitted elsewhere)")
-                        return None
-                    if attempt < MAX_RETRIES:
-                        backoff = RETRY_BACKOFF_BASE * (2 ** attempt)
-                        time.sleep(backoff)
-                    break  # next provider on non-retryable
+        accepted_by = []
 
-        raise RPCAllProvidersDown(f"TX submission failed on all providers. Last: {last_error}")
+        # Broadcast to ALL providers — don't stop on first success
+        for provider in ranked:
+            try:
+                t0 = time.time()
+                tx_hash = provider.w3.eth.send_raw_transaction(signed_tx)
+                latency = time.time() - t0
+                provider.record_success(latency)
+                h = tx_hash.hex() if hasattr(tx_hash, 'hex') else tx_hash
+                if hash_hex is None:
+                    hash_hex = h
+                accepted_by.append(provider.name)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "nonce too low" in err_str:
+                    if hash_hex:
+                        break  # already accepted elsewhere
+                    raise
+                if "replacement transaction underpriced" in err_str:
+                    if hash_hex:
+                        break
+                    raise
+                if "already known" in err_str:
+                    accepted_by.append(f"{provider.name}(dup)")
+                    continue
+                provider.record_failure()
+                last_error = e
+
+        if hash_hex:
+            log.info("TX broadcast to %s: %s", ", ".join(accepted_by), hash_hex)
+            return hash_hex
+
+        if last_error:
+            raise RPCAllProvidersDown(f"TX submission failed on all providers. Last: {last_error}")
+        return None
 
     def get_w3(self) -> Web3:
         """Get the Web3 instance for the best current provider.

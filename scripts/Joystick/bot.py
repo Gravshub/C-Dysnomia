@@ -534,6 +534,8 @@ def main() -> None:
                         help="Force single-wallet mode even if worker keys are set")
     parser.add_argument("--wallet-status", action="store_true",
                         help="Show 3-wallet balances, auth status, nonces")
+    parser.add_argument("--force-test", action="store_true",
+                        help="Force one E4 TokenFactory diagnostic cycle (bypasses ROI threshold)")
     args = parser.parse_args()
 
     if args.rpc_status:
@@ -605,6 +607,17 @@ def main() -> None:
         _events.log_engine_result("LAU", result)
         print(f"LAU result: success={result.success} gas={result.gas_pls:.4f} PLS "
               f"txs={len(result.tx_hashes)} notes={result.notes}")
+        return
+
+    if args.force_test:
+        # Enable force-test on the TokenFactory engine and run one cycle
+        os.environ["FORCE_AFF_TEST"] = "1"
+        for e in bot.engines:
+            if e.name == "TokenFactory":
+                e.FORCE_TEST = True
+                break
+        log.info("Force-test mode enabled for E4 TokenFactory")
+        bot.run_cycle()
         return
 
     if args.once:
