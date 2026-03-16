@@ -1,0 +1,156 @@
+{
+  "0x24db019d2eb8f869698cd5f2ecfb1da9ff92666b": {
+    "tx_count": 704,
+    "buywith_count": 445,
+    "generate_count": 259,
+    "total_loops": 155190,
+    "total_aff_minted": 465570,
+    "total_gas_pls": 8500322.42,
+    "avg_gas_per_aff": 18.2579,
+    "routes": {
+      "MATH": 445
+    },
+    "active_days": 1,
+    "first_active": "2026-01-27",
+    "last_active": "2026-01-27",
+    "wasted_generate_gas_pls": 2505365.28,
+    "avg_loop_size": 348.7
+  },
+  "0x87cf4843e102f776a32682543ab746645afeddfe": {
+    "tx_count": 491,
+    "buywith_count": 489,
+    "generate_count": 2,
+    "total_loops": 48900,
+    "total_aff_minted": 146700,
+    "total_gas_pls": 2365560.18,
+    "avg_gas_per_aff": 16.1252,
+    "routes": {
+      "MATH": 489
+    },
+    "active_days": 2,
+    "first_active": "2026-01-26",
+    "last_active": "2026-01-27",
+    "wasted_generate_gas_pls": 59907.24,
+    "avg_loop_size": 100.0
+  },
+  "0x9ecef91ef71041d6ea0b655d9e65cd95e989c499": {
+    "tx_count": 28,
+    "buywith_count": 27,
+    "generate_count": 1,
+    "total_loops": 8100,
+    "total_aff_minted": 24300,
+    "total_gas_pls": 1052671.03,
+    "avg_gas_per_aff": 43.3198,
+    "routes": {
+      "G5": 27
+    },
+    "active_days": 1,
+    "first_active": "2026-02-15",
+    "last_active": "2026-02-15",
+    "wasted_generate_gas_pls": 89425.67,
+    "avg_loop_size": 300.0
+  },
+  "0xb24d21eb8a111fe06fde5b042889f8b33364109f": {
+    "tx_count": 5,
+    "buywith_count": 5,
+    "generate_count": 0,
+    "total_loops": 1100,
+    "total_aff_minted": 3300,
+    "total_gas_pls": 115232.4,
+    "avg_gas_per_aff": 34.9189,
+    "routes": {
+      "PI": 5
+    },
+    "active_days": 1,
+    "first_active": "2026-02-16",
+    "last_active": "2026-02-16",
+    "wasted_generate_gas_pls": 0.0,
+    "avg_loop_size": 220.0
+  },
+  "0xcec3cdcbaad459b2b7bee596ea70a5300e5aa834": {
+    "tx_count": 6,
+    "buywith_count": 3,
+    "generate_count": 3,
+    "total_loops": 511,
+    "total_aff_minted": 1533,
+    "total_gas_pls": 46746.92,
+    "avg_gas_per_aff": 30.4938,
+    "routes": {
+      "MATH": 3
+    },
+    "active_days": 1,
+    "first_active": "2026-01-27",
+    "last_active": "2026-01-27",
+    "wasted_generate_gas_pls": 22940.14,
+    "avg_loop_size": 170.3
+  },
+  "0xe26009a420f21048eed184ff9146d88fde00d0d0": {
+    "tx_count": 1,
+    "buywith_count": 1,
+    "generate_count": 0,
+    "total_loops": 300,
+    "total_aff_minted": 900,
+    "total_gas_pls": 11881.91,
+    "avg_gas_per_aff": 13.2021,
+    "routes": {
+      "MATH": 1
+    },
+    "active_days": 1,
+    "first_active": "2026-02-13",
+    "last_active": "2026-02-13",
+    "wasted_generate_gas_pls": 0.0,
+    "avg_loop_size": 300.0
+  },
+  "0x28d0a7374d42efd842c5f23da27b47ffcb46bd17": {
+    "tx_count": 1,
+    "buywith_count": 1,
+    "generate_count": 0,
+    "total_loops": 100,
+    "total_aff_minted": 300,
+    "total_gas_pls": 8711.82,
+    "avg_gas_per_aff": 29.0394,
+    "routes": {
+      "PI": 1
+    },
+    "active_days": 1,
+    "first_active": "2026-02-15",
+    "last_active": "2026-02-15",
+    "wasted_generate_gas_pls": 0.0,
+    "avg_loop_size": 100.0
+  },
+  "0x17367877af5a8d0eb33ba5689a880f696386e24d": {
+    "tx_count": 3,
+    "buywith_count": 2,
+    "generate_count": 1,
+    "total_loops": 20,
+    "total_aff_minted": 60,
+    "total_gas_pls": 4153.68,
+    "avg_gas_per_aff": 69.2281,
+    "routes": {
+      "MATH": 2
+    },
+    "active_days": 2,
+    "first_active": "2026-03-12",
+    "last_active": "2026-03-16",
+    "wasted_generate_gas_pls": 3357.06,
+    "avg_loop_size": 10.0,
+    "tag": "JOEY"
+  },
+  "0xb8d6b3e179fb9bd37043f32f9dd2fdcc40ad3044": {
+    "tx_count": 4,
+    "buywith_count": 2,
+    "generate_count": 2,
+    "total_loops": 3,
+    "total_aff_minted": 9,
+    "total_gas_pls": 1875.46,
+    "avg_gas_per_aff": 208.3848,
+    "routes": {
+      "MATH": 2
+    },
+    "active_days": 1,
+    "first_active": "2026-01-27",
+    "last_active": "2026-01-27",
+    "wasted_generate_gas_pls": 1244.01,
+    "avg_loop_size": 1.5
+  }
+}
