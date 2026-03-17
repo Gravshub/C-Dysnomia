@@ -28,7 +28,7 @@ JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E2
 AFFECTION  = Web3.to_checksum_address("0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D")
 WM         = Web3.to_checksum_address("0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29")
 WPLS       = Web3.to_checksum_address("0xA1077a294dDE1B09bB078844df40758a5D0f9a27")
-PDAI       = Web3.to_checksum_address("0xefD766cCb38EaF1dfd701853BFCe31359239F305")
+PDAI       = Web3.to_checksum_address("0x6B175474E89094C44Da98b954EedeAC495271d0F")
 PUSDC      = Web3.to_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 
 # ── Joey's contracts ──────────────────────────────────────────────────────────
@@ -72,8 +72,9 @@ SEED_LAUS = [
 ]
 
 # ── DEX ───────────────────────────────────────────────────────────────────────
-PULSEX_V1_ROUTER  = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
+PULSEX_V1_ROUTER  = Web3.to_checksum_address("0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02")
 PULSEX_V1_FACTORY = Web3.to_checksum_address("0x1715a3E4A142d8b698131108995174F37aEBA10D")
+PULSEX_V2_ROUTER  = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
 PULSEX_V2_FACTORY = Web3.to_checksum_address("0x29eA7545DEf87022BAdc76323F373EA1e707C523")
 NINEMM_FACTORY    = Web3.to_checksum_address("0xE26E7F6b5A43A667dBA42Cd9C829d5C75A8093b1")
 NINEINCH_FACTORY  = Web3.to_checksum_address("0x7a8FC9dEA0B3316b76686F2Cf58E1b3c02890F8D")
@@ -114,7 +115,7 @@ HUB_TOKENS = [
     GIBS_LAU,                                                                 # GIBS
     Web3.to_checksum_address("0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"),  # FDIC
     Web3.to_checksum_address("0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6"),  # ATROPA
-    PDAI,                                                                     # pDAI
+    Web3.to_checksum_address("0x6B175474E89094C44Da98b954EedeAC495271d0F"),  # pDAI
 ]
 
 # ── Graph arb parameters ────────────────────────────────────────────────────
