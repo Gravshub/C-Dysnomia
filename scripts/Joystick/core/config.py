@@ -118,6 +118,10 @@ HUB_TOKENS = [
     Web3.to_checksum_address("0x6B175474E89094C44Da98b954EedeAC495271d0F"),  # pDAI
 ]
 
+# ── PulseX dual-DEX token list filters ────────────────────────────────────────
+PULSEX_MIN_SPREAD_BPS = float(os.getenv("PULSEX_MIN_SPREAD_BPS", "0"))
+PULSEX_MIN_TVL_PLS    = float(os.getenv("PULSEX_MIN_TVL_PLS", "1000"))
+
 # ── Graph arb parameters ────────────────────────────────────────────────────
 GRAPH_ARB_MIN_PROFIT_PLS = int(os.getenv("GRAPH_ARB_MIN_PROFIT_PLS", "1000"))
 GRAPH_ARB_MAX_IMPACT_PCT = float(os.getenv("GRAPH_ARB_MAX_IMPACT_PCT", "10.0"))
