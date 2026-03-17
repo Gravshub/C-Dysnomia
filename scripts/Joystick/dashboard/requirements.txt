@@ -1,0 +1,14 @@
+# JOYSTICK Mission Control — API dependencies
+# Install: pip install -r requirements.txt
+
+# --- API framework ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+
+# --- Chain interaction ---
+web3>=6.0.0
+eth-abi>=5.0.0
+
+# --- Optional: for future WebSocket support ---
+# websockets>=12.0
