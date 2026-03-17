@@ -1,0 +1,97 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  |>JOYSTICK<| Bot Service
+#  File: /etc/systemd/system/joystick-bot.service
+#
+#  What this does:
+#    - Runs bot.py as a background service (like an app on your phone
+#      that keeps running even when you close it)
+#    - Automatically restarts if it crashes (after 10 second cooldown)
+#    - Starts automatically when the VPS reboots
+#    - Logs everything to journald (viewable with: journalctl -u joystick-bot)
+#
+#  Commands you'll use:
+#    sudo systemctl start joystick-bot     # Start the bot
+#    sudo systemctl stop joystick-bot      # Stop the bot
+#    sudo systemctl restart joystick-bot   # Restart (e.g. after code update)
+#    sudo systemctl status joystick-bot    # Check if it's running
+#    journalctl -u joystick-bot -f         # Watch live logs (Ctrl+C to exit)
+#    journalctl -u joystick-bot --since "1 hour ago"  # Recent logs
+# ═══════════════════════════════════════════════════════════════════════
+
+[Unit]
+# Human-readable description (shows in `systemctl status`)
+Description=|>JOYSTICK<| PulseChain Arbitrage Bot
+# Wait for network to be up before starting — the bot needs RPC access
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=simple means: the process we start IS the service
+# (as opposed to "forking" where it spawns a child and exits)
+Type=simple
+
+# Which user runs the bot. NEVER run as root.
+# The deploy script creates this user with no login shell (security)
+User=joystick
+Group=joystick
+
+# Where the bot's working directory is
+WorkingDirectory=/opt/joystick/repo/scripts/Joystick
+
+# Load environment variables from .env.pulse, then run bot.py
+# The "set -a" exports all variables so Python's os.getenv() sees them
+# The "exec" replaces the shell process with Python (cleaner process tree)
+ExecStart=/bin/bash -c 'set -a && source /opt/joystick/.env.pulse && set +a && exec /opt/joystick/venv/bin/python -u bot.py'
+
+# -u flag on Python = unbuffered output. Without this, print() statements
+# get stuck in a buffer and you won't see logs in real-time.
+
+# ─── Restart policy ──────────────────────────────────────────────────
+# "on-failure" = restart only if the process exits with an error code
+# If you run `systemctl stop`, it won't restart (that's a clean exit)
+Restart=on-failure
+
+# Wait 10 seconds before restarting after a crash
+# This prevents rapid-fire restarts that burn gas if something is wrong
+RestartSec=10
+
+# Give up after 5 consecutive crashes within 60 seconds
+# If the bot crashes 5 times in a minute, something is seriously wrong
+# and it needs human attention, not more restarts
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# ─── Security hardening ─────────────────────────────────────────────
+# These prevent the bot process from doing things it shouldn't
+
+# No writing to /usr, /boot, /etc (read-only system directories)
+ProtectSystem=strict
+
+# Allow writing ONLY to these directories
+ReadWritePaths=/opt/joystick/data /opt/joystick/logs /opt/joystick/repo
+
+# Can't get new privileges (prevents privilege escalation attacks)
+NoNewPrivileges=true
+
+# Private /tmp directory (other processes can't snoop on bot's temp files)
+PrivateTmp=true
+
+# ─── Resource limits ────────────────────────────────────────────────
+# Memory limit: 512MB should be plenty. If the bot uses more, it's a bug.
+MemoryMax=512M
+
+# CPU limit: 50% of one core. The bot is I/O-bound (waiting for RPC),
+# not CPU-bound. This prevents runaway loops from starving the VPS.
+CPUQuota=50%
+
+# ─── Environment ─────────────────────────────────────────────────────
+# PYTHONUNBUFFERED ensures all output goes to logs immediately
+Environment=PYTHONUNBUFFERED=1
+
+# PYTHONDONTWRITEBYTECODE avoids __pycache__ clutter
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+# "multi-user.target" = start this service when the system boots normally
+# (i.e., not in recovery mode or single-user mode)
+WantedBy=multi-user.target
