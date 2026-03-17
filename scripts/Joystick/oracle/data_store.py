@@ -40,6 +40,7 @@ class DataStore:
         self._recon_ts: float = 0
         self._v2_federal: Optional[list] = None
         self._contracts: Optional[dict] = None
+        self._pulsex_dual: Optional[list] = None
 
     @classmethod
     def get(cls) -> "DataStore":
@@ -226,10 +227,43 @@ class DataStore:
         """Filter v2_federal to Debenture=true only."""
         return [t for t in self.v2_federal_tokens() if t.get("debenture") is True]
 
+    # ── PulseX Dual-DEX Token List ────────────────────────────────────
+
+    def pulsex_dual_dex(self, min_spread_bps: float = 0, min_tvl_pls: float = 0) -> list[dict]:
+        """
+        Load pulsex_dual_dex_tokens.json — broader PulseX V1+V2 arb candidates.
+        Returns list of token dicts, optionally filtered by min spread and TVL.
+        Static file — no TTL needed (refreshed by manual recon runs).
+        """
+        if self._pulsex_dual is None:
+            path = os.path.join(_DATA_DIR, "pulsex_dual_dex_tokens.json")
+            if not os.path.exists(path):
+                log.debug("DataStore: pulsex_dual_dex_tokens.json not found")
+                self._pulsex_dual = []
+            else:
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    self._pulsex_dual = data.get("tokens", [])
+                    log.debug("DataStore: loaded %d pulsex dual-DEX tokens",
+                              len(self._pulsex_dual))
+                except Exception as exc:
+                    log.warning("DataStore: failed to load pulsex_dual_dex_tokens.json: %s", exc)
+                    self._pulsex_dual = []
+
+        tokens = self._pulsex_dual
+        if min_spread_bps > 0 or min_tvl_pls > 0:
+            tokens = [
+                t for t in tokens
+                if t.get("spread_bps", 0) >= min_spread_bps
+                and t.get("combined_wpls_pls", 0) >= min_tvl_pls
+            ]
+        return tokens
+
     # ── Cache Management ─────────────────────────────────────────────
 
     def invalidate(self, which: str = "all") -> None:
-        """Force reload on next access. which: 'pairs', 'recon', 'tokens', 'v2fed', 'all'."""
+        """Force reload on next access. which: 'pairs', 'recon', 'tokens', 'v2fed', 'pulsex', 'all'."""
         if which in ("pairs", "all"):
             self._pair_graph = None
             self._pair_graph_ts = 0
@@ -240,6 +274,8 @@ class DataStore:
             self._token_master = None
         if which in ("v2fed", "all"):
             self._v2_federal = None
+        if which in ("pulsex", "all"):
+            self._pulsex_dual = None
         if which in ("all",):
             self._contracts = None
         log.debug("DataStore: invalidated cache '%s'", which)

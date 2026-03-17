@@ -216,3 +216,64 @@ class TestDataStore:
         result = store.lookup_pair("0x" + "aa" * 20, "0x" + "bb" * 20)
         # Either None (no graph) or None (not found) — both acceptable
         assert result is None
+
+    # ── PulseX Dual-DEX Token List ────────────────────────────────────
+
+    @pytest.mark.skipif(
+        not os.path.exists(os.path.join(_DATA_DIR, "pulsex_dual_dex_tokens.json")),
+        reason="pulsex_dual_dex_tokens.json not found",
+    )
+    def test_pulsex_dual_dex_loads(self):
+        """Verify pulsex_dual_dex_tokens.json loads and filters correctly."""
+        store = DataStore.get()
+        all_tokens = store.pulsex_dual_dex()
+        assert len(all_tokens) > 0, "pulsex_dual_dex should have tokens"
+
+        # Filter by TVL
+        big = store.pulsex_dual_dex(min_tvl_pls=1_000_000)
+        assert len(big) < len(all_tokens)
+
+        # Verify structure
+        tok = all_tokens[0]
+        assert "address" in tok
+        assert "v1_pair" in tok
+        assert "v2_pair" in tok
+        assert "spread_bps" in tok
+
+    @pytest.mark.skipif(
+        not os.path.exists(os.path.join(_DATA_DIR, "pulsex_dual_dex_tokens.json")),
+        reason="pulsex_dual_dex_tokens.json not found",
+    )
+    def test_pulsex_dual_dex_spread_filter(self):
+        """Verify spread filter reduces the result set."""
+        store = DataStore.get()
+        all_tokens = store.pulsex_dual_dex()
+        filtered = store.pulsex_dual_dex(min_spread_bps=100)
+        assert len(filtered) <= len(all_tokens)
+
+    @pytest.mark.skipif(
+        not os.path.exists(os.path.join(_DATA_DIR, "pulsex_dual_dex_tokens.json")),
+        reason="pulsex_dual_dex_tokens.json not found",
+    )
+    def test_pulsex_dual_dex_cached(self):
+        """Verify pulsex_dual_dex caches after first load."""
+        store = DataStore.get()
+        _ = store.pulsex_dual_dex()
+        assert store._pulsex_dual is not None
+        cached_ref = store._pulsex_dual
+        _ = store.pulsex_dual_dex()
+        assert store._pulsex_dual is cached_ref  # same object
+
+    def test_invalidate_pulsex(self):
+        """invalidate('pulsex') resets pulsex cache."""
+        store = DataStore.get()
+        store._pulsex_dual = [{"test": "data"}]
+        store.invalidate("pulsex")
+        assert store._pulsex_dual is None
+
+    def test_invalidate_all_includes_pulsex(self):
+        """invalidate('all') also resets pulsex cache."""
+        store = DataStore.get()
+        store._pulsex_dual = [{"test": "data"}]
+        store.invalidate("all")
+        assert store._pulsex_dual is None
