@@ -16,7 +16,7 @@
 #    - Start the bot. You start it after verifying the config.
 #
 #  Run as root on your VPS:
-#    curl -O https://raw.githubusercontent.com/Gravshub/C-Dysnomia/claude/Joystick-Engines-Lj9Kp/scripts/Joystick/deploy/setup_vps.sh
+#    curl -O https://raw.githubusercontent.com/Gravshub/C-Dysnomia/claude/joystick-V2-FanxJ/scripts/Joystick/deploy/setup_vps.sh
 #    chmod +x setup_vps.sh
 #    sudo bash setup_vps.sh
 #
@@ -68,7 +68,7 @@ apt-get install -y -qq python3-venv python3-dev build-essential 2>/dev/null || t
 # ─── Configuration ───────────────────────────────────────────────────
 INSTALL_DIR="/opt/joystick"
 REPO_URL="https://github.com/Gravshub/C-Dysnomia.git"
-REPO_BRANCH="claude/Joystick-Engines-Lj9Kp"
+REPO_BRANCH="claude/joystick-V2-FanxJ"
 BOT_USER="joystick"
 
 info "Install directory: ${INSTALL_DIR}"
