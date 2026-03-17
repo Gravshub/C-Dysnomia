@@ -30,7 +30,7 @@ echo ""
 # Pull latest code
 echo "Pulling latest code..."
 cd "${REPO_DIR}"
-sudo -u "${BOT_USER}" git pull origin claude/Joystick-Engines-Lj9Kp
+sudo -u "${BOT_USER}" git pull origin claude/joystick-V2-FanxJ
 echo ""
 
 # Update Python deps if requirements changed
