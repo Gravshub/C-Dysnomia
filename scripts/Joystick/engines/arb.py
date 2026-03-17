@@ -13,6 +13,7 @@ from ..core.config import (
     MAX_SLIPPAGE, RESERVE_CACHE_TTL,
     GRAPH_ARB_MIN_PROFIT_PLS, TGSV8,
     HUB_TOKENS, SEED_LAUS,
+    PULSEX_MIN_SPREAD_BPS, PULSEX_MIN_TVL_PLS,
 )
 from ..core.chain import erc20, purchasable, router_contract, safe, w3_submit, w3_read
 from ..core.executor import send_tx, approve_if_needed
@@ -181,23 +182,51 @@ class ArbEngine(EngineBase):
             log.debug("CrossDex: no dual-DEX candidates found")
             return None
 
+        # Batch reserve reads via Multicall3 for known pair addresses
+        from ..core.chain import multicall3_batch_reserves
+
+        # Separate candidates with known pair addresses from those needing TGSv8
+        known_pairs = []  # (v1_pair, v2_pair)
+        for _addr, _label, v1_pair, v2_pair in candidates:
+            known_pairs.append((v1_pair, v2_pair))
+
+        reserves_map = multicall3_batch_reserves(known_pairs, batch_size=1500)
+        log.debug("CrossDex: fetched reserves for %d pairs via Multicall3", len(reserves_map))
+
+        # Get Joey's available balance once (not per-candidate)
+        wpls_bal = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
+        pls_bal = w3_read.eth.get_balance(JOEY_WALLET)
+        available = wpls_bal + pls_bal - gas_cost_wei
+        if available <= 0:
+            return None
+
         best = None
 
-        for token_addr, label in candidates:
+        for idx, (token_addr, label, _v1p, _v2p) in enumerate(candidates):
             try:
-                # Query reserves on both DEXes via TGSv8.getReservesBoth()
-                v1rA, v1rB, v2rA, v2rB = safe(
-                    tgs, "getReservesBoth", token_addr, WPLS
-                ) or (0, 0, 0, 0)
+                raw = reserves_map.get(idx, (0, 0, 0, 0))
+                v1r0, v1r1, v2r0, v2r1 = raw
 
                 # Need liquidity on BOTH DEXes
-                if v1rA == 0 or v1rB == 0 or v2rA == 0 or v2rB == 0:
+                if v1r0 == 0 or v1r1 == 0 or v2r0 == 0 or v2r1 == 0:
                     continue
 
+                # Determine token order: getReserves returns (token0, token1) sorted
+                # We need (tokenReserve, wplsReserve). Token with lower address is token0.
+                token_lc = token_addr.lower()
+                wpls_lc = WPLS.lower()
+                if token_lc < wpls_lc:
+                    # token is token0, WPLS is token1
+                    v1rA, v1rB = v1r0, v1r1  # A=token, B=WPLS
+                    v2rA, v2rB = v2r0, v2r1
+                else:
+                    # WPLS is token0, token is token1
+                    v1rA, v1rB = v1r1, v1r0  # A=token, B=WPLS
+                    v2rA, v2rB = v2r1, v2r0
+
                 # Compute spot prices (WPLS per token) on each DEX
-                # price = reserveWPLS / reserveToken
-                v1_price = v1rB / v1rA  # WPLS per token on V1
-                v2_price = v2rB / v2rA  # WPLS per token on V2
+                v1_price = v1rB / v1rA
+                v2_price = v2rB / v2rA
 
                 if v1_price == 0 or v2_price == 0:
                     continue
@@ -209,43 +238,33 @@ class ArbEngine(EngineBase):
                     continue
 
                 # Determine direction: buy on cheaper DEX, sell on expensive DEX
-                # DEX enum: 0=V1, 1=V2
                 if v1_price < v2_price:
-                    buy_dex, sell_dex = 0, 1  # Buy V1 (cheaper), sell V2
+                    buy_dex, sell_dex = 0, 1
                     buy_reserves = (v1rA, v1rB)
                     sell_reserves = (v2rA, v2rB)
                 else:
-                    buy_dex, sell_dex = 1, 0  # Buy V2 (cheaper), sell V1
+                    buy_dex, sell_dex = 1, 0
                     buy_reserves = (v2rA, v2rB)
                     sell_reserves = (v1rA, v1rB)
 
                 # Optimal input: cap at 5% of the smaller pool's WPLS reserve
-                # to limit price impact
                 smaller_wpls_reserve = min(v1rB, v2rB)
                 max_input = smaller_wpls_reserve * 5 // 100
 
-                # Also cap at Joey's available WPLS/PLS
-                wpls_bal = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
-                pls_bal = w3_read.eth.get_balance(JOEY_WALLET)
-                available = wpls_bal + pls_bal - gas_cost_wei
-                if available <= 0:
-                    continue
                 trade_amount = min(max_input, available)
-                if trade_amount < 10**16:  # At least 0.01 WPLS
+                if trade_amount < 10**16:
                     continue
 
                 # Simulate profit: buy tokenOut with WPLS, sell tokenOut back to WPLS
-                # Step 1: WPLS → token on buy_dex (Uniswap v2 formula)
-                buy_r_in = buy_reserves[1]   # WPLS reserve on buy side
-                buy_r_out = buy_reserves[0]  # Token reserve on buy side
+                buy_r_in = buy_reserves[1]
+                buy_r_out = buy_reserves[0]
                 tokens_bought = (buy_r_out * trade_amount * 997) // (buy_r_in * 1000 + trade_amount * 997)
 
                 if tokens_bought == 0:
                     continue
 
-                # Step 2: token → WPLS on sell_dex
-                sell_r_in = sell_reserves[0]   # Token reserve on sell side
-                sell_r_out = sell_reserves[1]  # WPLS reserve on sell side
+                sell_r_in = sell_reserves[0]
+                sell_r_out = sell_reserves[1]
                 wpls_received = (sell_r_out * tokens_bought * 997) // (sell_r_in * 1000 + tokens_bought * 997)
 
                 profit_wei = wpls_received - trade_amount - gas_cost_wei
@@ -280,27 +299,59 @@ class ArbEngine(EngineBase):
 
         return best
 
-    def _cross_dex_candidates(self) -> list[tuple[str, str]]:
+    def _cross_dex_candidates(self) -> list[tuple[str, str, str, str]]:
         """
-        Build list of (token_address, label) for tokens with pairs on BOTH
-        V1 and V2 DEXes against WPLS.
+        Build list of (token_address, label, v1_pair, v2_pair) for tokens
+        with pairs on BOTH V1 and V2 DEXes against WPLS.
 
-        Uses pair_registry.json via DataStore — zero RPC calls.
-        Falls back to live scan only if registry is empty/missing.
+        Merges two sources:
+          1. pair_registry.json (Atropa ecosystem pairs)
+          2. pulsex_dual_dex_tokens.json (broader PulseX universe)
+
+        Falls back to live scan only if both registries are empty/missing.
         """
         from ..oracle.data_store import DataStore
 
         store = DataStore.get()
-        dual = store.dual_dex_tokens(base_token=WPLS)
+        seen = set()
+        candidates = []
 
-        if dual:
-            candidates = [(addr, sym) for addr, sym, _v1, _v2 in dual]
-            log.debug("CrossDex: %d dual-DEX candidates from pair_registry", len(candidates))
+        # Source 1: pair_registry.json (Atropa ecosystem pairs)
+        dual = store.dual_dex_tokens(base_token=WPLS)
+        registry_count = len(dual)
+        for addr, sym, v1_pair, v2_pair in dual:
+            addr_lc = addr.lower()
+            if addr_lc not in seen:
+                seen.add(addr_lc)
+                candidates.append((addr, sym, v1_pair, v2_pair))
+
+        # Source 2: pulsex_dual_dex_tokens.json (broader PulseX universe)
+        pulsex = store.pulsex_dual_dex(
+            min_spread_bps=PULSEX_MIN_SPREAD_BPS,
+            min_tvl_pls=PULSEX_MIN_TVL_PLS,
+        )
+        pulsex_added = 0
+        for tok in pulsex:
+            addr_lc = tok["address"].lower()
+            if addr_lc not in seen:
+                seen.add(addr_lc)
+                candidates.append((
+                    tok["address"], tok["symbol"],
+                    tok["v1_pair"], tok["v2_pair"],
+                ))
+                pulsex_added += 1
+
+        if candidates:
+            log.debug(
+                "CrossDex: %d candidates (%d from pair_registry, %d from pulsex_dual_dex)",
+                len(candidates), registry_count, pulsex_added,
+            )
             return candidates
 
-        # Fallback: live scan (original logic, only if cache is empty)
-        log.info("CrossDex: pair_registry empty — falling back to live factory scan")
-        return self._cross_dex_candidates_live()
+        # Fallback: live scan (original logic, only if both registries empty)
+        log.info("CrossDex: all registries empty — falling back to live factory scan")
+        live = self._cross_dex_candidates_live()
+        return [(addr, sym, "", "") for addr, sym in live]
 
     def _cross_dex_candidates_live(self) -> list[tuple[str, str]]:
         """Original live factory scan — only used as fallback when pair_registry is empty."""
