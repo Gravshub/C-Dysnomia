@@ -1,0 +1,45 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  |>JOYSTICK<| Dashboard API Service
+#  File: /etc/systemd/system/joystick-api.service
+#
+#  Runs the FastAPI dashboard server on port 8369.
+#  Reads bot state from /opt/joystick/data/ (written by the bot process).
+#  This is the ONLY port you need to expose to the internet.
+#
+#  Commands:
+#    sudo systemctl start joystick-api
+#    sudo systemctl stop joystick-api
+#    journalctl -u joystick-api -f
+# ═══════════════════════════════════════════════════════════════════════
+
+[Unit]
+Description=|>JOYSTICK<| Dashboard API
+After=network-online.target joystick-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=joystick
+Group=joystick
+WorkingDirectory=/opt/joystick/repo/scripts/Joystick/dashboard
+
+ExecStart=/bin/bash -c 'set -a && source /opt/joystick/.env.pulse && set +a && exec /opt/joystick/venv/bin/uvicorn api.server:app --host 0.0.0.0 --port 8369'
+
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+ProtectSystem=strict
+ReadWritePaths=/opt/joystick/data /opt/joystick/logs
+ReadOnlyPaths=/opt/joystick/repo
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=256M
+CPUQuota=25%
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=multi-user.target
