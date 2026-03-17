@@ -179,6 +179,84 @@ def multicall(calls: list[tuple[Any, str, list]]) -> list[Any | None]:
             decoded.append(None)
     return decoded
 
+# ── Batch reserve reads (Multicall3 powered) ──────────────────────────────
+# getReserves() selector: keccak256("getReserves()")[:4] = 0x0902f1ac
+_GET_RESERVES_SELECTOR = bytes.fromhex("0902f1ac")
+
+
+def multicall3_batch_reserves(
+    pair_addresses: list[tuple[str, str]],
+    batch_size: int = 1500,
+) -> dict[str, tuple[int, int, int, int]]:
+    """
+    Batch getReserves() on known V1+V2 pair addresses via Multicall3.
+
+    pair_addresses: list of (v1_pair_addr, v2_pair_addr) tuples.
+    Returns: dict keyed by index → (v1_r0, v1_r1, v2_r0, v2_r1).
+    Pairs with zero address or failed calls return (0, 0, 0, 0).
+
+    2 sub-calls per token pair (V1 + V2 getReserves) → 2N total calls,
+    batched into ceil(2N / batch_size) Multicall3 aggregate3 RPCs.
+    """
+    ZERO = "0x" + "0" * 40
+
+    # Build flat call list: [v1_reserves_0, v2_reserves_0, v1_reserves_1, v2_reserves_1, ...]
+    encoded_calls = []
+    call_map = []  # (pair_index, dex) where dex=0 is V1, dex=1 is V2
+    for i, (v1_pair, v2_pair) in enumerate(pair_addresses):
+        for dex, pair_addr in [(0, v1_pair), (1, v2_pair)]:
+            if not pair_addr or pair_addr == ZERO:
+                call_map.append((i, dex, False))
+                continue
+            call_map.append((i, dex, True))
+            encoded_calls.append({
+                "target": Web3.to_checksum_address(pair_addr),
+                "allowFailure": True,
+                "callData": _GET_RESERVES_SELECTOR,
+            })
+
+    # Execute in batches
+    raw_results = []
+    call_idx = 0
+    for batch_start in range(0, len(encoded_calls), batch_size):
+        batch = encoded_calls[batch_start:batch_start + batch_size]
+
+        def _do_mc(w3, b=batch):
+            mc = w3.eth.contract(address=MULTICALL3, abi=MULTICALL3_ABI)
+            return mc.functions.aggregate3(b).call()
+
+        try:
+            batch_results = _read_pool.call(_do_mc)
+            raw_results.extend(batch_results)
+        except Exception as exc:
+            log.warning("multicall3_batch_reserves batch failed: %s", exc)
+            raw_results.extend([(False, b"") for _ in batch])
+
+    # Decode results back into per-pair reserves
+    results: dict[int, list[int]] = {}
+    raw_idx = 0
+    for i, dex, valid in call_map:
+        if i not in results:
+            results[i] = [0, 0, 0, 0]
+        if not valid:
+            continue
+        success, return_data = raw_results[raw_idx]
+        raw_idx += 1
+        if success and len(return_data) >= 64:
+            try:
+                r0, r1, _ = abi_decode(["uint112", "uint112", "uint32"], return_data)
+                if dex == 0:
+                    results[i][0] = r0
+                    results[i][1] = r1
+                else:
+                    results[i][2] = r0
+                    results[i][3] = r1
+            except Exception:
+                pass
+
+    return {i: tuple(v) for i, v in results.items()}
+
+
 # ── Balance snapshot (Multicall3 powered) ─────────────────────────────────
 def snapshot_balances(extra_wallets: list[str] | None = None) -> dict:
     """
