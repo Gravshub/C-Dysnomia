@@ -57,7 +57,7 @@ Two options:
 **Option A: Download and run directly (easiest)**
 ```bash
 apt-get update && apt-get install -y curl git
-curl -O https://raw.githubusercontent.com/Gravshub/C-Dysnomia/claude/Joystick-Engines-Lj9Kp/scripts/Joystick/deploy/setup_vps.sh
+curl -O https://raw.githubusercontent.com/Gravshub/C-Dysnomia/claude/joystick-V2-FanxJ/scripts/Joystick/deploy/setup_vps.sh
 chmod +x setup_vps.sh
 bash setup_vps.sh
 ```
@@ -65,7 +65,7 @@ bash setup_vps.sh
 **Option B: Clone first, then run**
 ```bash
 apt-get update && apt-get install -y git python3 python3-venv python3-pip
-git clone --branch claude/Joystick-Engines-Lj9Kp https://github.com/Gravshub/C-Dysnomia.git /opt/joystick/repo
+git clone --branch claude/claude/joystick-V2-FanxJ https://github.com/Gravshub/C-Dysnomia.git /opt/joystick/repo
 bash /opt/joystick/repo/scripts/Joystick/deploy/setup_vps.sh
 ```
 
