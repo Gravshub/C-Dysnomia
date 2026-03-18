@@ -9,8 +9,8 @@ should_wait() for engines to make gas-timing decisions.
 PulseChain gas context:
   - Gas is denominated in Beats (not Gwei), but eth_gasPrice returns
     Impulses (wei-equivalent), same as Ethereum.
-  - Typical PulseChain gas prices: 500K-2M Gwei range, and 100's of Millions to Billions during heavy use.
-  - PLS is very cheap (~$0.00001), so even "high" gas in Gwei terms
+  - Typical PulseChain gas prices: 500K-2M Beats range, and 100's of Millions to Billions during heavy use.
+  - PLS is very cheap (~$0.00001), so even "high" gas in Beats terms
     translates to fractions of a cent. The ceiling is about preventing
     runaway costs during chain congestion, not about saving pennies.
 
@@ -25,13 +25,15 @@ Usage:
 """
 import time
 import logging
+
+from .log_names import get_logger
 from collections import deque
 from decimal import Decimal
 
 from .chain import w3_read
 from .config import GAS_PRICE_CEIL
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Rolling window: 20 readings × 30s cycle = ~10 minutes of history
 WINDOW_SIZE = 20
@@ -61,14 +63,14 @@ class GasOracle:
             price = w3_read.eth.gas_price
         except Exception as exc:
             log.warning("GasOracle: eth_gasPrice failed (%s), using last known", exc)
-            price = self._last_price or 1_000_000 * 10**9  # 1M Gwei fallback
+            price = self._last_price or 1_000_000 * 10**9  # 1M Beats fallback
 
         self._window.append(price)
         self._timestamps.append(time.time())
         self._last_price = price
 
         log.debug(
-            "GasOracle: %.2f Gwei (avg=%.2f, trend=%s, window=%d)",
+            "⛽ GasOracle: %.0f Beats (avg=%.0f, trend=%s, window=%d)",
             price / 1e9, self.average() / 1e9, self.trend(), len(self._window),
         )
         return price
@@ -77,9 +79,12 @@ class GasOracle:
         """Latest gas price in wei. 0 if no readings yet."""
         return self._last_price
 
-    def current_gwei(self) -> float:
-        """Latest gas price in Gwei (human-readable)."""
+    def current_beats(self) -> float:
+        """Latest gas price in Beats (human-readable)."""
         return self._last_price / 1e9
+
+    # Keep alias for backward compat
+    current_gwei = current_beats
 
     def average(self) -> int:
         """Rolling average gas price in wei."""
@@ -87,9 +92,12 @@ class GasOracle:
             return 0
         return sum(self._window) // len(self._window)
 
-    def average_gwei(self) -> float:
-        """Rolling average in Gwei."""
+    def average_beats(self) -> float:
+        """Rolling average in Beats."""
         return self.average() / 1e9
+
+    # Keep alias for backward compat
+    average_gwei = average_beats
 
     def trend(self) -> str:
         """
@@ -137,21 +145,21 @@ class GasOracle:
     def status(self) -> dict:
         """Full status dict for logging / --status display."""
         return {
-            "current_gwei":    self.current_gwei(),
-            "average_gwei":    self.average_gwei(),
+            "current_beats":    self.current_beats(),
+            "average_beats":    self.average_beats(),
             "trend":           self.trend(),
             "should_wait":     self.should_wait(),
             "above_ceiling":   self.is_above_ceiling(),
-            "ceiling_gwei":    GAS_PRICE_CEIL / 1e9,
+            "ceiling_beats":    GAS_PRICE_CEIL / 1e9,
             "window_size":     len(self._window),
-            "window_max_gwei": max(self._window) / 1e9 if self._window else 0,
-            "window_min_gwei": min(self._window) / 1e9 if self._window else 0,
+            "window_max_beats": max(self._window) / 1e9 if self._window else 0,
+            "window_min_beats": min(self._window) / 1e9 if self._window else 0,
         }
 
     def __repr__(self) -> str:
         s = self.status()
         return (
-            f"GasOracle(current={s['current_gwei']:.0f} Gwei, "
-            f"avg={s['average_gwei']:.0f}, trend={s['trend']}, "
+            f"GasOracle(current={s['current_beats']:.0f} Beats, "
+            f"avg={s['average_beats']:.0f}, trend={s['trend']}, "
             f"wait={s['should_wait']})"
         )

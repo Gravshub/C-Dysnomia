@@ -36,6 +36,8 @@ Usage:
 """
 import json
 import logging
+
+from .log_names import get_logger
 import os
 import time
 from dataclasses import dataclass, field
@@ -47,7 +49,7 @@ if TYPE_CHECKING:
     from ..engines.base import EngineBase, EngineResult, SimResult
     from .gas_oracle import GasOracle
 
-log = logging.getLogger("joystick.strategist")
+log = get_logger("joystick.strategist")
 
 _JOYSTICK_DIR = Path(__file__).parent.parent
 _STATE_FILE = _JOYSTICK_DIR / "data" / "strategist_state.json"
@@ -525,7 +527,7 @@ class Strategist:
         threshold_level = self.CONFIDENCE_ORDER.get(self.AUTO_THRESHOLD, 2)
         approved = rec_level >= threshold_level
         if not approved:
-            log.info("Auto-skip: %s confidence=%s (threshold=%s)",
+            log.info("⏭️ Auto-skip: %s confidence=%s (threshold=%s)",
                      rec.engine.name if rec.engine else "none",
                      rec.confidence, self.AUTO_THRESHOLD)
         return approved

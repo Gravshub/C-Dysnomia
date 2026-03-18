@@ -13,6 +13,8 @@ This prevents:
 """
 import json
 import logging
+
+from ..core.log_names import get_logger
 import os
 
 from web3 import Web3
@@ -23,7 +25,7 @@ from ..core.config import (
 )
 from ..core.chain import erc20, safe, w3_read
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # All known payment tokens and their labels
 # Order matters: first match wins in scanner's rate check

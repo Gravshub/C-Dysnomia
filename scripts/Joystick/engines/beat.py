@@ -19,6 +19,8 @@ The bot treats it as lowest-priority when other engines have positive ROI.
 """
 import logging
 
+from ..core.log_names import get_logger
+
 from .base import EngineBase, EngineResult
 from ..core.config import (
     JOEY_WALLET, GIBS_LAU, GIBS_QING, GIBS_QING_WAAT,
@@ -28,7 +30,7 @@ from ..core.chain import erc20, safe, w3_submit, META_ABI, CHEON_ABI
 from ..core.executor import send_tx
 from ..core.simulator import SimulationFailed, simulate, estimate_gas
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Minimum SHIO balance required (1 token / 1e18 units)
 MIN_SHIO_WEI = 10**12  # 0.000001 — just above zero

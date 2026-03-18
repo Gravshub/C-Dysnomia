@@ -9,6 +9,8 @@ Usage:
 """
 import os
 import logging
+
+from .log_names import get_logger
 from web3 import Web3
 from eth_account import Account as EthAccount
 from eth_account.signers.local import LocalAccount
@@ -16,7 +18,7 @@ from eth_account.signers.local import LocalAccount
 from .config import JOEY_WALLET, CHAIN_ID
 from .chain import w3_submit, w3_read, get_submit_pool, get_read_pool
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Account ───────────────────────────────────────────────────────────────────
 def _load_account() -> LocalAccount:

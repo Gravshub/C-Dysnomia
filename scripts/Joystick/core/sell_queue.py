@@ -9,11 +9,13 @@ Source of truth: TGSv8 balanceOf() on-chain. The JSON cache is advisory only.
 """
 import json
 import logging
+
+from .log_names import get_logger
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _QUEUE_FILE = _DATA_DIR / "sell_queue.json"

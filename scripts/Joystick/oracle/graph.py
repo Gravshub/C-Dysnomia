@@ -25,6 +25,8 @@ The math:
     output_of_3_hops(input) > input (after fees on each hop)
 """
 import logging
+
+from ..core.log_names import get_logger
 import math
 from dataclasses import dataclass, field
 
@@ -37,7 +39,7 @@ from ..core.config import (
 from .pair_discovery import PairGraph, PoolEdge
 from .price import simulate_swap_exact
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Gas estimate for a 3-hop swap via router (approve + multicall route)
 TRIANGLE_GAS_ESTIMATE = 500_000

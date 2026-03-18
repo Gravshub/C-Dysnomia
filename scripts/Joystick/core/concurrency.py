@@ -9,6 +9,8 @@ Layer 3: Parallel wallet execution — each wallet's TX pipeline runs
 """
 import asyncio
 import logging
+
+from .log_names import get_logger
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
@@ -18,12 +20,17 @@ from ..engines.base import SimResult
 if TYPE_CHECKING:
     from ..engines.base import EngineBase, EngineResult
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Default max workers for simulation (8 engines)
 SIM_WORKERS = 8
-# Timeout per engine simulation in seconds
+# Default timeout per engine simulation in seconds
 SIM_TIMEOUT = 5.0
+# Per-engine timeout overrides (Arb/TokenFactory do graph + reserve refresh)
+SIM_TIMEOUT_MAP: dict[str, float] = {
+    "Arb": 15.0,
+    "TokenFactory": 10.0,
+}
 
 
 class SimExecutor:
@@ -61,17 +68,18 @@ class SimExecutor:
             return {}
 
         async def _run_one(engine: "EngineBase") -> tuple[str, SimResult]:
+            timeout = SIM_TIMEOUT_MAP.get(engine.name, SIM_TIMEOUT)
             try:
                 result = await asyncio.wait_for(
                     loop.run_in_executor(self._pool, engine.sim_result),
-                    timeout=SIM_TIMEOUT,
+                    timeout=timeout,
                 )
                 return engine.name, result
             except asyncio.TimeoutError:
-                log.warning("%s simulation timed out (>%.1fs)", engine.name, SIM_TIMEOUT)
-                return engine.name, SimResult.failed(f"Timeout after {SIM_TIMEOUT}s")
+                log.warning("⏰ %s simulation timed out (>%.1fs)", engine.name, timeout)
+                return engine.name, SimResult.failed(f"Timeout after {timeout}s")
             except Exception as exc:
-                log.warning("%s simulation error: %s", engine.name, exc)
+                log.warning("⚠️ %s simulation error: %s", engine.name, exc)
                 return engine.name, SimResult.failed(str(exc))
 
         tasks = [_run_one(e) for e in eligible]
