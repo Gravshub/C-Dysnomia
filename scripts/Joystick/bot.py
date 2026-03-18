@@ -76,7 +76,8 @@ from .engines.phreak import PhreakEngine
 from .loops.terraform import TerraformLoop
 from .oracle.route_auditor import route_summary
 
-log = logging.getLogger("joystick")
+from .core.log_names import get_logger, fmt_pls as fmt_pls_comma, fmt_int, fmt_pls_short
+log = get_logger("joystick")
 
 
 class DysnomiaBot:
@@ -138,10 +139,11 @@ class DysnomiaBot:
         except Exception:
             pass
 
-        # Gameplay loops run after engines (lower priority, positional)
-        self.loops = [
-            TerraformLoop(),
-        ]
+        # Gameplay loops — disabled pending web-interface plug-in system
+        # self.loops = [
+        #     TerraformLoop(),
+        # ]
+        self.loops = []
 
     # ── Public entry points ────────────────────────────────────────────────────
 
@@ -149,7 +151,7 @@ class DysnomiaBot:
         """Main loop. Ctrl-C to stop gracefully."""
         mode = "interactive" if self.strategist.interactive else "auto"
         wallet_mode = "multi-wallet" if self.multi_wallet else "single-wallet"
-        log.info("Joystick V2 starting. Wallet: %s  Mode: %s  Wallets: %s  Dry-run: %s",
+        log.info("🚀 Joystick V2 starting. Wallet: %s  Mode: %s  Wallets: %s  Dry-run: %s",
                  JOEY_WALLET, mode, wallet_mode, self.dry_run)
         _events.log("bot.start", data={
             "wallet": JOEY_WALLET,
@@ -195,7 +197,7 @@ class DysnomiaBot:
                 self.delay.after_failure()
 
             self.cycle += 1
-            log.info("Cycle %d done — sleeping %.0fs", self.cycle - 1, self.delay.seconds)
+            log.info("😴 Cycle %d done — sleeping %.0fs", self.cycle - 1, self.delay.seconds)
             await asyncio.sleep(self.delay.seconds)
 
     def run_cycle(self) -> str:
@@ -216,8 +218,8 @@ class DysnomiaBot:
 
         snap = snapshot_balances(extra_wallets=extra_wallets or None)
         log.info(
-            "PLS=%.1f  AFF=%.4f  GIBS=%.1f  WM=%.4f  Fornax=%.4f",
-            snap["pls"] / 1e18, snap["affection"] / 1e18,
+            "💰 PLS=%s  AFF=%.4f  GIBS=%.4f  WM=%.4f  Fornax=%.4f",
+            fmt_pls_comma(snap["pls"]), snap["affection"] / 1e18,
             snap["gibs"] / 1e18, snap["wm"] / 1e18, snap["fornax"] / 1e18,
         )
         if self.multi_wallet:
@@ -230,15 +232,15 @@ class DysnomiaBot:
         gas_price = self.gas_oracle.update()
         gas_status = self.gas_oracle.status()
         log.info(
-            "Gas: %.0f Gwei (avg=%.0f, trend=%s, ceil=%.0f)",
-            gas_status["current_gwei"], gas_status["average_gwei"],
-            gas_status["trend"], gas_status["ceiling_gwei"],
+            "⛽ Gas: %s Beats (avg=%s, trend=%s, ceil=%s)",
+            fmt_int(gas_status["current_beats"]), fmt_int(gas_status["average_beats"]),
+            gas_status["trend"], fmt_int(gas_status["ceiling_beats"]),
         )
 
         if self.gas_oracle.is_above_ceiling():
             raise GasTooHigh(
-                f"Gas {gas_status['current_gwei']:.0f} Gwei > "
-                f"ceiling {gas_status['ceiling_gwei']:.0f}"
+                f"Gas {fmt_int(gas_status['current_beats'])} Beats > "
+                f"ceiling {fmt_int(gas_status['ceiling_beats'])}"
             )
 
         # 1. Gas guard
@@ -268,7 +270,7 @@ class DysnomiaBot:
 
         # Advisory: log if gas is falling
         if self.gas_oracle.should_wait():
-            log.info("GasOracle: gas is falling — non-urgent engines may benefit from waiting")
+            log.info("📉 Gas falling — non-urgent engines may benefit from waiting")
 
         cycle_outcome = "skip"
         engine_ran = ""
@@ -281,7 +283,7 @@ class DysnomiaBot:
         for rec in cycle_rec.all_recommendations():
             if rec.engine is None or not rec.approved:
                 reason = rec.rationale.split("\n")[0] if rec.rationale else "No recommendation"
-                log.info("Strategist [%s]: %s", rec.wallet_role, reason)
+                log.info("🧠 Strategist [%s]: %s", rec.wallet_role, reason)
                 continue
 
             engine = rec.engine
@@ -325,23 +327,18 @@ class DysnomiaBot:
                 cycle_outcome = "failure"
 
             # Structured cycle log line
-            now = datetime.now()
-            ts_str = now.strftime("%H:%M:%S")
-            dt_str = now.strftime("%m/%d/%Y")
             tx_short = result.tx_hashes[0][:10] + "..." if result.tx_hashes else "none"
             if result.success:
                 log.info(
-                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [%s] [SUCCESS] "
-                    "profit=+%.2f PLS | gas=%.1f PLS | net=+%.2f PLS | roi=%.2fx | tx=%s",
-                    self.cycle, ts_str, dt_str, engine.display_name, rec.wallet_role,
-                    result.profit_pls, result.gas_pls, result.net_pls,
-                    rec.roi, tx_short,
+                    "✅ [CYCLE %d] [%s] [%s] profit=+%s PLS | gas=%s PLS | net=+%s PLS | roi=%.2fx | tx=%s",
+                    self.cycle, engine.display_name, rec.wallet_role,
+                    fmt_pls_short(result.profit_pls), fmt_pls_short(result.gas_pls),
+                    fmt_pls_short(result.net_pls), rec.roi, tx_short,
                 )
             else:
                 log.info(
-                    "[CYCLE %d] [Time '%s' Date '%s'] [%s] [%s] [FAILED]  "
-                    "profit=0 PLS | gas=0 PLS | reason=%s",
-                    self.cycle, ts_str, dt_str, engine.display_name, rec.wallet_role,
+                    "❌ [CYCLE %d] [%s] [%s] FAILED | reason=%s",
+                    self.cycle, engine.display_name, rec.wallet_role,
                     result.notes[:100],
                 )
 
@@ -351,7 +348,7 @@ class DysnomiaBot:
         # 6. Sweep check (multi-wallet mode)
         if self.multi_wallet and not self.dry_run:
             if self.wallet_mgr.check_sweep():
-                log.info("Sweep threshold exceeded — sweeping Seller PLS to Joey")
+                log.info("🧹 Sweep threshold exceeded — sweeping Seller PLS to Joey")
                 self.wallet_mgr.execute_sweep(dry_run=self.dry_run)
 
         # 7. Gameplay loops (after engines — lower priority)
@@ -362,26 +359,42 @@ class DysnomiaBot:
                 log.info("▶ Loop: %s", loop.name)
                 result = loop.run(dry_run=self.dry_run)
                 if result.success:
-                    log.info("✓ %s: %s", loop.name, result.notes)
+                    log.info("🔄 %s: %s", loop.name, result.notes)
                     _events.log(
                         f"loop.{loop.name.lower()}.success",
                         data={"tx_hashes": result.tx_hashes},
                         notes=result.notes,
                     )
                 else:
-                    log.warning("✗ %s: %s", loop.name, result.notes)
+                    log.warning("⚠️ %s: %s", loop.name, result.notes)
                     _events.log(
                         f"loop.{loop.name.lower()}.failure",
                         success=False,
                         notes=result.notes,
                     )
 
-        # 8. Periodic RPC health log (every 100 cycles)
+        # 8. Background pair graph rebuild (between cycles, not during sim)
+        arb_engine = next((e for e in self.engines if e.name == "Arb"), None)
+        if arb_engine and getattr(arb_engine, '_needs_graph_rebuild', False):
+            log.info("📊 Background pair graph rebuild...")
+            try:
+                from .oracle.pair_discovery import discover_pairs
+                graph = discover_pairs()
+                arb_engine._pair_graph = graph
+                arb_engine._graph_last_refresh = time.time()
+                arb_engine._needs_graph_rebuild = False
+                log.info("📊 Pair graph rebuilt: %s edges, %s tokens",
+                         fmt_int(graph.edge_count), fmt_int(graph.token_count))
+            except Exception as exc:
+                log.warning("📊 Background graph rebuild failed: %s", exc)
+                arb_engine._needs_graph_rebuild = False
+
+        # 9. Periodic RPC health log (every 100 cycles)
         if self.cycle > 0 and self.cycle % 100 == 0:
             for r in get_read_pool().health_report():
                 log.info("RPC[read] %s: %sms err=%s%%", r["name"], r["latency_ms"], r["error_rate"])
 
-        # 9. Cycle summary event
+        # 10. Cycle summary event
         _events.log_cycle(
             cycle_num=self.cycle,
             balances=snap,
@@ -485,16 +498,15 @@ def _setup_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
 
-    # Console handler
+    # Console handler — no timestamp (journald/systemd provides it)
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter(
-        "%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
-        datefmt="%H:%M:%S",
+        "%(name)-16s %(levelname)-8s %(message)s",
     ))
     root.addHandler(console)
 
-    # Rotating file handler — 10MB, keep 3 backups
+    # Rotating file handler — 10MB, keep 3 backups (keeps timestamp for offline review)
     log_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "bot_run.log")
@@ -503,7 +515,8 @@ def _setup_logging() -> None:
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-8s %(message)s",
+        "%(asctime)s %(name)-16s %(levelname)-8s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     ))
     root.addHandler(file_handler)
 

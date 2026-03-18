@@ -15,6 +15,8 @@ Does NOT import from scanner.py — parallel discovery system for different arb 
 """
 import json
 import logging
+
+from ..core.log_names import get_logger
 import os
 import time
 from dataclasses import dataclass, field, asdict
@@ -30,7 +32,7 @@ from ..core.config import (
 )
 from ..core.chain import w3_read, safe, factory_contract
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 _JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.path.join(_JOYSTICK_DIR, "data")
@@ -437,7 +439,7 @@ def load_pair_graph() -> Optional[PairGraph]:
             with open(PAIR_GRAPH_CACHE_PATH) as f:
                 data = json.load(f)
             graph = PairGraph.from_dict(data)
-            log.info("Pair graph loaded from PAIR_GRAPH_CACHE_PATH: %d edges, %d tokens",
+            log.info("📊 Pair graph loaded (ext cache): %d edges, %d tokens",
                      graph.edge_count, graph.token_count)
             return graph
         except Exception as exc:
@@ -454,7 +456,7 @@ def load_pair_graph() -> Optional[PairGraph]:
         if age > GRAPH_CACHE_TTL:
             log.debug("Pair registry cache expired (age %.0fs > TTL %ds)", age, GRAPH_CACHE_TTL)
             return None
-        log.info("Pair graph cache hit: %d edges, %d tokens, age %.0fs",
+        log.info("💾 Pair graph cache hit: %d edges, %d tokens, age %.0fs",
                  graph.edge_count, graph.token_count, age)
         return graph
     except Exception as exc:
@@ -554,7 +556,7 @@ def discover_pairs(
         except Exception as exc:
             log.warning("Failed to update external cache: %s", exc)
 
-    log.info("Discovery complete: %d pairs, %d tokens", graph.edge_count, graph.token_count)
+    log.info("📊 Discovery complete: %d pairs, %d tokens", graph.edge_count, graph.token_count)
     return graph
 
 

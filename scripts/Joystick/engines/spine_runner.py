@@ -28,6 +28,8 @@ Implements: EngineBase ABC (is_ready, simulate, execute)
 
 import json
 import logging
+
+from ..core.log_names import get_logger
 import os
 import time
 from dataclasses import dataclass
@@ -40,7 +42,7 @@ from ..core.config import JOEY_WALLET, TGSV8, WPLS, GAS_PRICE_CEIL, GAS_MULT
 from ..core.chain import w3_read, w3_submit, tgsv8_contract, safe
 from ..core.executor import send_tx
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 DEX_BEST = 2
@@ -173,7 +175,7 @@ class SpineRunnerEngine(EngineBase):
         gas_price = w3_read.eth.gas_price
         if gas_price > GAS_PRICE_CEIL:
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
-                                notes=f"gas too high: {gas_price/1e9:.0f} Gwei")
+                                notes=f"gas too high: {gas_price/1e9:.0f} Beats")
 
         if not self._live_debenture_check(spine):
             spine.active = False

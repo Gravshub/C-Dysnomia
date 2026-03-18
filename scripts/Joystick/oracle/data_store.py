@@ -7,6 +7,8 @@ Follows Helios pattern: pre-cached JSON eliminates runtime RPC scanning.
 """
 import json
 import logging
+
+from ..core.log_names import get_logger
 import os
 import time
 from typing import Optional
@@ -15,7 +17,7 @@ from web3 import Web3
 
 from ..core.config import WPLS, PULSEX_V1_FACTORY, PULSEX_V2_FACTORY
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 _JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.path.join(_JOYSTICK_DIR, "data")

@@ -13,6 +13,8 @@ Graceful degradation: If MINTER_PRIVATE_KEY or SELLER_PRIVATE_KEY is not set,
 that wallet is disabled. Bot falls back to single-wallet mode (Joey only).
 """
 import logging
+
+from .log_names import get_logger
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -23,7 +25,7 @@ from web3 import Web3
 
 from .config import JOEY_WALLET, CHAIN_ID
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class WalletRole(Enum):
@@ -115,7 +117,7 @@ class WalletManager:
         self._sweep_threshold = int(os.getenv("SWEEP_THRESHOLD", "500000")) * 10**18
 
         if not self.is_multi_wallet:
-            log.warning("Multi-wallet mode disabled — running single-wallet (Joey only)")
+            log.warning("👤 Single-wallet mode — Minter/Seller not configured")
 
     @property
     def is_multi_wallet(self) -> bool:
@@ -143,7 +145,7 @@ class WalletManager:
             account=acct,
         )
         self._nonces[role] = WalletNonce(config.address, self._submit_pool)
-        log.info("%s wallet loaded: %s", role.value.upper(), config.address)
+        log.info("👛 %s wallet loaded: %s", role.value.upper(), config.address)
         return config
 
     def _load_optional_wallet(
@@ -152,7 +154,7 @@ class WalletManager:
         """Load an optional wallet — returns None if env var not set."""
         key = os.getenv(env_key, "")
         if not key:
-            log.info("%s not set — %s wallet disabled", env_key, role.value)
+            log.info("🏜️ %s not set — %s wallet disabled", env_key, role.value)
             return None
         acct = EthAccount.from_key(key)
         address = Web3.to_checksum_address(acct.address)
@@ -171,7 +173,7 @@ class WalletManager:
             account=acct,
         )
         self._nonces[role] = WalletNonce(config.address, self._submit_pool)
-        log.info("%s wallet loaded: %s", role.value.upper(), config.address)
+        log.info("👛 %s wallet loaded: %s", role.value.upper(), config.address)
         return config
 
     def get_wallet(self, role: WalletRole) -> WalletConfig | None:
@@ -311,7 +313,7 @@ class WalletManager:
         ]
         for label, w in wallets:
             if w is None:
-                lines.append(f"  {label:8s}  [DISABLED]")
+                lines.append(f"  🏜️ {label:8s}  [NOT CONFIGURED]")
                 continue
             try:
                 bal = self._read_pool.call(
@@ -322,7 +324,7 @@ class WalletManager:
             nonce = self._nonces.get(w.role)
             nonce_val = nonce.peek() if nonce else "?"
             lines.append(
-                f"  {label:8s}  {w.address}  "
+                f"  👛 {label:8s}  {w.address}  "
                 f"{bal_pls:>12,.1f} PLS  nonce={nonce_val}"
             )
         return lines

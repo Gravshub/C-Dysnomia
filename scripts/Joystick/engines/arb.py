@@ -3,6 +3,8 @@ import os
 import time
 import logging
 
+from ..core.log_names import get_logger
+
 from web3 import Web3
 
 from .base import EngineBase, EngineResult
@@ -22,7 +24,7 @@ from ..core.event_logger import events as _events
 from ..oracle.scanner import scan_tokens
 from ..oracle.profitability import rank_opportunities
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Gas estimates per mode
 PURCHASE_GAS_ESTIMATE = 400_000   # approve×2 + purchase + swap
@@ -65,6 +67,7 @@ class ArbEngine(EngineBase):
         self._top_opportunity: dict | None = None
         self._pair_graph = None
         self._graph_last_refresh: float = 0
+        self._needs_graph_rebuild: bool = False
 
     def is_ready(self) -> bool:
         """
@@ -129,7 +132,7 @@ class ArbEngine(EngineBase):
         mode = best_opp.get("mode", "?")
 
         log.info(
-            "ArbEngine top [%s]: profit %.4f PLS",
+            "🎯 Top [%s]: profit %.4f PLS",
             mode, best_opp["profit_wei"] / 1e18,
         )
 
@@ -407,7 +410,9 @@ class ArbEngine(EngineBase):
         )
         from ..oracle.graph import scan_all_triangles
 
-        # Load or build pair graph (with caching)
+        # Load or refresh pair graph — NEVER call discover_pairs() here
+        # (discover_pairs() does full Multicall3 factory scan: 30-60s, blows sim timeout)
+        # If no cache exists, flag for background rebuild between cycles.
         now = time.time()
         if self._pair_graph is None or (now - self._graph_last_refresh) > RESERVE_CACHE_TTL:
             cached = load_pair_graph()
@@ -415,10 +420,12 @@ class ArbEngine(EngineBase):
                 if reserves_stale(cached):
                     refresh_reserves(cached)
                 self._pair_graph = cached
+                self._graph_last_refresh = now
             else:
-                log.info("Building pair graph (first scan)...")
-                self._pair_graph = discover_pairs()
-            self._graph_last_refresh = now
+                # No cache — flag for background rebuild, skip this mode for now
+                log.info("🔄 No pair graph cache — flagging background rebuild")
+                self._needs_graph_rebuild = True
+                return None
 
         graph = self._pair_graph
         if graph is None or graph.edge_count == 0:

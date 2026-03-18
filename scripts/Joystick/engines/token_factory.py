@@ -20,6 +20,8 @@ Also exports LPStrategy dataclass and optimize_lp_ratio() for use by
 the mint test tool script.
 """
 import logging
+
+from ..core.log_names import get_logger
 import os
 import time
 from dataclasses import dataclass, field
@@ -45,7 +47,7 @@ from ..core.chain import (
 from ..core.simulator import SimulationFailed
 from ..oracle.price import get_amounts_out, get_amounts_out_v2, get_reserves
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 ZERO = "0x" + "0" * 40
 
