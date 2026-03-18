@@ -108,6 +108,8 @@ TOKEN EMISSION & SELF-SNIPE HOOK
 from __future__ import annotations
 
 import logging
+
+from ..core.log_names import get_logger
 import os
 import random
 import time
@@ -129,7 +131,7 @@ from ..core.wallet import pls_balance
 from .base import EngineBase, EngineResult
 from ..core.event_logger import events as _events
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 

@@ -11,12 +11,14 @@ Revert decoding covers:
 """
 import re
 import logging
+
+from .log_names import get_logger
 from typing import Any
 from web3.exceptions import ContractLogicError
 
 from .config import JOEY_WALLET
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Known custom error selectors (add as discovered) ─────────────────────────
 KNOWN_ERRORS: dict[str, str] = {

@@ -15,13 +15,15 @@ After MAX_FAILURES consecutive failures the engine is disabled until
 the bot is restarted (prevents endless retry loops on broken conditions).
 """
 import logging
+
+from ..core.log_names import get_logger
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from ..core.event_logger import events as _events
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Display name mapping ──────────────────────────────────────────────────────
 ENGINE_DISPLAY_NAMES: dict[str, str] = {

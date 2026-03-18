@@ -13,6 +13,8 @@ Established from tx_lau_arb.py send_tx() and tx_full_beat_flow.py send_tx() patt
 """
 import time
 import logging
+
+from .log_names import get_logger
 from typing import Any
 
 from web3.types import TxReceipt
@@ -23,7 +25,7 @@ from .chain import w3_submit, get_submit_pool
 from .simulator import simulate, estimate_gas, SimulationFailed, GasTooHigh
 from . import wallet
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ERC20 Transfer event signature (keccak256)
 TRANSFER_SIG = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -68,7 +70,7 @@ def send_tx(
         tx_from = JOEY_WALLET
         tx_account = wallet.account
 
-    log.info("→ %s [%s]", label, tx_from[:10])
+    log.info("📤 %s [%s]", label, tx_from[:10])
 
     # Step 1: eth_call simulation (free — always run unless skip_simulate)
     if not skip_simulate:
@@ -90,15 +92,15 @@ def send_tx(
     gas_price = get_submit_pool().call(lambda w3: w3.eth.gas_price)
     if gas_price > GAS_PRICE_CEIL:
         raise GasTooHigh(
-            f"Gas price {gas_price / 1e9:.1f} Gwei > ceiling "
-            f"{GAS_PRICE_CEIL / 1e9:.0f} Gwei — skipping cycle"
+            f"Gas price {gas_price / 1e9:.1f} Beats > ceiling "
+            f"{GAS_PRICE_CEIL / 1e9:.0f} Beats — skipping cycle"
         )
 
     # Step 3: estimate_gas (abort if fails)
     gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
     gas_limit = int(gas_est * gas_mult)
     cost_pls = gas_est * gas_price / 1e18
-    log.info("  Gas: %d  Gwei: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
+    log.info("  ⛽ Gas: %d  Beats: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
 
     # Step 4: Build TX with local nonce
     # Use wallet_ctx's nonce if available, else fall back to Joey's global nonce
@@ -145,7 +147,7 @@ def send_tx(
     status = receipt["status"]
     log.info(
         "  %s  Block: %d  Gas used: %d",
-        "✓ OK" if status == 1 else "✗ REVERTED",
+        "📦 OK" if status == 1 else "✗ REVERTED",
         receipt["blockNumber"],
         receipt["gasUsed"],
     )

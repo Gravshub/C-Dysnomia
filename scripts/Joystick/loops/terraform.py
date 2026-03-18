@@ -1,6 +1,10 @@
 """
 loops/terraform.py — CHOA.Chat terraforming loop.
 
+⚠️  DISABLED — CHOA.Chat ABI mismatch causes revert every cycle.
+    Registration commented out in bot.py. Do not re-enable until
+    the correct CHOA ABI is confirmed on-chain.
+
 Calls CHOA.Chat(QING, message) which:
   - Calls QING.Chat(UserToken, msg) to log the message
   - Calls CHAN.ReactYue → CHOA._mintToCap() → mints 1 CHOA token
@@ -14,6 +18,8 @@ presence and earns CHOA tokens which may be valuable as game-layer assets.
 Template for adding new gameplay loops — copy/adapt this file.
 """
 import logging
+
+from ..core.log_names import get_logger
 import time
 
 from web3 import Web3
@@ -27,7 +33,7 @@ from ..core.executor import send_tx
 from ..core.simulator import SimulationFailed
 from ..core.wallet import pls_balance
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # CHOA contract ABI — Chat(address QingAddr, string message)
 CHOA_ABI = [
@@ -41,7 +47,7 @@ CHOA_ABI = [
 # Default QING to terraform — can be overridden at init
 DEFAULT_QING = Web3.to_checksum_address("0x6152e1b7A3b9F5ABCA66b0de9eaB1CF11e49b7CF")  # Grav QING
 
-# Gas cost estimate: ~700K units at ~2 Gwei ≈ 1,400-2,000 PLS
+# Gas cost estimate: ~700K units at ~2 Beats ≈ 1,400-2,000 PLS
 TERRAFORM_GAS_EST = 700_000
 
 

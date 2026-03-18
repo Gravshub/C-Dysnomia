@@ -22,6 +22,8 @@ Implements: EngineBase ABC (is_ready, simulate, execute)
 """
 import json
 import logging
+
+from ..core.log_names import get_logger
 import math
 import os
 import time
@@ -46,7 +48,7 @@ from ..core.event_logger import events as _events
 from ..core.split_swap import SplitSwap, PairInfo
 from ..oracle.profitability import uniswap_v2_out, price_impact_pct
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ZERO_ADDR = "0x" + "0" * 40
@@ -405,7 +407,7 @@ class PhreakEngine(EngineBase):
         gas_price = w3_read.eth.gas_price
         if gas_price > GAS_PRICE_CEIL:
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
-                                notes=f"gas too high: {gas_price/1e9:.0f} Gwei")
+                                notes=f"gas too high: {gas_price/1e9:.0f} Beats")
 
         try:
             if mode == "arm":

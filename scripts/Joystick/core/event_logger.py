@@ -36,6 +36,8 @@ Usage from any engine:
 """
 import json
 import logging
+
+from .log_names import get_logger
 import os
 import threading
 import time
@@ -45,7 +47,7 @@ from typing import Any
 
 from web3.types import TxReceipt
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 _JOYSTICK_DIR = Path(__file__).parent.parent

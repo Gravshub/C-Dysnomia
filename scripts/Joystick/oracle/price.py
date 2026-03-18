@@ -5,6 +5,8 @@ All prices return amounts in wei (int) unless _human suffix is used.
 V1 router is default for most queries; V2 added for cross-pair graph arb.
 """
 import logging
+
+from ..core.log_names import get_logger
 from typing import Sequence
 
 from web3 import Web3
@@ -13,7 +15,7 @@ from ..core.config import WPLS, AFFECTION, PULSEX_V1_ROUTER, PULSEX_V2_ROUTER
 from ..core.chain import router_contract, safe, w3_read, factory_contract, pair_contract
 from ..core.config import PULSEX_V1_FACTORY, PULSEX_V2_FACTORY
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # V2 router ABI (same interface as V1 for getAmountsOut)
 _v2_router = None

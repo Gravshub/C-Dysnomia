@@ -12,6 +12,8 @@ Fallback: sell AFFECTION if GIBS insufficient.
 import time
 import logging
 
+from .log_names import get_logger
+
 from .config import (
     JOEY_WALLET, GIBS_LAU, AFFECTION, WPLS,
     PULSEX_V1_ROUTER, PLS_GAS_FLOOR, PLS_REPLENISH, MAX_SLIPPAGE,
@@ -21,7 +23,7 @@ from .wallet import pls_balance, fmt_pls, account
 from .executor import send_tx, approve_if_needed
 from .simulator import SimulationFailed
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class GasGuard:
@@ -40,7 +42,7 @@ class GasGuard:
         ok = bal >= PLS_GAS_FLOOR
         if not ok:
             log.warning(
-                "GAS LOW: %s < floor %s",
+                "🚨 GAS LOW: %s < floor %s",
                 fmt_pls(bal), fmt_pls(PLS_GAS_FLOOR)
             )
         return ok

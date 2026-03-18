@@ -18,6 +18,8 @@ execute():   chatAndClaimWithMultiplier(msg) → GIBS received → approve → s
 import time
 import logging
 
+from ..core.log_names import get_logger
+
 from web3 import Web3
 
 from .base import EngineBase, EngineResult
@@ -31,7 +33,7 @@ from ..core.executor import send_tx, approve_if_needed
 from ..core.simulator import SimulationFailed, estimate_gas
 from ..oracle.price import token_price_pls
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # Approximate gas for chatAndClaimWithMultiplier + approve + swap
 DSS_GAS_ESTIMATE = 380_000
