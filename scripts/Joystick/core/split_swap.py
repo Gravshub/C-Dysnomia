@@ -20,13 +20,15 @@ Strategy:
   4. Multiple pairs + still high per-pool impact → distribute AND delay.
 """
 import logging
+
+from .log_names import get_logger
 import math
 from dataclasses import dataclass, field
 from typing import Sequence
 
 from ..oracle.profitability import uniswap_v2_out, price_impact_pct
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 MAX_IMPACT_PCT = 10.0
 SPLIT_THRESHOLD_PCT = 3.33

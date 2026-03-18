@@ -13,13 +13,15 @@ Reads fan across all tiers for maximum availability.
 import os
 import time
 import logging
+
+from .log_names import get_logger
 import threading
 from dataclasses import dataclass, field
 
 from web3 import Web3
 from web3.exceptions import ProviderConnectionError, TimeExhausted
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── Tuning (env-overridable via config.py constants) ─────────────────────────
 MAX_RETRIES = int(os.getenv("RPC_MAX_RETRIES", "2"))
@@ -79,7 +81,7 @@ class ProviderState:
             cooldown = min(300, COOLDOWN_BASE * (2 ** (self.consecutive_fails - CIRCUIT_BREAKER_THRESHOLD)))
             self.disabled_until = time.time() + cooldown
             log.warning(
-                "RPC %s circuit breaker: disabled for %ds (consec fails: %d)",
+                "🔴 RPC %s circuit breaker: disabled for %ds (consec fails: %d)",
                 self.name, cooldown, self.consecutive_fails,
             )
 
@@ -123,7 +125,7 @@ class RPCPool:
         active = []
         for p in self.providers:
             if p.disabled_until > 0 and now >= p.disabled_until:
-                log.info("RPC %s cooldown expired, re-enabling", p.name)
+                log.info("🟢 RPC %s cooldown expired, re-enabling", p.name)
                 p.reset_health()
             if p.is_healthy:
                 active.append(p)
@@ -167,7 +169,7 @@ class RPCPool:
                         )
                         time.sleep(backoff)
                     else:
-                        log.warning("RPC %s exhausted retries: %s", provider.name, str(e)[:80])
+                        log.warning("🔌 RPC %s exhausted retries: %s", provider.name, str(e)[:80])
                         break  # next provider
 
         raise RPCAllProvidersDown(f"All {self.role} providers failed. Last error: {last_error}")

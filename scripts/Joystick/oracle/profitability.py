@@ -9,12 +9,14 @@ Formula (Uniswap v2 amountOut with 0.3% fee):
     amount_out = (reserve_out * amount_in * 997) / (reserve_in * 1000 + amount_in * 997)
 """
 import logging
+
+from ..core.log_names import get_logger
 from decimal import Decimal, getcontext
 
 from ..core.chain import w3_read
 
 getcontext().prec = 28
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 def uniswap_v2_out(

@@ -12,6 +12,8 @@ RPC connections use health-scored provider pools (rpc_provider.py):
 import json
 import os
 import logging
+
+from .log_names import get_logger
 from typing import Any
 from eth_abi import decode as abi_decode
 from web3 import Web3
@@ -24,7 +26,7 @@ from .config import (
 )
 from .rpc_provider import build_default_pools, RPCAllProvidersDown
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 # ── ABI loader ─────────────────────────────────────────────────────────────
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")

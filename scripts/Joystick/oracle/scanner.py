@@ -14,6 +14,8 @@ Cache: JSON file at /tmp/joystick_qing_cache.json with timestamp.
 import json
 import time
 import logging
+
+from ..core.log_names import get_logger
 import os
 from typing import Iterator
 
@@ -28,7 +30,7 @@ from ..core.chain import (
     purchasable, pair_contract, factory_contract, safe, erc20, PAIR_ABI, QING_ABI, w3_read
 )
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 _JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_FILE  = os.path.join(_JOYSTICK_DIR, "data", "arb_routes.json")
