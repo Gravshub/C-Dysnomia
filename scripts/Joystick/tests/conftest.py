@@ -38,6 +38,7 @@ os.environ["PULSECHAIN_RPC"] = ANVIL_URL
 os.environ["PULSECHAIN_READ_RPC"] = ANVIL_URL
 os.environ["PULSECHAIN_LOCAL_RPC"] = ANVIL_URL  # highest priority in RPCPool
 os.environ["TGSV8_ADDRESS"] = TGSV8_ADDR
+os.environ["TGSV8PLUS_ADDRESS"] = "0xA5D7771f16204d26770657eac186A6167e69e736"
 
 # Anvil default account key — won't match Joey, we handle that below
 _ANVIL_DEFAULT_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
