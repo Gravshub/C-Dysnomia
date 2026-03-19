@@ -242,20 +242,35 @@ class TestE1Razor:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestE2Cereal:
-    """E2 DSS should be profitable — GIBS is at ~203 PLS, 10x above break-even."""
+    """E2 CEREAL — now uses TGSv8+ harvestCycle instead of old DSS."""
+
+    TGSV8PLUS_ADDR = "0xA5D7771f16204d26770657eac186A6167e69e736"
 
     def test_instantiate(self, E2):
+        """Registry name stays 'DSS' for backward compat."""
         assert E2.name == "DSS"
 
+    def test_tgsv8plus_configured(self):
+        """TGSv8+ address must be set in config."""
+        from scripts.Joystick.core.config import TGSV8PLUS
+        # May be empty in test env — skip if not configured
+        if not TGSV8PLUS:
+            pytest.skip("TGSV8PLUS_ADDRESS not set in test env")
+        assert TGSV8PLUS
+
+    def test_tgsv8plus_has_code(self, w3):
+        """TGSv8+ should have code on fork."""
+        code = w3.eth.get_code(Web3.to_checksum_address(self.TGSV8PLUS_ADDR))
+        assert len(code) > 10, "TGSv8+ has no code — fork may have failed"
+
     def test_gibs_pair_exists(self, w3):
-        """GIBS/WPLS pair must exist for DSS to function."""
-        # Check both V1 and V2
+        """GIBS/WPLS pair must exist for CEREAL to function."""
         v1_pair = get_pair_address(V1_FACTORY, GIBS, WPLS, w3)
         v2_pair = get_pair_address(V2_FACTORY, GIBS, WPLS, w3)
         assert v1_pair or v2_pair, "No GIBS/WPLS pair on either DEX"
 
     def test_gibs_price_above_breakeven(self, w3):
-        """Verify GIBS/WPLS price > 21.5 PLS (DSS break-even)."""
+        """Verify GIBS/WPLS price > 60 PLS (TGSv8+ break-even with 45% sell)."""
         pair_addr = get_pair_address(V2_FACTORY, GIBS, WPLS, w3)
         if not pair_addr:
             pair_addr = get_pair_address(V1_FACTORY, GIBS, WPLS, w3)
@@ -270,56 +285,32 @@ class TestE2Cereal:
             r_gibs, r_wpls = r1, r0
 
         price = r_wpls / r_gibs if r_gibs > 0 else 0
-        assert price > 21.5, f"GIBS price {price:.2f} below DSS break-even"
-        log.info("GIBS price: %.2f PLS (%.1fx above break-even)", price, price / 21.5)
+        assert price > 60, f"GIBS price {price:.2f} below TGSv8+ break-even"
+        log.info("GIBS price: %.2f PLS (%.1fx above 60 PLS break-even)", price, price / 60)
 
     def test_is_ready(self, E2):
-        """DSS should be ready given GIBS pair exists and price > break-even."""
+        """E2 readiness check (may fail if TGSV8PLUS_ADDRESS not set)."""
         ready = E2.is_ready()
-        # May fail if V1 factory lookup fails on fork — that's informative
-        log.info("DSS is_ready: %s", ready)
+        log.info("E2 CEREAL is_ready: %s", ready)
 
     def test_simulate(self, E2):
-        """DSS simulate should return positive profit and gas."""
+        """E2 simulate should return positive profit and gas."""
         from scripts.Joystick.core.simulator import SimulationFailed
         try:
             profit, gas = E2.simulate()
-            assert profit > 0, f"DSS profit should be positive, got {profit}"
-            assert gas > 0, f"DSS gas should be positive, got {gas}"
-            assert profit > gas, f"DSS should be profitable: profit={profit} < gas={gas}"
-            log.info("DSS simulate: profit=%.4f PLS, gas=%.4f PLS, ROI=%.2fx",
+            assert profit > 0, f"E2 profit should be positive, got {profit}"
+            assert gas > 0, f"E2 gas should be positive, got {gas}"
+            assert profit > gas, f"E2 should be profitable: profit={profit} < gas={gas}"
+            log.info("E2 simulate: profit=%.4f PLS, gas=%.4f PLS, ROI=%.2fx",
                      profit / 1e18, gas / 1e18, profit / gas)
         except SimulationFailed as e:
-            pytest.skip(f"DSS simulate failed: {e}")
-
-    def test_dss_contract_callable(self, w3):
-        """chatAndClaimWithMultiplier should be callable on DSS contract."""
-        sig = Web3.keccak(text="chatAndClaimWithMultiplier(string)")[:4].hex()
-        # ABI encode: "test"
-        msg = "test"
-        encoded_msg = msg.encode().hex()
-        offset = "0000000000000000000000000000000000000000000000000000000000000020"
-        length = hex(len(msg))[2:].zfill(64)
-        data_hex = encoded_msg + "0" * (64 - len(encoded_msg))
-        calldata = f"0x{sig}{offset}{length}{data_hex}"
-
-        try:
-            w3.eth.call({
-                "from": Web3.to_checksum_address(JOEY),
-                "to": Web3.to_checksum_address(DSS_ADDR),
-                "data": calldata,
-                "gas": 1_000_000,
-            })
-            log.info("DSS chatAndClaimWithMultiplier simulation OK")
-        except Exception as e:
-            # May revert due to contract state, but should not be "no code"
-            assert "no code" not in str(e).lower(), f"DSS has no code: {e}"
+            pytest.skip(f"E2 simulate failed: {e}")
 
     def test_execute_dry_run(self, E2):
         """execute(dry_run=True) should return a result."""
         result = E2.execute(dry_run=True)
         assert hasattr(result, "success")
-        log.info("DSS dry_run result: success=%s notes=%s", result.success, result.notes)
+        log.info("E2 dry_run result: success=%s notes=%s", result.success, result.notes)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
