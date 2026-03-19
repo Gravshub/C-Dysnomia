@@ -35,6 +35,16 @@ PUSDC      = Web3.to_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB4
 GIBS_LAU   = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
 GIBS_QING  = Web3.to_checksum_address("0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35")
 JOEY_YUE   = Web3.to_checksum_address("0x8e666227B0C5A42075a4f9bdf5d2176f287a9cf0")
+# ── DSS (DysnomiaSelfSnipev4) ────────────────────────────────────────────
+# STATUS: DEPRECATED FOR MINTING (as of TGSv8+ deployment, March 2026)
+#
+# All minting revenue now flows through TGSv8+ via harvestCycle(), which is
+# silent (no Chat), atomic (1 TX), and includes automatic LP creation + burn.
+#
+# DSS is KEPT for one purpose only: broadcasting messages to the VOID chat.
+# Joey can still call DSS.chat(text) to post to the VOID when desired.
+#
+# To broadcast to VOID:  python scripts/tx_void_broadcast.py
 DSS        = Web3.to_checksum_address("0x91Df693177eE5C81016d0B7c4c2052A7d229c031")
 
 # GIBS QING waat — constant identifier for territory computation
@@ -88,6 +98,21 @@ MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA1
 # TGSv8 — Active execution layer (Token Factory + WM Minting + Dual DEX)
 # Supersedes TGSv5 (WM-only) and TGSv7 (no mintWM). See data/events/tgs_deprecation_log.json.
 TGSV8 = os.getenv("TGSV8_ADDRESS", "")
+
+# ── TGSv8+ — Companion contract for daily harvest pipeline ──────────────
+# Handles: silent minting, atomic harvestCycle, LP burns, removeLiquidity,
+# spread selling, generic execute. Deployed alongside TGSv8 (not a replacement).
+TGSV8PLUS = os.getenv("TGSV8PLUS_ADDRESS", "")
+
+# ── E2 Harvest Cycle Configuration ──────────────────────────────────────
+# All values in basis points (0-10000). Override via env vars.
+# Default strategy: 45% sell for PLS, 55% re-LP, burn 90% of new LP tokens.
+HARVEST_SELL_BPS   = int(os.getenv("HARVEST_SELL_BPS", "4500"))    # 45% sold → PLS to wallet
+HARVEST_BURN_BPS   = int(os.getenv("HARVEST_BURN_BPS", "9000"))    # 90% of LP → burned (permanent floor)
+HARVEST_MINT_COUNT = int(os.getenv("HARVEST_MINT_COUNT", "17"))    # LAU minted per cycle (17 Purchase calls)
+HARVEST_SELL_DEX   = int(os.getenv("HARVEST_SELL_DEX", "1"))       # 0=V1, 1=V2 for sell step
+HARVEST_LP_DEX     = int(os.getenv("HARVEST_LP_DEX", "1"))         # 0=V1, 1=V2 for addLiquidity step
+HARVEST_USE_SAFE   = os.getenv("HARVEST_USE_SAFE", "true").lower() == "true"  # safeMint required — silentMint fails when LAU self-balance=0
 
 # V4/V3 Personal/Index minters
 V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
