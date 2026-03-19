@@ -77,9 +77,12 @@ FACTORY_ABI   = load_abi("factory")
 PAIR_ABI      = load_abi("pair")
 META_ABI      = load_abi("meta")
 CHEON_ABI     = load_abi("cheon")
+# DSS ABI — DEPRECATED FOR MINTING. Kept for VOID Chat broadcast only.
+# See config.py DSS deprecation note for full context.
 DSS_ABI       = load_abi("dss")
 MULTICALL3_ABI = load_abi("multicall3")
 TGSV8_ABI     = load_abi("tgsv8")
+TGSV8PLUS_ABI = load_abi("tgsv8plus")
 MULTI_AFF_ABI = load_abi("multi_affection")
 
 # ── Contract factory helpers ──────────────────────────────────────────────
@@ -108,6 +111,17 @@ def tgsv8_contract(w3=None) -> Any:
         raise EnvironmentError("TGSV8_ADDRESS not set in .env")
     w3 = w3 or w3_read
     return w3.eth.contract(address=Web3.to_checksum_address(TGSV8), abi=TGSV8_ABI)
+
+def tgsv8plus_contract(w3=None) -> Any | None:
+    """Return TGSv8+ contract instance. Returns None if address not configured."""
+    from .config import TGSV8PLUS
+    if not TGSV8PLUS:
+        return None
+    _w3 = w3 or w3_read
+    return _w3.eth.contract(
+        address=Web3.to_checksum_address(TGSV8PLUS),
+        abi=TGSV8PLUS_ABI,
+    )
 
 def multi_affection_contract(w3=None) -> Any:
     """Multi AFFECTION batch minter (Helios's deployed contract)."""
