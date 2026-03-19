@@ -12,15 +12,30 @@ This worked but:
 
 === CURRENT (TGSv8+) ===
 Uses TGSv8+ contract at 0xA5D7771f16204d26770657eac186A6167e69e736.
-TGSv8+.harvestCycle() does the ENTIRE pipeline in ONE atomic TX:
-  1. silentMint(N) — calls LAU.Purchase(payToken, 1e18) × N. No Chat, no VOID spam.
-  2. Sell sellBps% of minted LAU → WPLS on DEX
-  3. addLiquidity with remaining LAU + received WPLS
-  4. Burn burnBps% of received LP tokens → 0x...369 (permanent floor)
-  5. Sweep leftover tokens to owner (Joey)
 
-Default: 45% sell (4500 bps), 90% LP burn (9000 bps), 17 LAU per cycle.
-All percentages configurable via env vars (HARVEST_SELL_BPS, HARVEST_BURN_BPS, etc.).
+Two-TX pipeline (workaround for TWO harvestCycle limitations):
+
+  LIMITATION 1: harvestCycle uses silentMint pattern (no mintToCap before Purchase).
+    GIBS self-balance must be pre-primed or Purchase reverts (ERC20InsufficientBalance).
+    FIX: TX1 calls batchExecute(mintToCap × N) to prime GIBS self-balance.
+
+  LIMITATION 2: harvestCycle's addLiquidity step uses 95% minimums that don't account
+    for price impact from the sell step. The sell changes the GIBS/WPLS ratio, then
+    addLiquidity reverts with INSUFFICIENT_A_AMOUNT because the new ratio doesn't
+    match the minimum amounts.
+    FIX: Use sellBps=10000 (100% sell, 0% LP). LP+burn done separately if desired.
+
+  TX1: batchExecute — calls GIBS_LAU.mintToCap() × N to prime LAU self-balance (~196K gas)
+  TX2: harvestCycle(N, 10000, minPls, 0, dex, dex) — mint + sell 100% → WPLS (~391K gas)
+       Sweeps all WPLS to owner (Joey).
+
+Default: 17 LAU per cycle, 100% sell, V2 DEX.
+All values configurable via env vars (HARVEST_MINT_COUNT, HARVEST_SELL_DEX, etc.).
+
+=== PROVEN ON MAINNET ===
+Block 26066631: harvestCycle(17, 10000, 0, 0, 1, 1) — 17 GIBS → 2991.64 PLS
+Gas: 196K (prime) + 391K (harvest) = 587K total ≈ 307 PLS
+Net profit: 2,684 PLS per cycle
 
 === DSS DEPRECATION NOTE ===
 The old DSS contract (0x91Df...) is NOT used for minting anymore. It remains
@@ -28,18 +43,16 @@ available ONLY for broadcasting messages to the VOID chat via DSS.chat(text).
 All minting revenue now flows through TGSv8+.
 
 === ECONOMICS ===
-Per harvestCycle(17, 4500, minPls, 9000, 1, 1):
+Per cycle (batchExecute prime + harvestCycle):
   - Mints: 17 GIBS (costs 17 AFFECTION)
-  - Sells: ~7.65 GIBS (45%) → WPLS
-  - Re-LPs: ~9.35 GIBS (55%) + WPLS → LP tokens
-  - Burns: 90% of LP → permanent floor
-  - Net to wallet: ~45% of 17 GIBS in PLS value, minus gas
-  - Gas: ~650K estimate (conservative — tune after first live harvestCycle)
+  - Sells: 17 GIBS (100%) → WPLS (~2992 PLS at current price)
+  - Gas: ~196K (prime) + ~391K (harvest) = ~587K total ≈ 307 PLS
+  - Net: ~2685 PLS per cycle
   - VOID spam: ZERO
 
-Break-even: GIBS price > gas_cost / (17 * sellBps/10000)
-At 650K gas, 700K Beats: ~455 PLS gas → break-even at ~60 PLS/GIBS (at 45% sell)
-Current GIBS: ~187 PLS → 3x above break-even
+Break-even: GIBS price > gas_cost / mint_count
+At 587K gas, 656K Beats: ~385 PLS gas → break-even at ~23 PLS/GIBS
+Current GIBS: ~176 PLS → 7.7x above break-even
 
 Prerequisites:
   - TGSv8+ deployed and owner=Joey
@@ -47,7 +60,6 @@ Prerequisites:
   - GIBS/WPLS pair exists on PulseX V2
   - GIBS price above break-even
 """
-import logging
 
 from ..core.log_names import get_logger
 
@@ -57,8 +69,7 @@ from .base import EngineBase, EngineResult
 from ..core.config import (
     JOEY_WALLET, GIBS_LAU, WPLS, AFFECTION, TGSV8PLUS,
     PULSEX_V2_FACTORY,
-    HARVEST_SELL_BPS, HARVEST_BURN_BPS, HARVEST_MINT_COUNT,
-    HARVEST_SELL_DEX, HARVEST_LP_DEX, HARVEST_USE_SAFE,
+    HARVEST_MINT_COUNT, HARVEST_SELL_DEX,
 )
 from ..core.chain import (
     erc20, factory_contract, safe, w3_read, w3_submit,
@@ -70,15 +81,20 @@ from ..oracle.price import token_price_pls
 
 log = get_logger(__name__)
 
-# Gas estimate for harvestCycle (mint 17 + swap + addLiquidity + burn LP)
-# Conservative — tune down after first live harvestCycle measurement.
-HARVEST_GAS_ESTIMATE = 650_000
+# Gas estimates — measured on mainnet block 26066612/26066631
+PRIME_GAS_ESTIMATE = 200_000     # batchExecute with 17 mintToCap calls (measured: 196K)
+HARVEST_GAS_ESTIMATE = 400_000   # harvestCycle 100% sell, no LP (measured: 391K)
+TOTAL_GAS_ESTIMATE = PRIME_GAS_ESTIMATE + HARVEST_GAS_ESTIMATE  # ~600K total
+
+# mintToCap() function selector — keccak256("mintToCap()")[:4]
+MINT_TO_CAP_SELECTOR = Web3.keccak(text="mintToCap()")[:4]
 
 
 class DSSEngine(EngineBase):
     """
     Engine 2: CEREAL — Silent GIBS harvest via TGSv8+ harvestCycle.
 
+    Two-TX pipeline: batchExecute(mintToCap×N) → harvestCycle(N, ...).
     Replaces the old DSS chatAndClaimWithMultiplier path.
     Wallet role: joey (owner of TGSv8+).
     """
@@ -154,26 +170,24 @@ class DSSEngine(EngineBase):
                       aff_in_plus // 10**18, aff_in_joey // 10**18)
             return False
 
-        # Break-even check
-        sell_gibs = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
-        if sell_gibs == 0:
-            sell_gibs = 1
+        # Break-even check (accounts for both TXs, 100% sell)
         gas_price = w3_read.eth.gas_price
-        gas_cost_wei = HARVEST_GAS_ESTIMATE * gas_price
-        revenue_wei = gibs_price * sell_gibs
+        gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
+        revenue_wei = gibs_price * HARVEST_MINT_COUNT  # 100% sell
 
         log.debug(
-            "E2: GIBS=%.2f PLS, mint=%d, sell=%d(%.0f%%), gas=%.1f PLS",
-            gibs_price / 1e18, HARVEST_MINT_COUNT, sell_gibs,
-            HARVEST_SELL_BPS / 100, gas_cost_wei / 1e18,
+            "E2: GIBS=%.2f PLS, mint=%d, 100%% sell, gas=%.1f PLS (2-TX)",
+            gibs_price / 1e18, HARVEST_MINT_COUNT, gas_cost_wei / 1e18,
         )
 
         return revenue_wei > gas_cost_wei
 
     def simulate(self) -> tuple[int, int]:
         """
-        Estimate (profit_wei, gas_cost_wei) for one harvestCycle.
+        Estimate (profit_wei, gas_cost_wei) for one harvest cycle.
+        Gas includes both batchExecute (prime) and harvestCycle TXs.
         Uses quoteSell() for accurate DEX output estimation.
+        100% sell — no LP step.
         """
         if not TGSV8PLUS:
             raise SimulationFailed("TGSV8PLUS_ADDRESS not configured")
@@ -182,8 +196,8 @@ class DSSEngine(EngineBase):
         if not pair:
             raise SimulationFailed("No GIBS/WPLS V2 pair")
 
-        sell_gibs = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
-        sell_gibs_wei = sell_gibs * 10**18
+        # 100% sell — all minted GIBS go to DEX
+        sell_gibs_wei = HARVEST_MINT_COUNT * 10**18
 
         # Use quoteSell for accurate WPLS estimate
         pls_out = self._quote_sell(sell_gibs_wei)
@@ -192,30 +206,33 @@ class DSSEngine(EngineBase):
             gibs_price = token_price_pls(GIBS_LAU, 10**18)
             if not gibs_price:
                 raise SimulationFailed("GIBS price oracle failed")
-            pls_out = gibs_price * sell_gibs
+            pls_out = gibs_price * HARVEST_MINT_COUNT
 
         gas_price = w3_read.eth.gas_price
-        gas_cost_wei = HARVEST_GAS_ESTIMATE * gas_price
+        gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
 
         if pls_out <= gas_cost_wei:
             raise SimulationFailed(
-                f"E2 unprofitable: sell {sell_gibs} GIBS → {pls_out/1e18:.1f} PLS "
-                f"<= gas {gas_cost_wei/1e18:.1f} PLS"
+                f"E2 unprofitable: sell {HARVEST_MINT_COUNT} GIBS → {pls_out/1e18:.1f} PLS "
+                f"<= gas {gas_cost_wei/1e18:.1f} PLS (2-TX)"
             )
 
         return pls_out, gas_cost_wei
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """
-        Atomic harvest cycle via TGSv8+:
+        Two-TX harvest pipeline via TGSv8+:
+
         1. Ensure AFF is deposited in TGSv8+
-        2. Call harvestCycle(mintCount, sellBps, minPlsOut, burnBps, sellDex, lpDex)
-        3. All minting, selling, LP creation, and LP burning happens in one TX
+        2. TX1: batchExecute — call mintToCap() on GIBS_LAU × mintCount
+           This primes the LAU contract's self-balance so Purchase works.
+        3. TX2: harvestCycle — atomic sell+LP+burn pipeline
+           Purchase × N succeeds because self-balance was primed in TX1.
         """
         plus = self._get_plus_submit()
         if not plus:
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
-                                notes="TGSv8+ not configured")
+                                tx_hashes=[], notes="TGSv8+ not configured")
 
         tx_hashes = []
         gas_spent = 0
@@ -223,7 +240,8 @@ class DSSEngine(EngineBase):
         try:
             revenue_wei, gas_cost_wei = self.simulate()
         except SimulationFailed as exc:
-            return EngineResult(success=False, profit_wei=0, gas_wei=0, notes=str(exc))
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes=str(exc))
 
         try:
             # Step 1: Ensure TGSv8+ has enough AFFECTION
@@ -258,45 +276,64 @@ class DSSEngine(EngineBase):
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Step 2: Compute minPlsOut with slippage protection
-            sell_gibs = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
-            sell_gibs_wei = sell_gibs * 10**18
+            # Step 2: Prime GIBS self-balance via batchExecute(mintToCap × N)
+            # harvestCycle uses silent Purchase (no mintToCap), so we must
+            # prime N tokens into GIBS_LAU's self-balance first.
+            mint_count = HARVEST_MINT_COUNT
+            gibs_addr = Web3.to_checksum_address(GIBS_LAU)
+            targets = [gibs_addr] * mint_count
+            datas = [MINT_TO_CAP_SELECTOR] * mint_count
+
+            log.info("E2: Priming GIBS self-balance — batchExecute(mintToCap × %d)", mint_count)
+
+            r = send_tx(
+                plus.functions.batchExecute(targets, datas),
+                f"Prime GIBS mintToCap × {mint_count}",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                log.info("E2: Prime TX confirmed — gas %d", r["gasUsed"])
+
+            # Step 3: Compute minPlsOut with slippage protection (100% sell)
+            sell_gibs_wei = HARVEST_MINT_COUNT * 10**18
             expected_pls = self._quote_sell(sell_gibs_wei)
             min_pls_out = int(expected_pls * 95 / 100) if expected_pls else 0
 
-            # Step 3: Execute harvestCycle — THE ATOMIC PIPELINE
+            # Step 4: Execute harvestCycle — 100% sell, no LP (LP step has
+            # INSUFFICIENT_A_AMOUNT bug due to tight minimums after price impact)
             log.info(
-                "E2: harvestCycle(mint=%d, sell=%.0f%%, burn=%.0f%%, minPLS=%.1f)",
-                HARVEST_MINT_COUNT, HARVEST_SELL_BPS / 100,
-                HARVEST_BURN_BPS / 100, min_pls_out / 1e18,
+                "E2: harvestCycle(mint=%d, sell=100%%, minPLS=%.1f, dex=%d)",
+                HARVEST_MINT_COUNT, min_pls_out / 1e18, HARVEST_SELL_DEX,
             )
 
             r = send_tx(
                 plus.functions.harvestCycle(
                     HARVEST_MINT_COUNT,
-                    HARVEST_SELL_BPS,
+                    10000,         # 100% sell — all GIBS → WPLS
                     min_pls_out,
-                    HARVEST_BURN_BPS,
+                    0,             # 0% burn (no LP created)
                     HARVEST_SELL_DEX,
-                    HARVEST_LP_DEX,
+                    HARVEST_SELL_DEX,  # lpDex irrelevant (no LP step)
                 ),
-                f"HarvestCycle({HARVEST_MINT_COUNT}, {HARVEST_SELL_BPS}bps, {HARVEST_BURN_BPS}bps)",
+                f"HarvestCycle({HARVEST_MINT_COUNT}, 100% sell, dex={HARVEST_SELL_DEX})",
                 dry_run=dry_run,
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            log.info("E2 complete: %d GIBS minted, %.0f%% sold, %.0f%% LP burned",
-                     HARVEST_MINT_COUNT, HARVEST_SELL_BPS / 100, HARVEST_BURN_BPS / 100)
+            log.info("E2 complete: %d GIBS minted + sold → PLS",
+                     HARVEST_MINT_COUNT)
 
             return EngineResult(
                 success=True,
                 profit_wei=revenue_wei,
                 gas_wei=gas_spent,
                 tx_hashes=tx_hashes,
-                notes=f"HarvestCycle: {HARVEST_MINT_COUNT} GIBS, "
-                      f"{HARVEST_SELL_BPS/100:.0f}% sell, {HARVEST_BURN_BPS/100:.0f}% burn",
+                notes=f"HarvestCycle: {HARVEST_MINT_COUNT} GIBS → PLS "
+                      f"(2-TX: prime+sell, dex={HARVEST_SELL_DEX})",
             )
 
         except Exception as exc:

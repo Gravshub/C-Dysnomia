@@ -112,7 +112,7 @@ HARVEST_BURN_BPS   = int(os.getenv("HARVEST_BURN_BPS", "9000"))    # 90% of LP â
 HARVEST_MINT_COUNT = int(os.getenv("HARVEST_MINT_COUNT", "17"))    # LAU minted per cycle (17 Purchase calls)
 HARVEST_SELL_DEX   = int(os.getenv("HARVEST_SELL_DEX", "1"))       # 0=V1, 1=V2 for sell step
 HARVEST_LP_DEX     = int(os.getenv("HARVEST_LP_DEX", "1"))         # 0=V1, 1=V2 for addLiquidity step
-HARVEST_USE_SAFE   = os.getenv("HARVEST_USE_SAFE", "").lower() == "true"  # Use safeMint if silentMint fails
+HARVEST_USE_SAFE   = os.getenv("HARVEST_USE_SAFE", "true").lower() == "true"  # safeMint required â€” silentMint fails when LAU self-balance=0
 
 # V4/V3 Personal/Index minters
 V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
