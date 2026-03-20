@@ -121,6 +121,81 @@ class TxHistoryResponse(BaseModel):
     net_pls: float
 
 
+# ─── TGSv8 ────────────────────────────────────────────────────────────
+
+class TGSv8AuthStatus(BaseModel):
+    joey: bool = False
+    minter: Optional[bool] = None
+    seller: Optional[bool] = None
+
+
+class TGSv8Response(BaseModel):
+    address: str
+    owner: Optional[str] = None
+    owner_is_joey: bool = False
+    paused: bool = False
+    authorized: TGSv8AuthStatus = TGSv8AuthStatus()
+    op_nonce: int = 0
+    registry_len: int = 0
+    max_batch: int = 0
+    native_pls: float = 0.0
+    token_balances: dict[str, float] = {}
+    refs: dict[str, Optional[str]] = {}
+    refs_valid: bool = False
+
+
+# ─── TGSv8+ ──────────────────────────────────────────────────────────
+
+class TGSv8PlusAuthStatus(BaseModel):
+    joey: bool = False
+    minter: Optional[bool] = None
+
+
+class TGSv8PlusStats(BaseModel):
+    total_lau_minted: float = 0.0
+    total_pay_token_spent: float = 0.0
+    total_lp_burned: float = 0.0
+    op_counter: int = 0
+    mintable_lau: int = 0
+    lau_remaining: int = 0
+
+
+class TGSv8PlusResponse(BaseModel):
+    address: str
+    owner: Optional[str] = None
+    owner_is_joey: bool = False
+    authorized: TGSv8PlusAuthStatus = TGSv8PlusAuthStatus()
+    stats: TGSv8PlusStats = TGSv8PlusStats()
+    native_pls: float = 0.0
+    token_balances: dict[str, float] = {}
+    refs: dict[str, Optional[str]] = {}
+    refs_valid: bool = False
+
+
+# ─── Combined TGSv8 + TGSv8+ ─────────────────────────────────────────
+
+class ContractsResponse(BaseModel):
+    tgsv8: TGSv8Response
+    tgsv8plus: TGSv8PlusResponse
+
+
+# ─── Balance history ─────────────────────────────────────────────────
+
+class HistoryPoint(BaseModel):
+    ts: int
+    block: int = 0
+    joey_pls: float = 0.0
+    tgsv8_pls: float = 0.0
+    tgsv8plus_pls: float = 0.0
+    total_pls: float = 0.0
+    gibs_price: Optional[float] = None
+    gas_beats: float = 0.0
+
+
+class HistoryResponse(BaseModel):
+    points: list[HistoryPoint] = []
+
+
 # ─── Overview (single-call dashboard payload) ────────────────────────
 
 class OverviewResponse(BaseModel):
@@ -130,6 +205,8 @@ class OverviewResponse(BaseModel):
     engines: EnginesResponse
     gas: GasResponse
     strategy: StrategyResponse
+    tgsv8: Optional[TGSv8Response] = None
+    tgsv8plus: Optional[TGSv8PlusResponse] = None
     recent_txs: list[TxRecord] = []
     poll_interval_sec: int = 15
     bot_online: bool = False
