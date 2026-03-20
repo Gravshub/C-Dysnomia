@@ -26,6 +26,34 @@ SEL_GET_RESERVES = Web3.keccak(text="getReserves()")[:4]
 SEL_TOKEN0       = Web3.keccak(text="token0()")[:4]
 SEL_TOKEN1       = Web3.keccak(text="token1()")[:4]
 
+# ─── TGSv8 selectors ───────────────────────────────────────────────
+SEL_OWNER        = Web3.keccak(text="owner()")[:4]
+SEL_PAUSED       = Web3.keccak(text="paused()")[:4]
+SEL_AUTHORIZED   = Web3.keccak(text="authorized(address)")[:4]
+SEL_OP_NONCE     = Web3.keccak(text="opNonce()")[:4]
+SEL_REGISTRY_LEN = Web3.keccak(text="registryLen()")[:4]
+SEL_MAX_BATCH    = Web3.keccak(text="maxBatch()")[:4]
+SEL_NATIVE_BAL   = Web3.keccak(text="nativeBal()")[:4]
+SEL_MINTER_V4    = Web3.keccak(text="minterV4()")[:4]
+SEL_MINTER_V3    = Web3.keccak(text="minterV3()")[:4]
+SEL_MV           = Web3.keccak(text="mv()")[:4]
+SEL_ROUTER_V1    = Web3.keccak(text="routerV1()")[:4]
+SEL_ROUTER_V2    = Web3.keccak(text="routerV2()")[:4]
+SEL_BATCH_BAL    = Web3.keccak(text="batchBal(address[])")[:4]
+
+# ─── TGSv8+ selectors ──────────────────────────────────────────────
+SEL_LAU              = Web3.keccak(text="lau()")[:4]
+SEL_PAY_TOKEN        = Web3.keccak(text="payToken()")[:4]
+SEL_WPLS             = Web3.keccak(text="wpls()")[:4]
+SEL_FACTORY_V1       = Web3.keccak(text="factoryV1()")[:4]
+SEL_FACTORY_V2       = Web3.keccak(text="factoryV2()")[:4]
+SEL_TOTAL_LAU_MINTED = Web3.keccak(text="totalLauMinted()")[:4]
+SEL_TOTAL_PAY_SPENT  = Web3.keccak(text="totalPayTokenSpent()")[:4]
+SEL_TOTAL_LP_BURNED  = Web3.keccak(text="totalLpBurned()")[:4]
+SEL_OP_COUNTER       = Web3.keccak(text="opCounter()")[:4]
+SEL_MINTABLE_LAU     = Web3.keccak(text="mintableLAU()")[:4]
+SEL_LAU_REMAINING    = Web3.keccak(text="lauRemaining()")[:4]
+
 # Multicall3 ABI (aggregate3 only — all we need for reads)
 MC3_ABI = [{
     "inputs": [{"components": [
@@ -206,6 +234,240 @@ class ChainReader:
         except Exception as e:
             logger.error(f"get_gibs_pls_price failed: {e}")
             return None
+
+    def get_tgsv8_state(self) -> dict:
+        """Fetch full TGSv8 contract state via Multicall3.
+
+        Returns dict with owner, paused, auth checks, refs, registry info,
+        native PLS balance, and token balances.
+        """
+        tgsv8 = Web3.to_checksum_address(config.TGSV8)
+        joey = Web3.to_checksum_address(config.JOEY_WALLET)
+        minter = Web3.to_checksum_address(config.MINTER_WALLET) if config.MINTER_WALLET else None
+        seller = Web3.to_checksum_address(config.SELLER_WALLET) if config.SELLER_WALLET else None
+
+        # Build multicall batch
+        calls = [
+            (tgsv8, SEL_OWNER),                                                    # 0: owner
+            (tgsv8, SEL_PAUSED),                                                   # 1: paused
+            (tgsv8, SEL_AUTHORIZED + abi_encode(["address"], [joey])),              # 2: auth joey
+            (tgsv8, SEL_OP_NONCE),                                                 # 3: opNonce
+            (tgsv8, SEL_REGISTRY_LEN),                                             # 4: registryLen
+            (tgsv8, SEL_MAX_BATCH),                                                # 5: maxBatch
+            (tgsv8, SEL_NATIVE_BAL),                                               # 6: nativeBal
+            (tgsv8, SEL_MINTER_V4),                                                # 7: minterV4
+            (tgsv8, SEL_MINTER_V3),                                                # 8: minterV3
+            (tgsv8, SEL_MV),                                                       # 9: mv
+            (tgsv8, SEL_ROUTER_V1),                                                # 10: routerV1
+            (tgsv8, SEL_ROUTER_V2),                                                # 11: routerV2
+        ]
+
+        # Auth checks for minter/seller (if configured)
+        auth_minter_idx = None
+        auth_seller_idx = None
+        if minter:
+            auth_minter_idx = len(calls)
+            calls.append((tgsv8, SEL_AUTHORIZED + abi_encode(["address"], [minter])))
+        if seller:
+            auth_seller_idx = len(calls)
+            calls.append((tgsv8, SEL_AUTHORIZED + abi_encode(["address"], [seller])))
+
+        # batchBal for tracked tokens
+        tracked_tokens = [
+            Web3.to_checksum_address(addr) for sym, addr in config.TOKEN_REGISTRY.items()
+            if addr is not None
+        ]
+        tracked_syms = [sym for sym, addr in config.TOKEN_REGISTRY.items() if addr is not None]
+        batch_bal_idx = len(calls)
+        calls.append((tgsv8, SEL_BATCH_BAL + abi_encode(["address[]"], [tracked_tokens])))
+
+        results = self._multicall(calls)
+
+        def _addr(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (a,) = abi_decode(["address"], data)
+                return a
+            return None
+
+        def _uint(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (v,) = abi_decode(["uint256"], data)
+                return v
+            return 0
+
+        def _bool(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (v,) = abi_decode(["bool"], data)
+                return v
+            return False
+
+        owner = _addr(0)
+        refs = {
+            "minter_v4": _addr(7),
+            "minter_v3": _addr(8),
+            "mv":        _addr(9),
+            "router_v1": _addr(10),
+            "router_v2": _addr(11),
+        }
+
+        # Check refs against expected values
+        refs_valid = all(
+            refs.get(k, "").lower() == v.lower()
+            for k, v in config.TGSV8_EXPECTED_REFS.items()
+            if refs.get(k)
+        )
+
+        # Parse batchBal
+        token_balances = {}
+        ok, data = results[batch_bal_idx]
+        if ok and len(data) >= 64:
+            try:
+                (bals,) = abi_decode(["uint256[]"], data)
+                for sym, bal in zip(tracked_syms, bals):
+                    token_balances[sym] = bal / 1e18
+            except Exception:
+                pass
+
+        native_pls = _uint(6) / 1e18
+
+        return {
+            "address": config.TGSV8,
+            "owner": owner,
+            "owner_is_joey": owner.lower() == joey.lower() if owner else False,
+            "paused": _bool(1),
+            "authorized": {
+                "joey": _bool(2),
+                "minter": _bool(auth_minter_idx) if auth_minter_idx is not None else None,
+                "seller": _bool(auth_seller_idx) if auth_seller_idx is not None else None,
+            },
+            "op_nonce": _uint(3),
+            "registry_len": _uint(4),
+            "max_batch": _uint(5),
+            "native_pls": round(native_pls, 4),
+            "token_balances": token_balances,
+            "refs": refs,
+            "refs_valid": refs_valid,
+        }
+
+    def get_tgsv8plus_state(self) -> dict:
+        """Fetch full TGSv8+ contract state via Multicall3.
+
+        Returns dict with owner, auth checks, refs, stats, token balances.
+        """
+        plus = Web3.to_checksum_address(config.TGSV8PLUS)
+        joey = Web3.to_checksum_address(config.JOEY_WALLET)
+        minter = Web3.to_checksum_address(config.MINTER_WALLET) if config.MINTER_WALLET else None
+
+        calls = [
+            (plus, SEL_OWNER),                                                     # 0: owner
+            (plus, SEL_AUTHORIZED + abi_encode(["address"], [joey])),               # 1: auth joey
+            (plus, SEL_LAU),                                                        # 2: lau
+            (plus, SEL_PAY_TOKEN),                                                  # 3: payToken
+            (plus, SEL_WPLS),                                                       # 4: wpls
+            (plus, SEL_ROUTER_V1),                                                  # 5: routerV1
+            (plus, SEL_ROUTER_V2),                                                  # 6: routerV2
+            (plus, SEL_FACTORY_V1),                                                 # 7: factoryV1
+            (plus, SEL_FACTORY_V2),                                                 # 8: factoryV2
+            (plus, SEL_TOTAL_LAU_MINTED),                                           # 9: totalLauMinted
+            (plus, SEL_TOTAL_PAY_SPENT),                                            # 10: totalPayTokenSpent
+            (plus, SEL_TOTAL_LP_BURNED),                                            # 11: totalLpBurned
+            (plus, SEL_OP_COUNTER),                                                 # 12: opCounter
+            (plus, SEL_MINTABLE_LAU),                                               # 13: mintableLAU
+            (plus, SEL_LAU_REMAINING),                                              # 14: lauRemaining
+        ]
+
+        auth_minter_idx = None
+        if minter:
+            auth_minter_idx = len(calls)
+            calls.append((plus, SEL_AUTHORIZED + abi_encode(["address"], [minter])))
+
+        # batchBal for tracked tokens
+        tracked_tokens = [
+            Web3.to_checksum_address(addr) for sym, addr in config.TOKEN_REGISTRY.items()
+            if addr is not None
+        ]
+        tracked_syms = [sym for sym, addr in config.TOKEN_REGISTRY.items() if addr is not None]
+        batch_bal_idx = len(calls)
+        calls.append((plus, SEL_BATCH_BAL + abi_encode(["address[]"], [tracked_tokens])))
+
+        # Native PLS balance via eth_getBalance
+        plus_pls = self.get_pls_balance(plus)
+
+        results = self._multicall(calls)
+
+        def _addr(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (a,) = abi_decode(["address"], data)
+                return a
+            return None
+
+        def _uint(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (v,) = abi_decode(["uint256"], data)
+                return v
+            return 0
+
+        def _bool(idx):
+            ok, data = results[idx]
+            if ok and len(data) >= 32:
+                (v,) = abi_decode(["bool"], data)
+                return v
+            return False
+
+        owner = _addr(0)
+        refs = {
+            "lau":        _addr(2),
+            "pay_token":  _addr(3),
+            "wpls":       _addr(4),
+            "router_v1":  _addr(5),
+            "router_v2":  _addr(6),
+            "factory_v1": _addr(7),
+            "factory_v2": _addr(8),
+        }
+
+        refs_valid = all(
+            refs.get(k, "").lower() == v.lower()
+            for k, v in config.TGSV8PLUS_EXPECTED_REFS.items()
+            if refs.get(k)
+        )
+
+        # Parse batchBal
+        token_balances = {}
+        ok, data = results[batch_bal_idx]
+        if ok and len(data) >= 64:
+            try:
+                (bals,) = abi_decode(["uint256[]"], data)
+                for sym, bal in zip(tracked_syms, bals):
+                    token_balances[sym] = bal / 1e18
+            except Exception:
+                pass
+
+        return {
+            "address": config.TGSV8PLUS,
+            "owner": owner,
+            "owner_is_joey": owner.lower() == joey.lower() if owner else False,
+            "authorized": {
+                "joey": _bool(1),
+                "minter": _bool(auth_minter_idx) if auth_minter_idx is not None else None,
+            },
+            "stats": {
+                "total_lau_minted": _uint(9) / 1e18,
+                "total_pay_token_spent": _uint(10) / 1e18,
+                "total_lp_burned": _uint(11) / 1e18,
+                "op_counter": _uint(12),
+                "mintable_lau": _uint(13),
+                "lau_remaining": _uint(14),
+            },
+            "native_pls": round(plus_pls / 1e18, 4),
+            "token_balances": token_balances,
+            "refs": refs,
+            "refs_valid": refs_valid,
+        }
 
     def get_dashboard_snapshot(self) -> dict:
         """Fetch all data the dashboard needs in minimal RPC calls.

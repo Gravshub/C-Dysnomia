@@ -2,20 +2,25 @@
 JOYSTICK Mission Control — API Server
 
 Entry point for the dashboard data layer.
-Run with: uvicorn dashboard.api.server:app --host 0.0.0.0 --port 8369
+Run with: uvicorn dashboard.server:app --host 0.0.0.0 --port 8369
 
 Or from the repo root:
-    python -m dashboard.api.server
+    cd scripts/Joystick
+    python -m dashboard.server
 """
 
 import logging
+import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .chain_reader import get_reader
 from .routes import wallet, engines, gas, overview
+from .routes import tgsv8 as tgsv8_route
+from .routes import history_route
 
 # ─── Logging ─────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -29,7 +34,7 @@ logger = logging.getLogger("joystick.server")
 app = FastAPI(
     title="|>JOYSTICK<| Mission Control",
     description="Read-only API for the JOYSTICK arbitrage bot on PulseChain (369)",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # ─── CORS ────────────────────────────────────────────────────────────
@@ -49,6 +54,13 @@ app.include_router(wallet.router, prefix="/api", tags=["wallet"])
 app.include_router(engines.router, prefix="/api", tags=["engines"])
 app.include_router(gas.router, prefix="/api", tags=["gas"])
 app.include_router(overview.router, prefix="/api", tags=["overview"])
+app.include_router(tgsv8_route.router, prefix="/api", tags=["tgsv8"])
+app.include_router(history_route.router, prefix="/api", tags=["history"])
+
+# ─── Static frontend ────────────────────────────────────────────────
+_frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.isdir(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
 
 
 # ─── Health check ────────────────────────────────────────────────────
@@ -98,7 +110,7 @@ async def shutdown():
 # ─── Direct run ──────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
-        "dashboard.api.server:app",
+        "dashboard.server:app",
         host=config.API_HOST,
         port=config.API_PORT,
         reload=True,
