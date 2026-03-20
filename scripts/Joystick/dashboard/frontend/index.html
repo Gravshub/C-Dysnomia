@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>|>JOYSTICK<| Mission Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg: #0a0d14;
+    --card-bg: #0f1117;
+    --card-border: #1a1f2e;
+    --text: #c8cdd8;
+    --text-dim: #5a6178;
+    --green: #00ff88;
+    --red: #ff4444;
+    --cyan: #00ccff;
+    --yellow: #ffcc00;
+    --orange: #ff8844;
+    --purple: #aa66ff;
+    --accent: #00ff88;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 20px;
+    min-height: 100vh;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--card-border);
+    padding-bottom: 16px;
+  }
+  .header h1 {
+    color: var(--green);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  .header .status-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  .header .status-bar span { color: var(--text-dim); }
+  .header .status-bar .val { color: var(--cyan); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card-full { grid-column: 1 / -1; }
+  .card-wide { grid-column: span 2; }
+
+  .card-title {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--card-border);
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+  }
+  .stat-label { color: var(--text-dim); }
+  .stat-value { color: var(--text); font-weight: 500; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red { color: var(--red); }
+  .stat-value.cyan { color: var(--cyan); }
+  .stat-value.yellow { color: var(--yellow); }
+
+  .progress-bar {
+    width: 100%;
+    height: 20px;
+    background: var(--card-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+    position: relative;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--cyan));
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .progress-text {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--bg);
+    text-shadow: 0 0 4px rgba(0,255,136,0.5);
+  }
+
+  .engine-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  .engine-cell {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid var(--card-border);
+    text-align: center;
+  }
+  .engine-cell .eid { font-size: 10px; color: var(--text-dim); }
+  .engine-cell .ename { font-weight: 700; font-size: 12px; }
+  .engine-cell .estatus { font-size: 10px; margin-top: 2px; }
+  .engine-cell.running .ename { color: var(--green); }
+  .engine-cell.ready .ename { color: var(--cyan); }
+  .engine-cell.blocked .ename { color: var(--red); }
+  .engine-cell.gated .ename { color: var(--yellow); }
+  .engine-cell.disabled .ename { color: var(--text-dim); }
+  .engine-cell.recon .ename { color: var(--orange); }
+  .engine-cell.design .ename { color: var(--purple); }
+
+  .auth-check { font-size: 11px; }
+  .auth-ok { color: var(--green); }
+  .auth-fail { color: var(--red); }
+  .ref-ok { color: var(--green); }
+  .ref-fail { color: var(--red); }
+
+  .token-table { width: 100%; }
+  .token-table td { padding: 2px 4px; }
+  .token-table td:last-child { text-align: right; font-weight: 500; }
+
+  .chart-container {
+    position: relative;
+    height: 200px;
+    width: 100%;
+  }
+
+  .contract-section {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(26,31,46,0.5);
+  }
+  .contract-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .contract-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--cyan);
+    margin-bottom: 4px;
+  }
+
+  @media (max-width: 768px) {
+    .card-wide { grid-column: span 1; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>|>JOYSTICK<| Mission Control</h1>
+  <div class="subtitle">PulseChain (369) Dashboard &mdash; Joey / Gibson / GIBS</div>
+  <div class="status-bar">
+    <span>Block: <span class="val" id="hdr-block">--</span></span>
+    <span>Gas: <span class="val" id="hdr-gas">--</span> Beats</span>
+    <span>Bot: <span class="val" id="hdr-bot">--</span></span>
+    <span>Updated: <span class="val" id="hdr-time">--</span></span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- Wallet -->
+  <div class="card">
+    <div class="card-title">Joey Wallet</div>
+    <div class="stat-row">
+      <span class="stat-label">PLS Balance</span>
+      <span class="stat-value green" id="w-pls">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Gas Buffer</span>
+      <span class="stat-value" id="w-gas-buf">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Address</span>
+      <span class="stat-value" style="font-size:10px" id="w-addr">--</span>
+    </div>
+  </div>
+
+  <!-- Validator Progress -->
+  <div class="card">
+    <div class="card-title">Validator Progress</div>
+    <div class="stat-row">
+      <span class="stat-label">Target</span>
+      <span class="stat-value">32,000,000 PLS</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="v-fill" style="width:0%"></div>
+      <div class="progress-text" id="v-pct">0%</div>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Remaining</span>
+      <span class="stat-value" id="v-remaining">--</span>
+    </div>
+  </div>
+
+  <!-- 24H Balance History Chart -->
+  <div class="card card-full">
+    <div class="card-title">24H Balance History</div>
+    <div class="chart-container">
+      <canvas id="balance-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Token Holdings -->
+  <div class="card">
+    <div class="card-title">Token Holdings</div>
+    <table class="token-table" id="token-table">
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Gas -->
+  <div class="card">
+    <div class="card-title">Gas Conditions</div>
+    <div class="stat-row">
+      <span class="stat-label">Gas Price</span>
+      <span class="stat-value" id="g-price">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Ceiling</span>
+      <span class="stat-value" id="g-ceil">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Condition</span>
+      <span class="stat-value" id="g-cond">--</span>
+    </div>
+  </div>
+
+  <!-- Engines -->
+  <div class="card card-full">
+    <div class="card-title">Engines</div>
+    <div class="engine-grid" id="engine-grid"></div>
+  </div>
+
+  <!-- TGSv8 Contract -->
+  <div class="card card-wide">
+    <div class="card-title">TGSv8 Contract</div>
+    <div class="contract-section">
+      <div class="contract-label">Ownership &amp; Auth</div>
+      <div class="stat-row">
+        <span class="stat-label">Owner (Joey)</span>
+        <span class="stat-value" id="v8-owner">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Paused</span>
+        <span class="stat-value" id="v8-paused">--</span>
+      </div>
+      <div class="auth-check" id="v8-auth"></div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">State</div>
+      <div class="stat-row">
+        <span class="stat-label">Op Nonce</span>
+        <span class="stat-value" id="v8-nonce">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Registry</span>
+        <span class="stat-value" id="v8-registry">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Max Batch</span>
+        <span class="stat-value" id="v8-batch">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Native PLS</span>
+        <span class="stat-value cyan" id="v8-pls">--</span>
+      </div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">References</div>
+      <div id="v8-refs"></div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">Token Balances</div>
+      <div id="v8-tokens"></div>
+    </div>
+  </div>
+
+  <!-- TGSv8+ Contract -->
+  <div class="card card-wide">
+    <div class="card-title">TGSv8+ Contract (Companion)</div>
+    <div class="contract-section">
+      <div class="contract-label">Ownership &amp; Auth</div>
+      <div class="stat-row">
+        <span class="stat-label">Owner (Joey)</span>
+        <span class="stat-value" id="v8p-owner">--</span>
+      </div>
+      <div class="auth-check" id="v8p-auth"></div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">Pipeline Stats</div>
+      <div class="stat-row">
+        <span class="stat-label">Op Counter</span>
+        <span class="stat-value" id="v8p-ops">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Total LAU Minted</span>
+        <span class="stat-value" id="v8p-lau-minted">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Pay Token Spent</span>
+        <span class="stat-value" id="v8p-pay-spent">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">LP Burned</span>
+        <span class="stat-value" id="v8p-lp-burned">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Mintable LAU</span>
+        <span class="stat-value cyan" id="v8p-mintable">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">LAU Remaining</span>
+        <span class="stat-value" id="v8p-remaining">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Native PLS</span>
+        <span class="stat-value cyan" id="v8p-pls">--</span>
+      </div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">References</div>
+      <div id="v8p-refs"></div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">Token Balances</div>
+      <div id="v8p-tokens"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Config ──────────────────────────────────────────────────────────
+const API_BASE = window.location.origin;
+const OVERVIEW_POLL = 15000;   // 15s
+const HISTORY_POLL  = 300000;  // 5 min
+
+// ─── Chart setup ─────────────────────────────────────────────────────
+let balanceChart = null;
+
+function initChart() {
+  const ctx = document.getElementById('balance-chart').getContext('2d');
+  balanceChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Total PLS',
+          data: [],
+          borderColor: '#00ff88',
+          backgroundColor: 'rgba(0, 255, 136, 0.05)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHitRadius: 10,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Gas (Beats)',
+          data: [],
+          borderColor: '#00ccff',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          fill: false,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHitRadius: 10,
+          yAxisID: 'y1',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: '#5a6178',
+            font: { family: 'JetBrains Mono', size: 10 },
+            boxWidth: 12,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0f1117',
+          borderColor: '#1a1f2e',
+          borderWidth: 1,
+          titleFont: { family: 'JetBrains Mono', size: 11 },
+          bodyFont: { family: 'JetBrains Mono', size: 11 },
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.datasetIndex === 0) return ctx.parsed.y.toLocaleString() + ' PLS';
+              return ctx.parsed.y.toFixed(1) + ' Beats';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(26, 31, 46, 0.5)' },
+          ticks: { color: '#5a6178', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 12 }
+        },
+        y: {
+          position: 'left',
+          grid: { color: 'rgba(26, 31, 46, 0.5)' },
+          ticks: {
+            color: '#5a6178',
+            font: { family: 'JetBrains Mono', size: 10 },
+            callback: v => (v / 1000).toFixed(0) + 'K'
+          }
+        },
+        y1: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: {
+            color: '#00ccff',
+            font: { family: 'JetBrains Mono', size: 10 },
+            callback: v => v.toFixed(0) + 'B'
+          }
+        }
+      }
+    }
+  });
+}
+
+// ─── Formatters ──────────────────────────────────────────────────────
+function fmtPLS(v) {
+  if (v == null) return '--';
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function fmtAddr(a) {
+  if (!a) return '--';
+  return a.slice(0, 6) + '...' + a.slice(-4);
+}
+
+function authSpan(label, ok) {
+  if (ok === null || ok === undefined) return '';
+  const cls = ok ? 'auth-ok' : 'auth-fail';
+  const sym = ok ? 'AUTHORIZED' : 'NOT AUTH';
+  return `<div class="stat-row"><span class="stat-label">${label}</span><span class="${cls}">${ok ? '\u2713' : '\u2717'} ${sym}</span></div>`;
+}
+
+function refRow(label, addr, expected) {
+  const match = addr && expected && addr.toLowerCase() === expected.toLowerCase();
+  const cls = match ? 'ref-ok' : (addr ? 'ref-fail' : 'stat-value');
+  const sym = match ? '\u2713' : (addr ? '\u2717' : '');
+  return `<div class="stat-row"><span class="stat-label">${label}</span><span class="${cls}">${sym} ${fmtAddr(addr)}</span></div>`;
+}
+
+function tokenRows(balances) {
+  if (!balances || Object.keys(balances).length === 0) return '<div class="stat-row"><span class="stat-label">No tokens</span></div>';
+  return Object.entries(balances).map(([sym, bal]) =>
+    `<div class="stat-row"><span class="stat-label">${sym}</span><span class="stat-value">${fmtPLS(bal)}</span></div>`
+  ).join('');
+}
+
+// ─── Expected refs ───────────────────────────────────────────────────
+const V8_EXPECTED = {
+  minter_v4: '0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7',
+  minter_v3: '0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC',
+  mv:        '0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29',
+  router_v1: '0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02',
+  router_v2: '0x165C3410fC91EF562C50559f7d2289fEbed552d9',
+};
+const V8P_EXPECTED = {
+  lau:        '0x66a08aa12da955eb63d7ac121a88b2b210a07b03',
+  pay_token:  '0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D',
+  wpls:       '0xA1077a294dDE1B09bB078844df40758a5D0f9a27',
+  router_v1:  '0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02',
+  router_v2:  '0x165C3410fC91EF562C50559f7d2289fEbed552d9',
+  factory_v1: '0x1715a3E4A142d8b698131108995174F37aEBA10D',
+  factory_v2: '0x29eA7545DEf87022BAdc76323F373EA1e707C523',
+};
+
+// ─── Render overview ─────────────────────────────────────────────────
+function renderOverview(d) {
+  const w = d.wallet;
+  const g = d.gas;
+
+  // Header
+  document.getElementById('hdr-block').textContent = w.block_number ? w.block_number.toLocaleString() : '--';
+  document.getElementById('hdr-gas').textContent = g.gas_price_beats;
+  document.getElementById('hdr-bot').textContent = d.bot_online ? 'ONLINE' : 'OFFLINE';
+  document.getElementById('hdr-bot').style.color = d.bot_online ? 'var(--green)' : 'var(--red)';
+  document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString();
+
+  // Wallet
+  document.getElementById('w-pls').textContent = fmtPLS(w.pls_balance) + ' PLS';
+  const gasOk = w.gas_buffer_ok;
+  const gBuf = document.getElementById('w-gas-buf');
+  gBuf.textContent = gasOk ? '\u2713 OK (>100K)' : '\u2717 LOW';
+  gBuf.className = 'stat-value ' + (gasOk ? 'green' : 'red');
+  document.getElementById('w-addr').textContent = fmtAddr(w.address);
+
+  // Validator
+  const pct = w.validator_progress_pct || 0;
+  document.getElementById('v-fill').style.width = Math.min(pct, 100) + '%';
+  document.getElementById('v-pct').textContent = pct.toFixed(3) + '%';
+  const remaining = 32000000 - (w.pls_balance || 0);
+  document.getElementById('v-remaining').textContent = fmtPLS(remaining) + ' PLS';
+
+  // Tokens
+  const tbody = document.querySelector('#token-table tbody');
+  tbody.innerHTML = '';
+  (w.tokens || []).forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="stat-label">${t.symbol}</td><td class="stat-value">${fmtPLS(t.balance)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  // Gas
+  document.getElementById('g-price').textContent = g.gas_price_beats + ' Beats';
+  document.getElementById('g-ceil').textContent = g.gas_ceiling_beats + ' Beats';
+  const condEl = document.getElementById('g-cond');
+  condEl.textContent = g.condition.toUpperCase();
+  condEl.className = 'stat-value ' + (g.condition === 'clear' ? 'green' : g.condition === 'caution' ? 'yellow' : 'red');
+
+  // Engines
+  const eg = document.getElementById('engine-grid');
+  eg.innerHTML = '';
+  (d.engines?.engines || []).forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'engine-cell ' + (e.status || 'disabled');
+    div.innerHTML = `<div class="eid">${e.id}</div><div class="ename">${e.name}</div><div class="estatus">${e.status}</div>`;
+    eg.appendChild(div);
+  });
+
+  // TGSv8
+  if (d.tgsv8) renderTGSv8(d.tgsv8);
+  if (d.tgsv8plus) renderTGSv8Plus(d.tgsv8plus);
+}
+
+function renderTGSv8(v8) {
+  const ownerEl = document.getElementById('v8-owner');
+  ownerEl.textContent = v8.owner_is_joey ? '\u2713 Verified' : '\u2717 ' + fmtAddr(v8.owner);
+  ownerEl.className = 'stat-value ' + (v8.owner_is_joey ? 'green' : 'red');
+
+  const pausedEl = document.getElementById('v8-paused');
+  pausedEl.textContent = v8.paused ? 'PAUSED' : 'Active';
+  pausedEl.className = 'stat-value ' + (v8.paused ? 'red' : 'green');
+
+  const auth = v8.authorized || {};
+  document.getElementById('v8-auth').innerHTML =
+    authSpan('Joey', auth.joey) +
+    authSpan('Minter', auth.minter) +
+    authSpan('Seller', auth.seller);
+
+  document.getElementById('v8-nonce').textContent = v8.op_nonce;
+  document.getElementById('v8-registry').textContent = v8.registry_len + ' tokens';
+  document.getElementById('v8-batch').textContent = v8.max_batch;
+  document.getElementById('v8-pls').textContent = fmtPLS(v8.native_pls) + ' PLS';
+
+  const refs = v8.refs || {};
+  document.getElementById('v8-refs').innerHTML =
+    refRow('Minter V4', refs.minter_v4, V8_EXPECTED.minter_v4) +
+    refRow('Minter V3', refs.minter_v3, V8_EXPECTED.minter_v3) +
+    refRow('MV (WM)', refs.mv, V8_EXPECTED.mv) +
+    refRow('Router V1', refs.router_v1, V8_EXPECTED.router_v1) +
+    refRow('Router V2', refs.router_v2, V8_EXPECTED.router_v2);
+
+  document.getElementById('v8-tokens').innerHTML = tokenRows(v8.token_balances);
+}
+
+function renderTGSv8Plus(v8p) {
+  const ownerEl = document.getElementById('v8p-owner');
+  ownerEl.textContent = v8p.owner_is_joey ? '\u2713 Verified' : '\u2717 ' + fmtAddr(v8p.owner);
+  ownerEl.className = 'stat-value ' + (v8p.owner_is_joey ? 'green' : 'red');
+
+  const auth = v8p.authorized || {};
+  document.getElementById('v8p-auth').innerHTML =
+    authSpan('Joey', auth.joey) +
+    authSpan('Minter', auth.minter);
+
+  const s = v8p.stats || {};
+  document.getElementById('v8p-ops').textContent = s.op_counter || 0;
+  document.getElementById('v8p-lau-minted').textContent = fmtPLS(s.total_lau_minted);
+  document.getElementById('v8p-pay-spent').textContent = fmtPLS(s.total_pay_token_spent);
+  document.getElementById('v8p-lp-burned').textContent = fmtPLS(s.total_lp_burned);
+  document.getElementById('v8p-mintable').textContent = s.mintable_lau || 0;
+  document.getElementById('v8p-remaining').textContent = s.lau_remaining || 0;
+  document.getElementById('v8p-pls').textContent = fmtPLS(v8p.native_pls) + ' PLS';
+
+  const refs = v8p.refs || {};
+  document.getElementById('v8p-refs').innerHTML =
+    refRow('LAU (GIBS)', refs.lau, V8P_EXPECTED.lau) +
+    refRow('Pay Token', refs.pay_token, V8P_EXPECTED.pay_token) +
+    refRow('WPLS', refs.wpls, V8P_EXPECTED.wpls) +
+    refRow('Router V1', refs.router_v1, V8P_EXPECTED.router_v1) +
+    refRow('Router V2', refs.router_v2, V8P_EXPECTED.router_v2) +
+    refRow('Factory V1', refs.factory_v1, V8P_EXPECTED.factory_v1) +
+    refRow('Factory V2', refs.factory_v2, V8P_EXPECTED.factory_v2);
+
+  document.getElementById('v8p-tokens').innerHTML = tokenRows(v8p.token_balances);
+}
+
+// ─── Render history chart ────────────────────────────────────────────
+function renderHistory(data) {
+  if (!balanceChart || !data.points || data.points.length === 0) return;
+
+  const labels = data.points.map(p => {
+    const d = new Date(p.ts * 1000);
+    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+  });
+  const totals = data.points.map(p => p.total_pls);
+  const gasBeats = data.points.map(p => p.gas_beats);
+
+  balanceChart.data.labels = labels;
+  balanceChart.data.datasets[0].data = totals;
+  balanceChart.data.datasets[1].data = gasBeats;
+  balanceChart.update();
+}
+
+// ─── Fetch helpers ───────────────────────────────────────────────────
+async function fetchOverview() {
+  try {
+    const res = await fetch(API_BASE + '/api/overview');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderOverview(data);
+  } catch (e) {
+    console.error('Overview fetch failed:', e);
+  }
+}
+
+async function fetchHistory() {
+  try {
+    const res = await fetch(API_BASE + '/api/history');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderHistory(data);
+  } catch (e) {
+    console.error('History fetch failed:', e);
+  }
+}
+
+// ─── Init ────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initChart();
+  fetchOverview();
+  fetchHistory();
+  setInterval(fetchOverview, OVERVIEW_POLL);
+  setInterval(fetchHistory, HISTORY_POLL);
+});
+</script>
+</body>
+</html>
