@@ -116,7 +116,7 @@ VALIDATOR_TARGET_PLS = 32_000_000  # 32M PLS
 
 # ─── Gas ─────────────────────────────────────────────────────────────
 GAS_BUFFER_FLOOR = 100_000  # 100K PLS minimum buffer
-GAS_CEILING_BEATS = int(os.getenv("GAS_CEILING_BEATS", "50"))
+GAS_CEILING_BEATS = int(os.getenv("GAS_CEILING_BEATS", "50").replace(",", ""))
 
 # ─── Engine definitions ─────────────────────────────────────────────
 # Static metadata for each engine — runtime state comes from chain/bot
