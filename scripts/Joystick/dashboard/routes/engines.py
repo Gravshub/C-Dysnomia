@@ -20,13 +20,13 @@ logger = logging.getLogger("joystick.routes.engines")
 # When the bot is live, engine_state.json overrides these.
 KNOWN_STATES: dict[str, dict] = {
     "E1": {"status": EngineStatus.READY, "enabled": True, "roi_pct": -12.0, "total_earned_pls": 0},
-    "E2": {"status": EngineStatus.RUNNING, "enabled": True, "roi_pct": 840.0, "total_earned_pls": 24100},
+    "E2": {"status": EngineStatus.BLOCKED, "enabled": False, "error": "DSS has 0 GIBS"},
     "E3": {"status": EngineStatus.RUNNING, "enabled": True, "roi_pct": 62.0, "total_earned_pls": 8300},
     "E4": {"status": EngineStatus.RUNNING, "enabled": True, "roi_pct": 262.0, "total_earned_pls": 142000},
     "E5": {"status": EngineStatus.GATED, "enabled": False},
     "E6": {"status": EngineStatus.RECON, "enabled": False},
     "E7": {"status": EngineStatus.BLOCKED, "enabled": False},
-    "E8": {"status": EngineStatus.DESIGN, "enabled": False},
+    "E8": {"status": EngineStatus.READY, "enabled": True},
 }
 
 
