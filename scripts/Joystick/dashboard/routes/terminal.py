@@ -77,9 +77,21 @@ def _read_tail(path: Path, n: int = 100) -> list[dict]:
 
 def _format_event(ev: dict) -> str:
     """Format a JSONL event into a human-readable terminal line."""
+    from datetime import datetime, timezone, timedelta
+    _EST = timezone(timedelta(hours=-5))
+
     ts = ev.get("ts", "")
     if ts and "T" in ts:
-        ts = ts.split("T")[1][:8]  # HH:MM:SS
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            ts = dt.astimezone(_EST).strftime("%H:%M:%S")
+        except Exception:
+            ts = ts.split("T")[1][:8]
+    elif ev.get("epoch"):
+        try:
+            ts = datetime.fromtimestamp(ev["epoch"], tz=_EST).strftime("%H:%M:%S")
+        except Exception:
+            pass
 
     event_type = ev.get("event", "unknown")
     engine = ev.get("engine", "")

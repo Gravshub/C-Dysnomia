@@ -61,6 +61,8 @@
   }
   .header .status-bar span { color: var(--text-dim); }
   .header .status-bar .val { color: var(--cyan); }
+  .block-indicator { display: inline-flex; align-items: center; gap: 4px; }
+  .block-ring { vertical-align: middle; }
 
   .grid {
     display: grid;
@@ -518,7 +520,15 @@
   <h1>|>JOYSTICK<| Mission Control</h1>
   <div class="subtitle">PulseChain (369) Dashboard &mdash; Joey / Gibson / GIBS</div>
   <div class="status-bar">
-    <span>Block: <span class="val" id="hdr-block">--</span></span>
+    <span class="block-indicator">
+      <svg class="block-ring" width="18" height="18" viewBox="0 0 18 18">
+        <circle cx="9" cy="9" r="7" fill="none" stroke="var(--card-border)" stroke-width="2"/>
+        <circle id="block-ring-fill" cx="9" cy="9" r="7" fill="none" stroke="var(--green)" stroke-width="2"
+          stroke-dasharray="43.98" stroke-dashoffset="43.98" stroke-linecap="round"
+          transform="rotate(-90 9 9)" style="transition: stroke-dashoffset 0.3s linear"/>
+      </svg>
+      Block: <span class="val" id="hdr-block">--</span>
+    </span>
     <span>Gas: <span class="val" id="hdr-gas">--</span> Beats</span>
     <span>Bot: <span class="val" id="hdr-bot">--</span></span>
     <span>Updated: <span class="val" id="hdr-time">--</span></span>
@@ -786,6 +796,24 @@ function initChart() {
   });
 }
 
+// ─── Block countdown ring ────────────────────────────────────────────
+let _lastBlock = 0;
+let _blockTs = Date.now();
+const BLOCK_TIME_MS = 10000; // PulseChain ~10s blocks
+const RING_CIRCUMFERENCE = 43.98; // 2 * PI * 7
+
+function tickBlockRing() {
+  const elapsed = Date.now() - _blockTs;
+  const pct = Math.min(elapsed / BLOCK_TIME_MS, 1.0);
+  const offset = RING_CIRCUMFERENCE * (1 - pct);
+  const ring = document.getElementById('block-ring-fill');
+  if (ring) {
+    ring.style.strokeDashoffset = offset;
+    ring.style.stroke = pct >= 1.0 ? 'var(--yellow)' : 'var(--green)';
+  }
+  requestAnimationFrame(tickBlockRing);
+}
+
 // ─── Formatters ──────────────────────────────────────────────────────
 function fmtPLS(v) {
   if (v == null) return '--';
@@ -805,11 +833,18 @@ function renderOverview(d) {
   const g = d.gas;
 
   // Header
-  document.getElementById('hdr-block').textContent = w.block_number ? w.block_number.toLocaleString() : '--';
+  const newBlock = w.block_number || 0;
+  document.getElementById('hdr-block').textContent = newBlock ? newBlock.toLocaleString() : '--';
   document.getElementById('hdr-gas').textContent = g.gas_price_beats;
   document.getElementById('hdr-bot').textContent = d.bot_online ? 'ONLINE' : 'OFFLINE';
   document.getElementById('hdr-bot').style.color = d.bot_online ? 'var(--green)' : 'var(--red)';
-  document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString();
+  document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true });
+
+  // Block countdown ring — reset on new block
+  if (newBlock && newBlock !== _lastBlock) {
+    _lastBlock = newBlock;
+    _blockTs = Date.now();
+  }
 
   // Portfolio
   if (d.portfolio) renderPortfolio(d.portfolio);
@@ -1475,6 +1510,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTerminal();
   initTimeframeButtons();
   initExplorer();
+  requestAnimationFrame(tickBlockRing);
   document.getElementById('wallet-toggle').addEventListener('click', () => {
     const bd = document.getElementById('wallet-breakdown');
     const tg = document.getElementById('wallet-toggle');
