@@ -51,10 +51,18 @@ def maybe_record(snapshot: dict) -> None:
     logger.info(f"History recorded: total_pls={record['total_pls']:.2f} ({len(records)} points)")
 
 
-def get_history() -> list[dict]:
-    """Return all records within the last 24H, sorted by timestamp."""
+def get_history(span_seconds: int = None) -> list[dict]:
+    """Return records within the given time span, sorted by timestamp.
+
+    Args:
+        span_seconds: How far back to look (default: HISTORY_MAX_AGE from config).
+    """
     records = _load()
-    return _prune(records)
+    records = _prune(records)  # always prune stale data on read
+    if span_seconds is not None:
+        cutoff = time.time() - span_seconds
+        records = [r for r in records if r.get("ts", 0) >= cutoff]
+    return records
 
 
 def _prune(records: list[dict]) -> list[dict]:
