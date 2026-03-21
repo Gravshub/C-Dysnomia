@@ -75,6 +75,35 @@ class EnginesResponse(BaseModel):
     cycle_count: int = 0
 
 
+# ─── Mint economics ─────────────────────────────────────────────────
+
+class WmMintEconomics(BaseModel):
+    mint_cost_1: float = Field(description="PLS gas cost to mint 1 WM")
+    mint_cost_10: float = Field(description="PLS gas cost to mint 10 WM")
+    dex_value_1: float = Field(description="PLS received selling 1 WM on DEX")
+    dex_value_10: float = Field(description="PLS received selling 10 WM on DEX")
+
+
+class AffRouteEconomics(BaseModel):
+    name: str
+    payment_pls: float = Field(description="PLS cost of payment tokens per 1 AFF")
+    gas_pls: float = Field(description="PLS gas cost per 1 AFF (amortized)")
+    total_pls: float = Field(description="Total PLS cost per 1 AFF")
+    profitable: bool = False
+
+
+class AffMintEconomics(BaseModel):
+    dex_value: float = Field(description="PLS received selling 1 AFF on DEX")
+    cheapest_route: Optional[str] = None
+    cheapest_cost: Optional[float] = None
+    routes: list[AffRouteEconomics] = []
+
+
+class MintEconomics(BaseModel):
+    wm: WmMintEconomics = WmMintEconomics()
+    aff: AffMintEconomics = AffMintEconomics()
+
+
 # ─── Gas ─────────────────────────────────────────────────────────────
 
 class GasResponse(BaseModel):
@@ -86,6 +115,7 @@ class GasResponse(BaseModel):
         None, description="Gas price at which AFF generate becomes unprofitable"
     )
     block_number: int = 0
+    mint: Optional[MintEconomics] = Field(None, description="Live WM + AFF mint costs")
 
 
 # ─── Strategy ────────────────────────────────────────────────────────

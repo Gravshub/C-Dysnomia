@@ -349,6 +349,126 @@
     margin-bottom: 4px;
   }
 
+  /* ─── Chain Explorer ─────────────────────────────────────────────── */
+  .explorer-bar {
+    margin-bottom: 12px;
+  }
+  .explorer-input-row {
+    display: flex;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    background: #050709;
+    align-items: center;
+  }
+  .explorer-prompt {
+    padding: 8px 4px 8px 12px;
+    color: var(--cyan);
+    font-weight: 700;
+    font-size: 12px;
+    user-select: none;
+  }
+  .explorer-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 8px 8px 4px;
+    caret-color: var(--cyan);
+  }
+  .explorer-input::placeholder { color: var(--text-dim); opacity: 0.5; }
+  .explorer-go {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 4px 14px;
+    margin: 4px 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .explorer-go:hover { background: var(--cyan); color: var(--bg); }
+  .explorer-bookmarks {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .explorer-bm {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .explorer-bm:hover { color: var(--text); border-color: var(--text-dim); }
+  .explorer-bm.active { background: var(--cyan); color: var(--bg); font-weight: 700; border-color: var(--cyan); }
+  .explorer-results {
+    background: #050709;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    min-height: 120px;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .explorer-empty { color: var(--text-dim); font-style: italic; }
+  .explorer-loading { color: var(--cyan); }
+  .explorer-error { color: var(--red); }
+  .explorer-section {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(26,31,46,0.3);
+  }
+  .explorer-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .explorer-section-title {
+    color: var(--cyan);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .explorer-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+  .explorer-key { color: var(--text-dim); }
+  .explorer-val { color: var(--text); font-weight: 500; }
+  .explorer-val.green { color: var(--green); }
+  .explorer-val.red { color: var(--red); }
+  .explorer-val.cyan { color: var(--cyan); }
+  .explorer-val.yellow { color: var(--yellow); }
+  .explorer-addr {
+    color: var(--cyan);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .explorer-addr:hover { text-decoration: underline; }
+  .explorer-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .explorer-badge.eoa { background: var(--card-border); color: var(--text-dim); }
+  .explorer-badge.contract { background: rgba(0,204,255,0.15); color: var(--cyan); }
+  .explorer-badge.success { background: rgba(0,255,136,0.15); color: var(--green); }
+  .explorer-badge.reverted { background: rgba(255,68,68,0.15); color: var(--red); }
+  .explorer-badge.pending { background: rgba(255,204,0,0.15); color: var(--yellow); }
+
   @media (max-width: 768px) {
     .card-wide { grid-column: span 1; }
     .grid { grid-template-columns: 1fr; }
@@ -370,9 +490,9 @@
 
 <div class="grid">
 
-  <!-- Gas Conditions (first) -->
+  <!-- Gas & Mint Economics -->
   <div class="card">
-    <div class="card-title">Gas Conditions</div>
+    <div class="card-title">Gas &amp; Mint Economics</div>
     <div class="stat-row">
       <span class="stat-label">Gas Price</span>
       <span class="stat-value" id="g-price">--</span>
@@ -384,6 +504,37 @@
     <div class="stat-row">
       <span class="stat-label">Condition</span>
       <span class="stat-value" id="g-cond">--</span>
+    </div>
+    <div class="contract-section" style="margin-top:8px">
+      <div class="contract-label">WM Mint</div>
+      <div class="stat-row">
+        <span class="stat-label">Mint 1 WM</span>
+        <span class="stat-value" id="m-wm1">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Mint 10 WM</span>
+        <span class="stat-value" id="m-wm10">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">DEX Value (1)</span>
+        <span class="stat-value" id="m-wm-dex1">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">DEX Value (10)</span>
+        <span class="stat-value" id="m-wm-dex10">--</span>
+      </div>
+    </div>
+    <div class="contract-section">
+      <div class="contract-label">AFFECTION Mint</div>
+      <div class="stat-row">
+        <span class="stat-label">DEX Value</span>
+        <span class="stat-value cyan" id="m-aff-dex">--</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Best Route</span>
+        <span class="stat-value" id="m-aff-best">--</span>
+      </div>
+      <div id="m-aff-routes"></div>
     </div>
   </div>
 
@@ -477,99 +628,20 @@
     </div>
   </div>
 
-  <!-- TGSv8 Contract -->
-  <div class="card card-wide">
-    <div class="card-title">TGSv8 Contract</div>
-    <div class="contract-section">
-      <div class="contract-label">Ownership &amp; Auth</div>
-      <div class="stat-row">
-        <span class="stat-label">Owner (Joey)</span>
-        <span class="stat-value" id="v8-owner">--</span>
+  <!-- Chain Explorer -->
+  <div class="card card-full">
+    <div class="card-title">Chain Explorer</div>
+    <div class="explorer-bar">
+      <div class="explorer-input-row">
+        <span class="explorer-prompt">&gt;</span>
+        <input type="text" class="explorer-input" id="explorer-input"
+          placeholder="Paste address (0x...) or TX hash (0x...)" spellcheck="false" autocomplete="off">
+        <button class="explorer-go" id="explorer-go">Query</button>
       </div>
-      <div class="stat-row">
-        <span class="stat-label">Paused</span>
-        <span class="stat-value" id="v8-paused">--</span>
-      </div>
-      <div class="auth-check" id="v8-auth"></div>
+      <div class="explorer-bookmarks" id="explorer-bookmarks"></div>
     </div>
-    <div class="contract-section">
-      <div class="contract-label">State</div>
-      <div class="stat-row">
-        <span class="stat-label">Op Nonce</span>
-        <span class="stat-value" id="v8-nonce">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Registry</span>
-        <span class="stat-value" id="v8-registry">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Max Batch</span>
-        <span class="stat-value" id="v8-batch">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Native PLS</span>
-        <span class="stat-value cyan" id="v8-pls">--</span>
-      </div>
-    </div>
-    <div class="contract-section">
-      <div class="contract-label">References</div>
-      <div id="v8-refs"></div>
-    </div>
-    <div class="contract-section">
-      <div class="contract-label">Token Balances</div>
-      <div id="v8-tokens"></div>
-    </div>
-  </div>
-
-  <!-- TGSv8+ Contract -->
-  <div class="card card-wide">
-    <div class="card-title">TGSv8+ Contract (Companion)</div>
-    <div class="contract-section">
-      <div class="contract-label">Ownership &amp; Auth</div>
-      <div class="stat-row">
-        <span class="stat-label">Owner (Joey)</span>
-        <span class="stat-value" id="v8p-owner">--</span>
-      </div>
-      <div class="auth-check" id="v8p-auth"></div>
-    </div>
-    <div class="contract-section">
-      <div class="contract-label">Pipeline Stats</div>
-      <div class="stat-row">
-        <span class="stat-label">Op Counter</span>
-        <span class="stat-value" id="v8p-ops">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Total LAU Minted</span>
-        <span class="stat-value" id="v8p-lau-minted">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Pay Token Spent</span>
-        <span class="stat-value" id="v8p-pay-spent">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">LP Burned</span>
-        <span class="stat-value" id="v8p-lp-burned">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Mintable LAU</span>
-        <span class="stat-value cyan" id="v8p-mintable">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">LAU Remaining</span>
-        <span class="stat-value" id="v8p-remaining">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Native PLS</span>
-        <span class="stat-value cyan" id="v8p-pls">--</span>
-      </div>
-    </div>
-    <div class="contract-section">
-      <div class="contract-label">References</div>
-      <div id="v8p-refs"></div>
-    </div>
-    <div class="contract-section">
-      <div class="contract-label">Token Balances</div>
-      <div id="v8p-tokens"></div>
+    <div class="explorer-results" id="explorer-results">
+      <div class="explorer-empty">Enter an address or transaction hash above to query PulseChain.</div>
     </div>
   </div>
 
@@ -685,44 +757,7 @@ function fmtAddr(a) {
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-function authSpan(label, ok) {
-  if (ok === null || ok === undefined) return '';
-  const cls = ok ? 'auth-ok' : 'auth-fail';
-  const sym = ok ? 'AUTHORIZED' : 'NOT AUTH';
-  return `<div class="stat-row"><span class="stat-label">${label}</span><span class="${cls}">${ok ? '\u2713' : '\u2717'} ${sym}</span></div>`;
-}
 
-function refRow(label, addr, expected) {
-  const match = addr && expected && addr.toLowerCase() === expected.toLowerCase();
-  const cls = match ? 'ref-ok' : (addr ? 'ref-fail' : 'stat-value');
-  const sym = match ? '\u2713' : (addr ? '\u2717' : '');
-  return `<div class="stat-row"><span class="stat-label">${label}</span><span class="${cls}">${sym} ${fmtAddr(addr)}</span></div>`;
-}
-
-function tokenRows(balances) {
-  if (!balances || Object.keys(balances).length === 0) return '<div class="stat-row"><span class="stat-label">No tokens</span></div>';
-  return Object.entries(balances).map(([sym, bal]) =>
-    `<div class="stat-row"><span class="stat-label">${sym}</span><span class="stat-value">${fmtPLS(bal)}</span></div>`
-  ).join('');
-}
-
-// ─── Expected refs ───────────────────────────────────────────────────
-const V8_EXPECTED = {
-  minter_v4: '0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7',
-  minter_v3: '0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC',
-  mv:        '0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29',
-  router_v1: '0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02',
-  router_v2: '0x165C3410fC91EF562C50559f7d2289fEbed552d9',
-};
-const V8P_EXPECTED = {
-  lau:        '0x66a08aa12da955eb63d7ac121a88b2b210a07b03',
-  pay_token:  '0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D',
-  wpls:       '0xA1077a294dDE1B09bB078844df40758a5D0f9a27',
-  router_v1:  '0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02',
-  router_v2:  '0x165C3410fC91EF562C50559f7d2289fEbed552d9',
-  factory_v1: '0x1715a3E4A142d8b698131108995174F37aEBA10D',
-  factory_v2: '0x29eA7545DEf87022BAdc76323F373EA1e707C523',
-};
 
 // ─── Render overview ─────────────────────────────────────────────────
 function renderOverview(d) {
@@ -767,6 +802,9 @@ function renderOverview(d) {
   condEl.textContent = g.condition.toUpperCase();
   condEl.className = 'stat-value ' + (g.condition === 'clear' ? 'green' : g.condition === 'caution' ? 'yellow' : 'red');
 
+  // Mint economics
+  if (g.mint) renderMintEconomics(g.mint);
+
   // Engines
   _lastEngines = d.engines?.engines || [];
   const eg = document.getElementById('engine-grid');
@@ -780,72 +818,209 @@ function renderOverview(d) {
     eg.appendChild(div);
   });
 
-  // TGSv8
-  if (d.tgsv8) renderTGSv8(d.tgsv8);
-  if (d.tgsv8plus) renderTGSv8Plus(d.tgsv8plus);
 }
 
-function renderTGSv8(v8) {
-  const ownerEl = document.getElementById('v8-owner');
-  ownerEl.textContent = v8.owner_is_joey ? '\u2713 Verified' : '\u2717 ' + fmtAddr(v8.owner);
-  ownerEl.className = 'stat-value ' + (v8.owner_is_joey ? 'green' : 'red');
+// ─── Mint Economics ──────────────────────────────────────────────────
+function renderMintEconomics(m) {
+  const wm = m.wm || {};
+  const aff = m.aff || {};
 
-  const pausedEl = document.getElementById('v8-paused');
-  pausedEl.textContent = v8.paused ? 'PAUSED' : 'Active';
-  pausedEl.className = 'stat-value ' + (v8.paused ? 'red' : 'green');
+  // WM: mint cost vs DEX value — green if profitable, red if not
+  const wm1Prof = wm.dex_value_1 > wm.mint_cost_1;
+  const wm10Prof = wm.dex_value_10 > wm.mint_cost_10;
+  const el = (id, val, cls) => {
+    const e = document.getElementById(id);
+    e.textContent = val;
+    e.className = 'stat-value ' + (cls || '');
+  };
+  el('m-wm1', fmtPLS(wm.mint_cost_1) + ' PLS', wm1Prof ? 'green' : 'red');
+  el('m-wm10', fmtPLS(wm.mint_cost_10) + ' PLS', wm10Prof ? 'green' : 'red');
+  el('m-wm-dex1', fmtPLS(wm.dex_value_1) + ' PLS', 'cyan');
+  el('m-wm-dex10', fmtPLS(wm.dex_value_10) + ' PLS', 'cyan');
 
-  const auth = v8.authorized || {};
-  document.getElementById('v8-auth').innerHTML =
-    authSpan('Joey', auth.joey) +
-    authSpan('Minter', auth.minter) +
-    authSpan('Seller', auth.seller);
+  // AFF DEX value
+  el('m-aff-dex', fmtPLS(aff.dex_value) + ' PLS/AFF', '');
 
-  document.getElementById('v8-nonce').textContent = v8.op_nonce;
-  document.getElementById('v8-registry').textContent = v8.registry_len + ' tokens';
-  document.getElementById('v8-batch').textContent = v8.max_batch;
-  document.getElementById('v8-pls').textContent = fmtPLS(v8.native_pls) + ' PLS';
+  // Best route
+  if (aff.cheapest_route) {
+    const prof = aff.cheapest_cost < aff.dex_value;
+    el('m-aff-best', aff.cheapest_route + ' @ ' + fmtPLS(aff.cheapest_cost) + ' PLS', prof ? 'green' : 'yellow');
+  } else {
+    el('m-aff-best', 'No routes', 'red');
+  }
 
-  const refs = v8.refs || {};
-  document.getElementById('v8-refs').innerHTML =
-    refRow('Minter V4', refs.minter_v4, V8_EXPECTED.minter_v4) +
-    refRow('Minter V3', refs.minter_v3, V8_EXPECTED.minter_v3) +
-    refRow('MV (WM)', refs.mv, V8_EXPECTED.mv) +
-    refRow('Router V1', refs.router_v1, V8_EXPECTED.router_v1) +
-    refRow('Router V2', refs.router_v2, V8_EXPECTED.router_v2);
-
-  document.getElementById('v8-tokens').innerHTML = tokenRows(v8.token_balances);
+  // All routes
+  const routesEl = document.getElementById('m-aff-routes');
+  if (aff.routes && aff.routes.length > 0) {
+    const sorted = [...aff.routes].sort((a, b) => a.total_pls - b.total_pls);
+    routesEl.innerHTML = sorted.map(r => {
+      const cls = r.profitable ? 'green' : '';
+      return `<div class="stat-row"><span class="stat-label" style="font-size:10px">${r.name}</span><span class="stat-value ${cls}" style="font-size:10px">${fmtPLS(r.total_pls)} PLS</span></div>`;
+    }).join('');
+  }
 }
 
-function renderTGSv8Plus(v8p) {
-  const ownerEl = document.getElementById('v8p-owner');
-  ownerEl.textContent = v8p.owner_is_joey ? '\u2713 Verified' : '\u2717 ' + fmtAddr(v8p.owner);
-  ownerEl.className = 'stat-value ' + (v8p.owner_is_joey ? 'green' : 'red');
+// ─── Chain Explorer ──────────────────────────────────────────────────
+const EXPLORER_BOOKMARKS = [
+  { label: 'TGSv8', addr: '0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32' },
+  { label: 'TGSv8+', addr: '0xA5D7771f16204d26770657eac186A6167e69e736' },
+  { label: 'GIBS LAU', addr: '0x66a08aa12da955eb63d7ac121a88b2b210a07b03' },
+  { label: 'DSS', addr: '0x91Df693177eE5C81016d0B7c4c2052A7d229c031' },
+  { label: 'GIBS QING', addr: '0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35' },
+  { label: 'AFFECTION', addr: '0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D' },
+  { label: 'Joey', addr: '0x17367877aF5A8D0Eb33ba5689A880f696386E24D' },
+];
 
-  const auth = v8p.authorized || {};
-  document.getElementById('v8p-auth').innerHTML =
-    authSpan('Joey', auth.joey) +
-    authSpan('Minter', auth.minter);
+let _explorerActive = null;
 
-  const s = v8p.stats || {};
-  document.getElementById('v8p-ops').textContent = s.op_counter || 0;
-  document.getElementById('v8p-lau-minted').textContent = fmtPLS(s.total_lau_minted);
-  document.getElementById('v8p-pay-spent').textContent = fmtPLS(s.total_pay_token_spent);
-  document.getElementById('v8p-lp-burned').textContent = fmtPLS(s.total_lp_burned);
-  document.getElementById('v8p-mintable').textContent = s.mintable_lau || 0;
-  document.getElementById('v8p-remaining').textContent = s.lau_remaining || 0;
-  document.getElementById('v8p-pls').textContent = fmtPLS(v8p.native_pls) + ' PLS';
+function initExplorer() {
+  const bmContainer = document.getElementById('explorer-bookmarks');
+  EXPLORER_BOOKMARKS.forEach(bm => {
+    const btn = document.createElement('button');
+    btn.className = 'explorer-bm';
+    btn.textContent = bm.label;
+    btn.title = bm.addr;
+    btn.addEventListener('click', () => {
+      document.getElementById('explorer-input').value = bm.addr;
+      explorerQuery(bm.addr);
+    });
+    bmContainer.appendChild(btn);
+  });
 
-  const refs = v8p.refs || {};
-  document.getElementById('v8p-refs').innerHTML =
-    refRow('LAU (GIBS)', refs.lau, V8P_EXPECTED.lau) +
-    refRow('Pay Token', refs.pay_token, V8P_EXPECTED.pay_token) +
-    refRow('WPLS', refs.wpls, V8P_EXPECTED.wpls) +
-    refRow('Router V1', refs.router_v1, V8P_EXPECTED.router_v1) +
-    refRow('Router V2', refs.router_v2, V8P_EXPECTED.router_v2) +
-    refRow('Factory V1', refs.factory_v1, V8P_EXPECTED.factory_v1) +
-    refRow('Factory V2', refs.factory_v2, V8P_EXPECTED.factory_v2);
+  const input = document.getElementById('explorer-input');
+  const goBtn = document.getElementById('explorer-go');
+  goBtn.addEventListener('click', () => explorerQuery(input.value));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') explorerQuery(input.value);
+  });
+}
 
-  document.getElementById('v8p-tokens').innerHTML = tokenRows(v8p.token_balances);
+async function explorerQuery(q) {
+  q = (q || '').trim();
+  if (!q) return;
+
+  const el = document.getElementById('explorer-results');
+  el.innerHTML = '<div class="explorer-loading">Querying PulseChain...</div>';
+  _explorerActive = q;
+
+  // Highlight active bookmark
+  document.querySelectorAll('.explorer-bm').forEach(btn => {
+    btn.classList.toggle('active', btn.title.toLowerCase() === q.toLowerCase());
+  });
+
+  try {
+    const res = await fetch(API_BASE + '/api/explorer?q=' + encodeURIComponent(q));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.error) {
+      el.innerHTML = `<div class="explorer-error">${data.error}</div>`;
+      return;
+    }
+    if (data.type === 'address') renderExplorerAddress(data);
+    else if (data.type === 'transaction') renderExplorerTx(data);
+    else el.innerHTML = '<div class="explorer-error">Unknown response type.</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="explorer-error">Query failed: ${e.message}</div>`;
+  }
+}
+
+function explorerRow(key, val, cls) {
+  return `<div class="explorer-row"><span class="explorer-key">${key}</span><span class="explorer-val ${cls || ''}">${val}</span></div>`;
+}
+
+function explorerAddrLink(addr) {
+  if (!addr) return '--';
+  const short = fmtAddr(addr);
+  return `<span class="explorer-addr" onclick="document.getElementById('explorer-input').value='${addr}';explorerQuery('${addr}')" title="${addr}">${short}</span>`;
+}
+
+function renderExplorerAddress(d) {
+  const el = document.getElementById('explorer-results');
+  let html = '';
+
+  // Header
+  const badge = d.is_contract
+    ? '<span class="explorer-badge contract">CONTRACT</span>'
+    : '<span class="explorer-badge eoa">EOA</span>';
+  const title = d.symbol ? `${d.name || d.symbol} (${d.symbol})` : fmtAddr(d.address);
+  html += `<div class="explorer-section">`;
+  html += `<div class="explorer-section-title">Identity</div>`;
+  html += explorerRow('Address', `<span title="${d.address}" style="color:var(--cyan)">${d.address}</span>`);
+  html += explorerRow('Type', badge);
+  if (d.name) html += explorerRow('Name', d.name);
+  if (d.symbol) html += explorerRow('Symbol', d.symbol);
+  if (d.code_size) html += explorerRow('Code Size', d.code_size.toLocaleString() + ' bytes');
+  if (d.nonce !== undefined) html += explorerRow('Nonce', d.nonce.toLocaleString());
+  html += `</div>`;
+
+  // Balances
+  html += `<div class="explorer-section">`;
+  html += `<div class="explorer-section-title">Balances</div>`;
+  html += explorerRow('PLS', fmtPLS(d.pls_balance) + ' PLS', 'cyan');
+  if (d.is_erc20) {
+    html += explorerRow('Decimals', d.decimals);
+    html += explorerRow('Total Supply', fmtPLS(d.total_supply));
+    if (d.joey_balance !== undefined) {
+      html += explorerRow('Joey Holds', fmtPLS(d.joey_balance) + ' ' + (d.symbol || ''));
+    }
+  }
+  html += `</div>`;
+
+  // Owner
+  if (d.owner) {
+    html += `<div class="explorer-section">`;
+    html += `<div class="explorer-section-title">Ownership</div>`;
+    html += explorerRow('Owner', explorerAddrLink(d.owner));
+    html += `</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function renderExplorerTx(d) {
+  const el = document.getElementById('explorer-results');
+  let html = '';
+
+  // Status badge
+  const statusBadge = {
+    success: '<span class="explorer-badge success">SUCCESS</span>',
+    reverted: '<span class="explorer-badge reverted">REVERTED</span>',
+    pending: '<span class="explorer-badge pending">PENDING</span>',
+  }[d.status] || d.status;
+
+  html += `<div class="explorer-section">`;
+  html += `<div class="explorer-section-title">Transaction</div>`;
+  html += explorerRow('Hash', `<span style="color:var(--cyan);font-size:11px">${d.hash}</span>`);
+  html += explorerRow('Status', statusBadge);
+  html += explorerRow('Block', d.block ? d.block.toLocaleString() : 'pending');
+  html += `</div>`;
+
+  html += `<div class="explorer-section">`;
+  html += `<div class="explorer-section-title">Parties</div>`;
+  html += explorerRow('From', explorerAddrLink(d.from));
+  html += explorerRow('To', d.to ? explorerAddrLink(d.to) : '<span class="explorer-val yellow">Contract Creation</span>');
+  html += `</div>`;
+
+  html += `<div class="explorer-section">`;
+  html += `<div class="explorer-section-title">Value &amp; Gas</div>`;
+  html += explorerRow('Value', fmtPLS(d.value_pls) + ' PLS', d.value_pls > 0 ? 'cyan' : '');
+  html += explorerRow('Gas Limit', d.gas_limit ? d.gas_limit.toLocaleString() : '--');
+  html += explorerRow('Gas Used', d.gas_used ? d.gas_used.toLocaleString() : '--');
+  html += explorerRow('Gas Price', d.gas_price_beats + ' Beats');
+  html += explorerRow('Gas Cost', d.gas_cost_pls ? fmtPLS(d.gas_cost_pls) + ' PLS' : '--');
+  html += `</div>`;
+
+  if (d.method_selector || d.log_count) {
+    html += `<div class="explorer-section">`;
+    html += `<div class="explorer-section-title">Execution</div>`;
+    if (d.method_selector) html += explorerRow('Method', `<code>${d.method_selector}</code>`);
+    if (d.input_size) html += explorerRow('Input Data', d.input_size + ' bytes');
+    if (d.log_count !== undefined) html += explorerRow('Event Logs', d.log_count);
+    html += explorerRow('Nonce', d.nonce);
+    html += `</div>`;
+  }
+
+  el.innerHTML = html;
 }
 
 // ─── Render history chart ────────────────────────────────────────────
@@ -1076,7 +1251,7 @@ function renderEngineInfo(eid) {
   // Fetch engine-specific logs via REST
   const logName = {
     E1: 'arb', E2: 'dss', E3: 'beat', E4: 'tokenfactory',
-    E5: 'lau', E6: 'joystick_events', E7: 'joystick_events', E8: 'joystick_events'
+    E5: 'lau', E6: 'treasurysniper', E7: 'spinerunner', E8: 'phr3ak'
   }[eid] || 'joystick_events';
 
   fetch(API_BASE + `/api/logs?n=25&engine=${logName}`)
@@ -1084,7 +1259,7 @@ function renderEngineInfo(eid) {
     .then(data => {
       termEl.innerHTML = '';
       if (!data.lines || data.lines.length === 0) {
-        appendLine(`No logs for ${logName}. Run 'bot status' in the main terminal.`, 't-system');
+        appendLine(`No events yet for ${eid}. Engine has not executed.`, 't-system');
         return;
       }
       data.lines.forEach(l => appendLine(l.text, 't-log'));
@@ -1212,6 +1387,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initChart();
   initTerminal();
   initTimeframeButtons();
+  initExplorer();
   document.getElementById('ed-close').addEventListener('click', () => {
     document.getElementById('engine-detail').classList.remove('visible');
     document.querySelectorAll('.engine-cell').forEach(c => c.classList.remove('selected'));
