@@ -341,20 +341,37 @@ HELP_TEXT = """
   gas                Gas conditions
   tgsv8              TGSv8 contract state
 
+ ── Engines (dry-run, add --live) ───
+  bot razor          E1 Cross-DEX arb scan
+  bot cereal         E2 GIBS harvest
+  bot beat           E3 Territory Beat
+  bot factory        E4 AFF/WM mint
+  bot lau            E5 ABUPRU state loop
+  bot davinci        E6 Treasury sniper
+  bot backbone       E7 Spine runner
+  bot phreak         E8 Web weaver
+
  ── Bot Control ─────────────────────
-  bot cycle          Dry-run one cycle (no TXs)
-  bot cycle --live   Live-fire one cycle (real TXs!)
-  bot status         Bot engine/strategist status
-  bot wallet-status  3-wallet balances + auth + nonces
-  bot rpc-status     RPC provider health check
+  bot cycle          Dry-run one full cycle
+  bot cycle --live   Live-fire one cycle
+  bot status         Engine/strategist status
+  bot wallet-status  3-wallet balances + auth
+  bot rpc-status     RPC provider health
   bot log-status     Event log statistics
-  bot beat           Run Beat engine only (dry-run)
-  bot beat --live    Run Beat engine only (live)
-  bot lau            Run LAU engine only (dry-run)
-  bot lau --live     Run LAU engine only (live)
-  bot e4-test        Force E4 TokenFactory test cycle
   bot run            Start bot loop (background)
   bot stop           Stop background bot
+
+ ── Recon (read-only) ───────────────
+  recon arb          Scan 272 QINGs for arb opps
+  recon aff          AFF + WM profitability check
+  recon beat         Beat prerequisites
+  recon tgsv8        TGSv8 state verification
+  recon pairs        GIBS LP pair discovery
+  recon players      Active player scan
+  recon crows        CROWS bouncer analysis
+  recon shio         SHIO availability + pricing
+  recon void         VOID active users
+  recon fornax       Fornax whale mapping
 
  ── Logs ────────────────────────────
   logs [N]           Last N events (default 20)
@@ -369,13 +386,6 @@ HELP_TEXT = """
   test tgsv8         TGSv8+ contract tests
   test razor         RAZOR PulseChain tests
   test <file.py>     Run specific test file
-
- ── Recon (read-only) ───────────────
-  recon tgsv8        TGSv8 deployment verification
-  recon arb          Scan 272 QINGs for arb routes
-  recon pairs        Discover GIBS LP pairs
-  recon beat         Beat prerequisites check
-  recon players      Active player scan
 
  ── Tools ───────────────────────────
   run <script.py>    Run a script from scripts/
@@ -602,6 +612,19 @@ async def _cmd_logs(ws: WebSocket, parts: list, now: float):
 _BOT_MODULE = "scripts.Joystick.bot"
 
 
+async def _run_engine(ws: WebSocket, engine_name: str, label: str, is_live: bool, now: float):
+    """Run a specific engine via --engine flag."""
+    flags = ["--engine", engine_name]
+    if not is_live:
+        flags.append("--dry-run")
+    mode = "LIVE" if is_live else "dry-run"
+    if is_live:
+        await ws.send_json({"type": "system", "ts": now,
+                            "text": f"⚠ LIVE MODE — {label} will send real transactions!"})
+    cmd = [_PYTHON, "-m", _BOT_MODULE] + flags
+    await _run_script(ws, cmd, f"{label} ({mode})", timeout=180)
+
+
 async def _cmd_bot(ws: WebSocket, parts: list, now: float):
     """Bot control commands."""
     sub = parts[1].lower() if len(parts) >= 2 else "help"
@@ -616,11 +639,18 @@ async def _cmd_bot(ws: WebSocket, parts: list, now: float):
   bot wallet-status  3-wallet balances + auth
   bot rpc-status     RPC provider health
   bot log-status     Event log statistics
-  bot beat           Beat engine (dry-run)
-  bot beat --live    Beat engine (live)
-  bot lau            LAU engine (dry-run)
-  bot lau --live     LAU engine (live)
-  bot e4-test        Force E4 test cycle
+
+ ── Per-Engine (dry-run, add --live) ──
+  bot razor          E1 Cross-DEX arb scan
+  bot cereal         E2 GIBS harvest
+  bot beat           E3 Territory Beat
+  bot factory        E4 AFF/WM mint
+  bot lau            E5 ABUPRU state loop
+  bot davinci        E6 Treasury sniper
+  bot backbone       E7 Spine runner
+  bot phreak         E8 Web weaver
+
+ ── Control ─────────────────────────
   bot run            Start bot loop (background)
   bot stop           Stop background bot
 ─────────────────────────────────────""".strip()})
@@ -674,9 +704,22 @@ async def _cmd_bot(ws: WebSocket, parts: list, now: float):
         cmd = [_PYTHON, "-m", _BOT_MODULE] + flags
         await _run_script(ws, cmd, label, timeout=180)
 
-    elif sub in ("e4-test", "e4", "factory-test"):
-        cmd = [_PYTHON, "-m", _BOT_MODULE, "--force-test", "--dry-run", "--once"]
-        await _run_script(ws, cmd, "E4 TokenFactory Test", timeout=180)
+    elif sub in ("razor", "e1"):
+        await _run_engine(ws, "Arb", "E1 RAZOR", is_live, now)
+    elif sub in ("cereal", "dss", "e2"):
+        await _run_engine(ws, "DSS", "E2 CEREAL", is_live, now)
+    elif sub in ("factory", "e4", "e4-test", "factory-test"):
+        if sub in ("e4-test", "factory-test"):
+            cmd = [_PYTHON, "-m", _BOT_MODULE, "--force-test", "--dry-run", "--once"]
+            await _run_script(ws, cmd, "E4 TokenFactory Test", timeout=180)
+        else:
+            await _run_engine(ws, "TokenFactory", "E4 FACTORY", is_live, now)
+    elif sub in ("davinci", "treasury", "e6"):
+        await _run_engine(ws, "TreasurySniper", "E6 DaVINCI", is_live, now)
+    elif sub in ("backbone", "spine", "e7"):
+        await _run_engine(ws, "SpineRunner", "E7 BACKBONE", is_live, now)
+    elif sub in ("phreak", "e8"):
+        await _run_engine(ws, "PHR3AK", "E8 PHR3AK", is_live, now)
 
     elif sub == "run":
         # Start bot as a background process
@@ -779,12 +822,15 @@ async def _cmd_test(ws: WebSocket, parts: list, now: float):
 # ── Recon commands ───────────────────────────────────────────────────
 
 _RECON_SCRIPTS = {
-    "tgsv8":   ("scripts/Joystick/tools/tgsv8_recon.py", "TGSv8 Recon"),
-    "arb":     ("scripts/scan_lau_arb.py",                "QING Arb Scanner"),
-    "beat":    ("scripts/beat_recon.py",                   "Beat Prerequisites"),
-    "players": ("scripts/player_recon.py",                 "Player Scanner"),
-    "crows":   ("scripts/crows_recon.py",                  "CROWS Recon"),
-    "shio":    ("scripts/shio_acquisition_recon.py",       "SHIO Acquisition Recon"),
+    "tgsv8":     ("scripts/Joystick/tools/tgsv8_recon.py",       "TGSv8 Recon"),
+    "arb":       ("scripts/scan_lau_arb.py",                      "QING Arb Scanner (272 venues)"),
+    "beat":      ("scripts/beat_recon.py",                         "Beat Prerequisites"),
+    "players":   ("scripts/player_recon.py",                       "Player Scanner"),
+    "crows":     ("scripts/crows_recon.py",                        "CROWS Recon"),
+    "shio":      ("scripts/shio_acquisition_recon.py",             "SHIO Acquisition Recon"),
+    "aff":       ("scripts/Joystick/tools/test_aff_wm_cycle.py",  "AFF + WM Profitability"),
+    "void":      ("scripts/void_scan.py",                          "VOID Active Users"),
+    "fornax":    ("scripts/fornax_holders_recon.py",               "Fornax Whale Mapping"),
 }
 
 

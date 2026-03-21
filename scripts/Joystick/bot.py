@@ -570,6 +570,8 @@ def main() -> None:
                         help="Show 3-wallet balances, auth status, nonces")
     parser.add_argument("--force-test", action="store_true",
                         help="Force one E4 TokenFactory diagnostic cycle (bypasses ROI threshold)")
+    parser.add_argument("--engine", type=str, default="",
+                        help="Run a specific engine by name (e.g. --engine Arb, --engine PHR3AK)")
     args = parser.parse_args()
 
     if args.rpc_status:
@@ -640,6 +642,30 @@ def main() -> None:
         result = engine.execute(dry_run=args.dry_run)
         _events.log_engine_result("LAU", result)
         print(f"LAU result: success={result.success} gas={result.gas_pls:.4f} PLS "
+              f"txs={len(result.tx_hashes)} notes={result.notes}")
+        return
+
+    if args.engine:
+        target = args.engine.strip()
+        engine = None
+        for e in bot.engines:
+            if e.name.lower() == target.lower() or e.display_name.lower().startswith(target.lower()):
+                engine = e
+                break
+        if not engine:
+            print(f"Unknown engine: {target}")
+            print(f"Available: {', '.join(e.name for e in bot.engines)}")
+            return
+        print(f"Running {engine.display_name} ({'dry-run' if args.dry_run else 'LIVE'})...")
+        print(f"  Ready: {engine.is_ready()}")
+        try:
+            sim_profit, sim_gas = engine.simulate()
+            print(f"  Simulate: profit={sim_profit/1e18:.4f} PLS, gas={sim_gas/1e18:.4f} PLS")
+        except Exception as e:
+            print(f"  Simulate: {e}")
+        result = engine.execute(dry_run=args.dry_run)
+        _events.log_engine_result(engine.name, result)
+        print(f"  Result: success={result.success} net={result.net_pls:.4f} PLS "
               f"txs={len(result.tx_hashes)} notes={result.notes}")
         return
 
