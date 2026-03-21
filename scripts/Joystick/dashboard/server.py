@@ -12,6 +12,8 @@ Or from the repo root:
 import logging
 import os
 import uvicorn
+from dotenv import load_dotenv
+load_dotenv("/opt/joystick/.env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
