@@ -145,4 +145,4 @@ TX_LOG_FILE = os.path.join(BOT_DATA_DIR, "tx_log.json") if BOT_DATA_DIR else ""
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), "data")
 HISTORY_FILE = os.path.join(HISTORY_DIR, "balance_history.json")
 HISTORY_RECORD_INTERVAL = 900   # 15 minutes
-HISTORY_MAX_AGE = 86400         # 24 hours
+HISTORY_MAX_AGE = 604800        # 7 days (1 week)

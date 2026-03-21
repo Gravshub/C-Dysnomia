@@ -229,6 +229,113 @@
   .ws-connected { color: var(--green); }
   .ws-disconnected { color: var(--red); }
 
+  /* ─── Timeframe selector ───────────────────────────────────────── */
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .timeframe-btns {
+    display: flex;
+    gap: 4px;
+  }
+  .tf-btn {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tf-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .tf-btn.active { background: var(--green); color: var(--bg); font-weight: 700; }
+
+  /* ─── Engine detail panels ─────────────────────────────────────── */
+  .engine-cell { cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
+  .engine-cell:hover { border-color: var(--text-dim); }
+  .engine-cell.selected { border-color: var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.15); }
+
+  .engine-detail {
+    display: none;
+    margin-top: 12px;
+    background: #050709;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .engine-detail.visible { display: block; }
+
+  .engine-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--card-border);
+    background: var(--card-bg);
+  }
+  .engine-detail-title {
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .engine-detail-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  .engine-detail-close:hover { color: var(--red); }
+
+  .engine-detail-body {
+    display: flex;
+    height: 250px;
+  }
+  .engine-detail-info {
+    width: 280px;
+    min-width: 280px;
+    padding: 10px 12px;
+    border-right: 1px solid var(--card-border);
+    overflow-y: auto;
+    font-size: 11px;
+  }
+  .engine-detail-info .stat-row { padding: 2px 0; }
+  .engine-detail-info .section-label {
+    color: var(--cyan);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-top: 8px;
+    margin-bottom: 4px;
+  }
+  .engine-detail-info .section-label:first-child { margin-top: 0; }
+  .engine-detail-term {
+    flex: 1;
+    padding: 8px 12px;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .engine-detail-term .t-system { color: var(--cyan); }
+  .engine-detail-term .t-result { color: var(--green); }
+  .engine-detail-term .t-error { color: var(--red); }
+  .engine-detail-term .t-cmd { color: var(--yellow); }
+  .engine-detail-term .t-log { color: var(--text-dim); }
+
+  @media (max-width: 768px) {
+    .engine-detail-body { flex-direction: column; height: auto; }
+    .engine-detail-info { width: 100%; min-width: auto; border-right: none; border-bottom: 1px solid var(--card-border); }
+    .engine-detail-term { height: 200px; }
+  }
+
   .contract-section {
     margin-bottom: 12px;
     padding-bottom: 8px;
@@ -263,9 +370,26 @@
 
 <div class="grid">
 
-  <!-- Wallet -->
+  <!-- Gas Conditions (first) -->
   <div class="card">
-    <div class="card-title">Joey Wallet</div>
+    <div class="card-title">Gas Conditions</div>
+    <div class="stat-row">
+      <span class="stat-label">Gas Price</span>
+      <span class="stat-value" id="g-price">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Ceiling</span>
+      <span class="stat-value" id="g-ceil">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Condition</span>
+      <span class="stat-value" id="g-cond">--</span>
+    </div>
+  </div>
+
+  <!-- Wallet Holdings (merged wallet + tokens) -->
+  <div class="card">
+    <div class="card-title">Wallet Holdings</div>
     <div class="stat-row">
       <span class="stat-label">PLS Balance</span>
       <span class="stat-value green" id="w-pls">--</span>
@@ -274,7 +398,10 @@
       <span class="stat-label">Gas Buffer</span>
       <span class="stat-value" id="w-gas-buf">--</span>
     </div>
-    <div class="stat-row">
+    <table class="token-table" id="token-table" style="margin-top:8px">
+      <tbody></tbody>
+    </table>
+    <div class="stat-row" style="margin-top:6px; border-top:1px solid var(--card-border); padding-top:6px">
       <span class="stat-label">Address</span>
       <span class="stat-value" style="font-size:10px" id="w-addr">--</span>
     </div>
@@ -297,6 +424,25 @@
     </div>
   </div>
 
+  <!-- Balance History Chart (with timeframe selector) -->
+  <div class="card card-full">
+    <div class="chart-header">
+      <div class="card-title" style="margin-bottom:0; padding-bottom:0; border-bottom:none">Balance History</div>
+      <div class="timeframe-btns" id="tf-btns">
+        <button class="tf-btn" data-span="10m">10m</button>
+        <button class="tf-btn" data-span="1h">1H</button>
+        <button class="tf-btn" data-span="3h">3H</button>
+        <button class="tf-btn" data-span="6h">6H</button>
+        <button class="tf-btn" data-span="12h">12H</button>
+        <button class="tf-btn active" data-span="24h">24H</button>
+        <button class="tf-btn" data-span="1w">1W</button>
+      </div>
+    </div>
+    <div class="chart-container">
+      <canvas id="balance-chart"></canvas>
+    </div>
+  </div>
+
   <!-- Terminal -->
   <div class="card card-full">
     <div class="card-title">
@@ -315,43 +461,20 @@
     </div>
   </div>
 
-  <!-- 24H Balance History Chart -->
-  <div class="card card-full">
-    <div class="card-title">24H Balance History</div>
-    <div class="chart-container">
-      <canvas id="balance-chart"></canvas>
-    </div>
-  </div>
-
-  <!-- Token Holdings -->
-  <div class="card">
-    <div class="card-title">Token Holdings</div>
-    <table class="token-table" id="token-table">
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <!-- Gas -->
-  <div class="card">
-    <div class="card-title">Gas Conditions</div>
-    <div class="stat-row">
-      <span class="stat-label">Gas Price</span>
-      <span class="stat-value" id="g-price">--</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Ceiling</span>
-      <span class="stat-value" id="g-ceil">--</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Condition</span>
-      <span class="stat-value" id="g-cond">--</span>
-    </div>
-  </div>
-
   <!-- Engines -->
   <div class="card card-full">
     <div class="card-title">Engines</div>
     <div class="engine-grid" id="engine-grid"></div>
+    <div class="engine-detail" id="engine-detail">
+      <div class="engine-detail-header">
+        <span class="engine-detail-title" id="ed-title">--</span>
+        <button class="engine-detail-close" id="ed-close">&times;</button>
+      </div>
+      <div class="engine-detail-body">
+        <div class="engine-detail-info" id="ed-info"></div>
+        <div class="engine-detail-term" id="ed-term"></div>
+      </div>
+    </div>
   </div>
 
   <!-- TGSv8 Contract -->
@@ -457,6 +580,7 @@
 const API_BASE = window.location.origin;
 const OVERVIEW_POLL = 15000;   // 15s
 const HISTORY_POLL  = 300000;  // 5 min
+let currentSpan = '24h';
 
 // ─── Chart setup ─────────────────────────────────────────────────────
 let balanceChart = null;
@@ -644,12 +768,15 @@ function renderOverview(d) {
   condEl.className = 'stat-value ' + (g.condition === 'clear' ? 'green' : g.condition === 'caution' ? 'yellow' : 'red');
 
   // Engines
+  _lastEngines = d.engines?.engines || [];
   const eg = document.getElementById('engine-grid');
   eg.innerHTML = '';
-  (d.engines?.engines || []).forEach(e => {
+  _lastEngines.forEach(e => {
     const div = document.createElement('div');
-    div.className = 'engine-cell ' + (e.status || 'disabled');
+    div.className = 'engine-cell ' + (e.status || 'disabled') + (selectedEngine === e.id ? ' selected' : '');
+    div.setAttribute('data-eid', e.id);
     div.innerHTML = `<div class="eid">${e.id}</div><div class="ename">${e.name}</div><div class="estatus">${e.status}</div>`;
+    div.addEventListener('click', () => openEngineDetail(e.id));
     eg.appendChild(div);
   });
 
@@ -752,7 +879,7 @@ async function fetchOverview() {
 
 async function fetchHistory() {
   try {
-    const res = await fetch(API_BASE + '/api/history');
+    const res = await fetch(API_BASE + '/api/history?span=' + currentSpan);
     if (!res.ok) return;
     const data = await res.json();
     renderHistory(data);
@@ -760,6 +887,236 @@ async function fetchHistory() {
     console.error('History fetch failed:', e);
   }
 }
+
+function initTimeframeButtons() {
+  document.querySelectorAll('.tf-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSpan = btn.dataset.span;
+      fetchHistory();
+    });
+  });
+}
+
+// ─── Engine Detail Panels ────────────────────────────────────────────
+const ENGINE_META = {
+  E1: {
+    title: 'E1 RAZOR — Cross-DEX Arbitrage',
+    wallet: 'Seller',
+    info: [
+      { section: 'Mechanics' },
+      { label: 'Contract', value: 'TGSv8.atomicArb()' },
+      { label: 'Modes', value: 'Purchase / CrossDex / CrossPair' },
+      { label: 'Gas Est.', value: '350-500K gas' },
+      { section: 'Prerequisites' },
+      { label: 'AFF', value: '≥ 1 (Purchase mode)' },
+      { label: 'PLS', value: '≥ 10 (CrossDex mode)' },
+    ],
+    commands: ['logs engine arb', 'recon arb'],
+  },
+  E2: {
+    title: 'E2 CEREAL — GIBS Harvest',
+    wallet: 'Joey',
+    info: [
+      { section: 'Mechanics' },
+      { label: 'Pipeline', value: '2-TX: prime → harvestCycle' },
+      { label: 'Yield', value: '17 GIBS/cycle → swap to PLS' },
+      { label: 'Gas Est.', value: '~600K (2 TXs, ~307 PLS)' },
+      { section: 'Prerequisites' },
+      { label: 'TGSv8+', value: 'Deployed + authorized' },
+      { label: 'AFF', value: '≥ 17 (in TGSv8+ or wallet)' },
+      { label: 'Break-even', value: 'GIBS > 21.5 PLS' },
+    ],
+    commands: ['logs engine dss', 'recon pairs'],
+  },
+  E3: {
+    title: 'E3 MERIDIAN — Territory Beat',
+    wallet: 'Joey',
+    info: [
+      { section: 'Mechanics' },
+      { label: 'Calls', value: 'CHEON.Su() → META.Beat()' },
+      { label: 'Output', value: 'Dione/Charge/Deimos/Yeo' },
+      { label: 'Gas Est.', value: '100-500K gas' },
+      { section: 'Prerequisites' },
+      { label: 'Fornax', value: '> 0 at GIBS_LAU' },
+      { label: 'Fomalhaute', value: '> 0 at GIBS_LAU' },
+      { label: 'CHO', value: '> 0 at GIBS_LAU' },
+      { section: 'Note' },
+      { label: 'Profit', value: '0 PLS (strategic positioning)' },
+    ],
+    commands: ['logs engine beat', 'recon beat'],
+  },
+  E4: {
+    title: 'E4 FACTORY — Token Mint',
+    wallet: 'Minter',
+    info: [
+      { section: 'AFF Routes' },
+      { label: 'MATH', value: '1 MATH = 1 AFF' },
+      { label: 'PI', value: '~300 AFF/PI' },
+      { label: 'G5', value: '5 AFF/G5' },
+      { section: 'WM Minting' },
+      { label: 'Contract', value: 'TGSv8.mintWM()' },
+      { label: 'Gas Est.', value: '180K per mint' },
+      { section: 'Status' },
+      { label: 'AFF routes', value: 'Unprofitable (need > 118 PLS)' },
+      { label: 'WM route', value: 'Unprofitable (23 vs 17 PLS)' },
+    ],
+    commands: ['logs engine tokenfactory'],
+  },
+  E5: {
+    title: 'E5 ABUPRU — LAU State Loop',
+    wallet: 'Joey',
+    info: [
+      { section: 'Sequence' },
+      { label: 'Steps', value: 'α → β → υ(F) → π → ρ → υ(T)' },
+      { label: 'Prime', value: 'MotzkinPrime 953467954114363' },
+      { label: 'Gas Est.', value: '~520K (full round)' },
+      { section: 'Gate' },
+      { label: 'Min PLS', value: '150,000 PLS floor' },
+      { section: 'Note' },
+      { label: 'Profit', value: 'Strategic (EmitSniper on mints)' },
+    ],
+    commands: ['logs engine lau', 'bot lau'],
+  },
+  E6: {
+    title: 'E6 DaVINCI — Treasury Sniper',
+    wallet: 'Minter',
+    info: [
+      { section: 'Mechanics' },
+      { label: 'Contract', value: 'TGSv8.batchClaimTreasury()' },
+      { label: 'Batch', value: 'Up to 10 targets/TX' },
+      { label: 'Gas Est.', value: '400K per claim' },
+      { section: 'Prerequisites' },
+      { label: 'TGSv8', value: 'Deployed' },
+      { label: 'Recon', value: 'recon_results.json required' },
+      { label: 'Working bal', value: '≥ 100 PLS in TGSv8' },
+    ],
+    commands: ['logs 10'],
+  },
+  E7: {
+    title: 'E7 BACKBONE — Spine Runner',
+    wallet: 'Minter',
+    info: [
+      { section: 'Mechanics' },
+      { label: 'Contract', value: 'TGSv8.batchMintAndClaim()' },
+      { label: 'Batch', value: '20 mint-claim loops/TX' },
+      { label: 'Gas Est.', value: '450K per batch' },
+      { section: 'Status' },
+      { label: 'Blocker', value: 'Needs OZZY spine via E8' },
+      { label: 'OZZY Deb', value: 'True (only V2 token)' },
+    ],
+    commands: ['logs 10'],
+  },
+  E8: {
+    title: 'E8 PHR3AK — Web Weaver',
+    wallet: 'Minter',
+    info: [
+      { section: 'Modes' },
+      { label: 'ARM', value: 'Buy Deb=True tokens (100 PLS)' },
+      { label: 'DEPLOY', value: 'createV4 + LP + burn' },
+      { label: 'STITCH', value: 'New LP pairs between tokens' },
+      { section: 'V3 Targets' },
+      { label: 'MXDAI', value: '118 PLS/tok, 29M liq' },
+      { label: 'S&㉿500', value: '44K PLS/tok, 6M liq' },
+      { section: 'Note' },
+      { label: 'Unlock', value: 'Critical path for V3 exploitation' },
+    ],
+    commands: ['logs 10'],
+  },
+};
+
+let selectedEngine = null;
+
+function renderEngineInfo(eid) {
+  const meta = ENGINE_META[eid];
+  if (!meta) return;
+
+  const infoEl = document.getElementById('ed-info');
+  const termEl = document.getElementById('ed-term');
+  const titleEl = document.getElementById('ed-title');
+
+  titleEl.textContent = meta.title;
+
+  // Build info panel
+  let html = `<div class="stat-row"><span class="stat-label">Wallet</span><span class="stat-value cyan">${meta.wallet}</span></div>`;
+
+  // Get current engine data from last overview
+  const eng = _lastEngines.find(e => e.id === eid);
+  if (eng) {
+    const statusCls = { running: 'green', ready: 'cyan', blocked: 'red', gated: 'yellow', recon: 'orange', design: 'purple' }[eng.status] || '';
+    html += `<div class="stat-row"><span class="stat-label">Status</span><span class="stat-value ${statusCls}">${eng.status.toUpperCase()}</span></div>`;
+    if (eng.roi_pct != null) html += `<div class="stat-row"><span class="stat-label">ROI</span><span class="stat-value ${eng.roi_pct >= 0 ? 'green' : 'red'}">${eng.roi_pct}%</span></div>`;
+    if (eng.total_earned_pls) html += `<div class="stat-row"><span class="stat-label">Earned</span><span class="stat-value green">${fmtPLS(eng.total_earned_pls)} PLS</span></div>`;
+    if (eng.error) html += `<div class="stat-row"><span class="stat-label">Error</span><span class="stat-value red">${eng.error}</span></div>`;
+  }
+
+  meta.info.forEach(item => {
+    if (item.section) {
+      html += `<div class="section-label">${item.section}</div>`;
+    } else {
+      html += `<div class="stat-row"><span class="stat-label">${item.label}</span><span class="stat-value">${item.value}</span></div>`;
+    }
+  });
+
+  infoEl.innerHTML = html;
+
+  // Run diagnostics in the mini-terminal
+  termEl.innerHTML = '';
+  function appendLine(text, cls) {
+    const div = document.createElement('div');
+    div.className = cls || 't-log';
+    div.textContent = text;
+    termEl.appendChild(div);
+    termEl.scrollTop = termEl.scrollHeight;
+  }
+
+  appendLine(`Loading ${eid} diagnostics...`, 't-system');
+
+  // Fetch engine-specific logs via REST
+  const logName = {
+    E1: 'arb', E2: 'dss', E3: 'beat', E4: 'tokenfactory',
+    E5: 'lau', E6: 'joystick_events', E7: 'joystick_events', E8: 'joystick_events'
+  }[eid] || 'joystick_events';
+
+  fetch(API_BASE + `/api/logs?n=25&engine=${logName}`)
+    .then(r => r.json())
+    .then(data => {
+      termEl.innerHTML = '';
+      if (!data.lines || data.lines.length === 0) {
+        appendLine(`No logs for ${logName}. Run 'bot status' in the main terminal.`, 't-system');
+        return;
+      }
+      data.lines.forEach(l => appendLine(l.text, 't-log'));
+    })
+    .catch(() => {
+      appendLine('Failed to load logs.', 't-error');
+    });
+}
+
+function openEngineDetail(eid) {
+  const panel = document.getElementById('engine-detail');
+  // Deselect previous
+  document.querySelectorAll('.engine-cell').forEach(c => c.classList.remove('selected'));
+
+  if (selectedEngine === eid) {
+    // Toggle off
+    panel.classList.remove('visible');
+    selectedEngine = null;
+    return;
+  }
+
+  selectedEngine = eid;
+  // Select cell
+  const cell = document.querySelector(`.engine-cell[data-eid="${eid}"]`);
+  if (cell) cell.classList.add('selected');
+
+  renderEngineInfo(eid);
+  panel.classList.add('visible');
+}
+
+// Store last engines data for detail panel
+let _lastEngines = [];
 
 // ─── Terminal ────────────────────────────────────────────────────────
 const TERM_MAX_LINES = 500;
@@ -854,6 +1211,12 @@ function initTerminal() {
 document.addEventListener('DOMContentLoaded', () => {
   initChart();
   initTerminal();
+  initTimeframeButtons();
+  document.getElementById('ed-close').addEventListener('click', () => {
+    document.getElementById('engine-detail').classList.remove('visible');
+    document.querySelectorAll('.engine-cell').forEach(c => c.classList.remove('selected'));
+    selectedEngine = null;
+  });
   fetchOverview();
   fetchHistory();
   setInterval(fetchOverview, OVERVIEW_POLL);
