@@ -49,7 +49,8 @@ import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv("/opt/joystick/.env")
+load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, PULSEX_V1_ROUTER, TGSV8PLUS,
