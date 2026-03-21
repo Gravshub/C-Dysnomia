@@ -525,14 +525,10 @@
       </div>
     </div>
     <div class="contract-section">
-      <div class="contract-label">AFFECTION Mint</div>
+      <div class="contract-label">AFFECTION — WPLS per 1 AFF</div>
       <div class="stat-row">
         <span class="stat-label">DEX Value</span>
         <span class="stat-value cyan" id="m-aff-dex">--</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">Best Route</span>
-        <span class="stat-value" id="m-aff-best">--</span>
       </div>
       <div id="m-aff-routes"></div>
     </div>
@@ -825,37 +821,33 @@ function renderMintEconomics(m) {
   const wm = m.wm || {};
   const aff = m.aff || {};
 
-  // WM: mint cost vs DEX value — green if profitable, red if not
-  const wm1Prof = wm.dex_value_1 > wm.mint_cost_1;
-  const wm10Prof = wm.dex_value_10 > wm.mint_cost_10;
   const el = (id, val, cls) => {
     const e = document.getElementById(id);
     e.textContent = val;
     e.className = 'stat-value ' + (cls || '');
   };
+
+  // WM: mint cost vs DEX value
+  const wm1Prof = wm.dex_value_1 > wm.mint_cost_1;
+  const wm10Prof = wm.dex_value_10 > wm.mint_cost_10;
   el('m-wm1', fmtPLS(wm.mint_cost_1) + ' PLS', wm1Prof ? 'green' : 'red');
   el('m-wm10', fmtPLS(wm.mint_cost_10) + ' PLS', wm10Prof ? 'green' : 'red');
   el('m-wm-dex1', fmtPLS(wm.dex_value_1) + ' PLS', 'cyan');
   el('m-wm-dex10', fmtPLS(wm.dex_value_10) + ' PLS', 'cyan');
 
   // AFF DEX value
-  el('m-aff-dex', fmtPLS(aff.dex_value) + ' PLS/AFF', '');
+  el('m-aff-dex', fmtPLS(aff.dex_value) + ' PLS', '');
 
-  // Best route
-  if (aff.cheapest_route) {
-    const prof = aff.cheapest_cost < aff.dex_value;
-    el('m-aff-best', aff.cheapest_route + ' @ ' + fmtPLS(aff.cheapest_cost) + ' PLS', prof ? 'green' : 'yellow');
-  } else {
-    el('m-aff-best', 'No routes', 'red');
-  }
-
-  // All routes
+  // AFF routes — WPLS total only, sorted cheapest first
   const routesEl = document.getElementById('m-aff-routes');
   if (aff.routes && aff.routes.length > 0) {
-    const sorted = [...aff.routes].sort((a, b) => a.total_pls - b.total_pls);
-    routesEl.innerHTML = sorted.map(r => {
-      const cls = r.profitable ? 'green' : '';
-      return `<div class="stat-row"><span class="stat-label" style="font-size:10px">${r.name}</span><span class="stat-value ${cls}" style="font-size:10px">${fmtPLS(r.total_pls)} PLS</span></div>`;
+    const sorted = [...aff.routes].sort((a, b) => a.payment_pls - b.payment_pls);
+    routesEl.innerHTML = sorted.map((r, i) => {
+      const isCheapest = i === 0;
+      const isProfit = r.payment_pls < aff.dex_value;
+      const cls = isProfit ? 'green' : (isCheapest ? 'yellow' : '');
+      const tag = isCheapest ? ' ◀' : '';
+      return `<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value ${cls}">${fmtPLS(r.payment_pls)} PLS${tag}</span></div>`;
     }).join('');
   }
 }
