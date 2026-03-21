@@ -135,12 +135,24 @@ async def get_logs(
     engine: Optional[str] = Query(None, description="Filter by engine name"),
 ):
     """Return recent log entries for initial terminal population."""
+    engine_filter = None
     if engine:
         log_file = _EVENTS_DIR / f"engine_{engine.lower()}.jsonl"
+        engine_filter = engine.lower()
     else:
         log_file = _MAIN_LOG
 
     events = _read_tail(log_file, n)
+
+    # Fallback: if per-engine file is empty/missing, search main log
+    if not events and engine_filter:
+        all_events = _read_tail(_MAIN_LOG, 500)
+        events = [
+            ev for ev in all_events
+            if ev.get("engine", "").lower() == engine_filter
+               or ev.get("engine_ran", "").lower() == engine_filter
+        ][-n:]
+
     lines = []
     for ev in events:
         lines.append({

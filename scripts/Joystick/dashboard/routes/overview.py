@@ -12,6 +12,7 @@ from ..models import (
     OverviewResponse, WalletResponse, TokenBalance,
     EnginesResponse, GasResponse, GasCondition,
     StrategyResponse, TxRecord,
+    MintEconomics, WmMintEconomics, AffMintEconomics, AffRouteEconomics,
 )
 from ..chain_reader import get_reader
 from ..routes.engines import _load_bot_state, KNOWN_STATES
@@ -60,8 +61,8 @@ def _build_wallet(snapshot: dict) -> WalletResponse:
     )
 
 
-def _build_gas(snapshot: dict) -> GasResponse:
-    """Build gas response from chain snapshot."""
+def _build_gas(snapshot: dict, reader=None) -> GasResponse:
+    """Build gas response from chain snapshot, including live mint economics."""
     gas_beats = snapshot["gas_price_beats"]
     ceiling = config.GAS_CEILING_BEATS
 
@@ -72,6 +73,25 @@ def _build_gas(snapshot: dict) -> GasResponse:
     else:
         condition = GasCondition.CLEAR
 
+    # Live mint economics
+    mint_data = None
+    if reader:
+        try:
+            raw = reader.get_mint_economics(snapshot["gas_price_impulses"])
+            wm = raw["wm"]
+            aff = raw["aff"]
+            mint_data = MintEconomics(
+                wm=WmMintEconomics(**wm),
+                aff=AffMintEconomics(
+                    dex_value=aff["dex_value"],
+                    cheapest_route=aff.get("cheapest_route"),
+                    cheapest_cost=aff.get("cheapest_cost"),
+                    routes=[AffRouteEconomics(**r) for r in aff.get("routes", [])],
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Mint economics failed: {e}")
+
     return GasResponse(
         gas_price_beats=round(gas_beats, 2),
         gas_price_impulses=snapshot["gas_price_impulses"],
@@ -79,6 +99,7 @@ def _build_gas(snapshot: dict) -> GasResponse:
         condition=condition,
         aff_breakeven_beats=38.0,
         block_number=snapshot["block_number"],
+        mint=mint_data,
     )
 
 
@@ -197,7 +218,7 @@ async def get_overview():
     return OverviewResponse(
         wallet=wallet_resp,
         engines=_build_engines(bot_state),
-        gas=_build_gas(snapshot),
+        gas=_build_gas(snapshot, reader=reader),
         strategy=_build_strategy(),
         tgsv8=tgsv8_resp,
         tgsv8plus=tgsv8plus_resp,

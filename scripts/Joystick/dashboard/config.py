@@ -71,6 +71,31 @@ TGSV8PLUS_EXPECTED_REFS = {
     "factory_v2": "0x29eA7545DEf87022BAdc76323F373EA1e707C523",
 }
 
+# ─── AFFECTION BuyWith payment tokens ─────────────────────────────
+AFF_MATH  = "0xB680F0cc810317933F234f67EB6A9E923407f05D"   # MATH v1.1
+AFF_PI    = "0xA2262D7728C689526693aE893D0fD8a352C7073C"   # pINDEPENDENCE
+AFF_G5    = "0x2fc636E7fDF9f3E8d61033103052079781a6e7D2"   # GIMME FIVE
+AFF_FA    = "0x232a27AB6941281b3f474Fe5fF7Cc89816fB675A"   # libConjecture v1.0
+AFF_FAUNG = "0x73A19FaFb359faf519C9707b781dfdB88407d10d"   # libDynamic v1.0
+
+# Per-AFF payment requirement (from contract rates)
+# multiBuyWith: 1 loop = 3 AFF.  Cost per loop in payment token wei:
+#   MATH=3, PI=0.01, G5=0.6, Fa=12, Faung=6
+# ⇒ Cost per 1 AFF:
+AFF_ROUTES = [
+    {"name": "MATH",  "addr": AFF_MATH,  "per_aff": 1.0},       # 1 MATH / AFF
+    {"name": "PI",    "addr": AFF_PI,    "per_aff": 0.003333},   # ~0.00333 PI / AFF
+    {"name": "G5",    "addr": AFF_G5,    "per_aff": 0.2},        # 0.2 G5 / AFF
+    {"name": "Fa",    "addr": AFF_FA,    "per_aff": 4.0},        # 4 Fa / AFF
+    {"name": "Faung", "addr": AFF_FAUNG, "per_aff": 2.0},        # 2 Faung / AFF
+]
+
+# WM mint gas estimate (from token_factory.py defaults)
+WM_MINT_GAS_PER_TOKEN = 130_000   # gas units per WM minted
+# AFF multiBuyWith gas estimate (base + per-loop overhead + swap overhead)
+AFF_BUYWITH_GAS_BASE = 4_200_000  # base gas for 1 loop of multiBuyWith
+AFF_SWAP_OVERHEAD     = 200_000   # approvals + token swap
+
 # ─── Infrastructure ──────────────────────────────────────────────────
 MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
 

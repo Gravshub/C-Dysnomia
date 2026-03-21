@@ -469,6 +469,115 @@ class ChainReader:
             "refs_valid": refs_valid,
         }
 
+    def get_mint_economics(self, gas_price_impulses: int) -> dict:
+        """Fetch live WM and AFF mint economics via getAmountsOut.
+
+        Uses Multicall3 to batch all price queries in one RPC round-trip.
+        Returns cost-per-token data for WM minting and each AFF BuyWith route.
+        """
+        # Router getAmountsOut selector
+        sel_amounts_out = Web3.keccak(text="getAmountsOut(uint256,address[])")[:4]
+        router_v2 = Web3.to_checksum_address(config.PULSEX_V2_ROUTER)
+        wpls = Web3.to_checksum_address(config.WPLS)
+        wm = Web3.to_checksum_address(config.MV_TOKEN)
+        aff = Web3.to_checksum_address(config.AFFECTION)
+
+        def _amounts_out_calldata(amount_wei: int, path: list[str]) -> bytes:
+            return sel_amounts_out + abi_encode(
+                ["uint256", "address[]"],
+                [amount_wei, [Web3.to_checksum_address(a) for a in path]],
+            )
+
+        # Build Multicall3 batch:
+        # 0: WM → WPLS (1 WM value)
+        # 1: WM → WPLS (10 WM value)
+        # 2: AFF → WPLS (1 AFF DEX value)
+        # 3+: payment_token → WPLS for each AFF route (1 unit of payment token)
+        calls = [
+            (router_v2, _amounts_out_calldata(int(1e18), [wm, wpls])),       # 0
+            (router_v2, _amounts_out_calldata(int(10e18), [wm, wpls])),      # 1
+            (router_v2, _amounts_out_calldata(int(1e18), [aff, wpls])),      # 2
+        ]
+        route_indices = {}
+        for i, route in enumerate(config.AFF_ROUTES):
+            idx = len(calls)
+            route_indices[route["name"]] = idx
+            calls.append((
+                router_v2,
+                _amounts_out_calldata(int(1e18), [route["addr"], wpls]),
+            ))
+
+        results = self._multicall(calls)
+
+        def _parse_amounts_out(idx: int) -> int:
+            ok, data = results[idx]
+            if ok and len(data) >= 64:
+                try:
+                    (amounts,) = abi_decode(["uint256[]"], data)
+                    return amounts[-1]  # last element = output amount
+                except Exception:
+                    pass
+            return 0
+
+        # WM economics
+        wm_value_1 = _parse_amounts_out(0) / 1e18    # PLS for 1 WM sold
+        wm_value_10 = _parse_amounts_out(1) / 1e18   # PLS for 10 WM sold
+        gas_price_pls = gas_price_impulses / 1e18     # PLS per gas unit
+
+        wm_gas_1 = config.WM_MINT_GAS_PER_TOKEN * 1
+        wm_gas_10 = config.WM_MINT_GAS_PER_TOKEN * 10
+        wm_mint_cost_1 = round(wm_gas_1 * gas_price_pls, 4)
+        wm_mint_cost_10 = round(wm_gas_10 * gas_price_pls, 4)
+
+        # AFF economics
+        aff_dex_value = _parse_amounts_out(2) / 1e18  # PLS per 1 AFF on DEX
+
+        # Gas cost to run 1 loop of multiBuyWith (yields 3 AFF)
+        aff_gas_total = config.AFF_BUYWITH_GAS_BASE + config.AFF_SWAP_OVERHEAD
+        aff_gas_pls = aff_gas_total * gas_price_pls
+
+        aff_routes = []
+        cheapest = None
+        for route in config.AFF_ROUTES:
+            name = route["name"]
+            per_aff = route["per_aff"]
+            idx = route_indices[name]
+            # PLS value of 1 payment token
+            tok_pls = _parse_amounts_out(idx) / 1e18
+            if tok_pls <= 0:
+                continue
+            # PLS cost of payment tokens per 1 AFF
+            payment_cost = per_aff * tok_pls
+            # Gas per AFF (1 loop = 3 AFF, amortize)
+            gas_per_aff = aff_gas_pls / 3
+            total_per_aff = payment_cost + gas_per_aff
+
+            entry = {
+                "name": name,
+                "payment_pls": round(payment_cost, 4),
+                "gas_pls": round(gas_per_aff, 4),
+                "total_pls": round(total_per_aff, 4),
+                "profitable": total_per_aff < aff_dex_value,
+            }
+            aff_routes.append(entry)
+            if cheapest is None or total_per_aff < cheapest["total_pls"]:
+                cheapest = entry
+
+        return {
+            "wm": {
+                "mint_cost_1": wm_mint_cost_1,
+                "mint_cost_10": wm_mint_cost_10,
+                "dex_value_1": round(wm_value_1, 4),
+                "dex_value_10": round(wm_value_10, 4),
+            },
+            "aff": {
+                "dex_value": round(aff_dex_value, 4),
+                "cheapest_route": cheapest["name"] if cheapest else None,
+                "cheapest_cost": cheapest["total_pls"] if cheapest else None,
+                "routes": aff_routes,
+            },
+        }
+
     def get_dashboard_snapshot(self) -> dict:
         """Fetch all data the dashboard needs in minimal RPC calls.
         
