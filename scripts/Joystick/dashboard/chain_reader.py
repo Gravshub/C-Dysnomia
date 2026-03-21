@@ -573,43 +573,40 @@ class ChainReader:
 
         return prices
 
+    # PLS/USD cache (CoinGecko rate-limited, cache for 60s)
+    _pls_usd_cache: float = 0.0
+    _pls_usd_cache_ts: float = 0.0
+
     def get_pls_usd_price(self) -> float:
-        """Get PLS price in USD from the WPLS/pDAI pair on V2."""
-        wpls = Web3.to_checksum_address(config.WPLS)
-        dai = Web3.to_checksum_address(config.DAI)
-        v2_factory = Web3.to_checksum_address(config.PULSEX_V2_FACTORY)
+        """Get PLS price in USD from CoinGecko API.
 
-        # Get pair address
-        cd = SEL_GET_PAIR + abi_encode(["address", "address"], [wpls, dai])
-        pair_results = self._multicall([(v2_factory, cd)])
-        if not pair_results[0][0] or len(pair_results[0][1]) < 32:
-            return 0.0
-        try:
-            (pair_addr,) = abi_decode(["address"], pair_results[0][1])
-        except Exception:
-            return 0.0
-        if pair_addr == "0x" + "0" * 40:
-            return 0.0
+        pDAI/pUSDC on PulseChain are NOT pegged to $1 (forked tokens),
+        so on-chain reserves give wrong USD prices. Use external oracle.
+        Cached for 60 seconds to respect rate limits.
+        """
+        import time
+        import requests
 
-        # Get reserves + token0
-        calls = [(pair_addr, SEL_GET_RESERVES), (pair_addr, SEL_TOKEN0)]
-        results = self._multicall(calls)
-        if not (results[0][0] and results[1][0]):
-            return 0.0
+        now = time.time()
+        if self._pls_usd_cache > 0 and (now - self._pls_usd_cache_ts) < 60:
+            return self._pls_usd_cache
+
         try:
-            r0, r1, _ = abi_decode(["uint112", "uint112", "uint32"], results[0][1])
-            (token0,) = abi_decode(["address"], results[1][1])
-            if r0 == 0 or r1 == 0:
-                return 0.0
-            # pDAI has 18 decimals, WPLS has 18 decimals — direct ratio
-            if token0.lower() == wpls.lower():
-                # token0=WPLS, token1=pDAI → pls_usd = r1/r0
-                return r1 / r0
-            else:
-                # token0=pDAI, token1=WPLS → pls_usd = r0/r1
-                return r0 / r1
-        except Exception:
-            return 0.0
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": "pulsechain", "vs_currencies": "usd"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                price = resp.json().get("pulsechain", {}).get("usd", 0.0)
+                if price > 0:
+                    self._pls_usd_cache = price
+                    self._pls_usd_cache_ts = now
+                    return price
+        except Exception as e:
+            logger.warning(f"CoinGecko PLS/USD fetch failed: {e}")
+
+        return self._pls_usd_cache  # return stale cache if fetch fails
 
     def get_multi_wallet_balances(self) -> dict[str, dict[str, int]]:
         """Fetch PLS + token balances for all portfolio wallets in one batch.
