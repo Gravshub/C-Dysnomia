@@ -96,6 +96,18 @@ WM_MINT_GAS_PER_TOKEN = 130_000   # gas units per WM minted
 AFF_BUYWITH_GAS_BASE = 4_200_000  # base gas for 1 loop of multiBuyWith
 AFF_SWAP_OVERHEAD     = 200_000   # approvals + token swap
 
+# ─── Stablecoins for PLS/USD pricing ──────────────────────────────
+DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"    # pDAI (18 decimals)
+USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # pUSDC (6 decimals)
+
+# ─── Multi-wallet portfolio tracking ──────────────────────────────
+PORTFOLIO_WALLETS = {
+    "Joey":   JOEY_WALLET,
+    "Minter": MINTER_WALLET,
+    "Seller": SELLER_WALLET,
+    "TGSv8":  TGSV8,
+}
+
 # ─── Infrastructure ──────────────────────────────────────────────────
 MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
 
