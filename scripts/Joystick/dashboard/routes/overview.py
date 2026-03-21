@@ -13,6 +13,7 @@ from ..models import (
     EnginesResponse, GasResponse, GasCondition,
     StrategyResponse, TxRecord,
     MintEconomics, WmMintEconomics, AffMintEconomics, AffRouteEconomics,
+    PortfolioSummary, TokenHolding,
 )
 from ..chain_reader import get_reader
 from ..routes.engines import _load_bot_state, KNOWN_STATES
@@ -188,12 +189,114 @@ def _load_recent_txs(limit: int = 10) -> list[TxRecord]:
         return []
 
 
+def _build_portfolio(reader, block: int) -> PortfolioSummary:
+    """Build portfolio summary across all wallets with token valuations."""
+    try:
+        prices = reader.get_token_prices_pls()
+        pls_usd = reader.get_pls_usd_price()
+        wallet_bals = reader.get_multi_wallet_balances()
+    except Exception as e:
+        logger.warning(f"Portfolio build failed: {e}")
+        return PortfolioSummary(snapshot_block=block)
+
+    # 24h history for change calculation
+    snap_24h = history.get_snapshot_24h_ago()
+    old_prices = snap_24h.get("token_prices", {}) if snap_24h else {}
+
+    # Aggregate balances per token across all wallets
+    all_syms = set()
+    for bals in wallet_bals.values():
+        all_syms.update(bals.keys())
+
+    holdings: list[TokenHolding] = []
+    wallet_totals = {label: 0.0 for label in wallet_bals}
+
+    for sym in sorted(all_syms):
+        joey_wei = wallet_bals.get("Joey", {}).get(sym, 0)
+        minter_wei = wallet_bals.get("Minter", {}).get(sym, 0)
+        seller_wei = wallet_bals.get("Seller", {}).get(sym, 0)
+        tgsv8_wei = wallet_bals.get("TGSv8", {}).get(sym, 0)
+        total_wei = joey_wei + minter_wei + seller_wei + tgsv8_wei
+
+        bal = total_wei / 1e18
+        price = prices.get(sym)
+        val_pls = bal * price if price else None
+        val_usd = val_pls * pls_usd if val_pls and pls_usd else None
+
+        # 24h change
+        change = None
+        if sym != "PLS" and price and old_prices.get(sym):
+            old_p = old_prices[sym]
+            if old_p > 0:
+                change = round(((price - old_p) / old_p) * 100, 2)
+
+        h = TokenHolding(
+            symbol=sym,
+            balance=round(bal, 4),
+            balance_wei=str(total_wei),
+            price_pls=round(price, 4) if price else None,
+            value_pls=round(val_pls, 2) if val_pls else None,
+            value_usd=round(val_usd, 2) if val_usd else None,
+            change_24h_pct=change,
+            joey_balance=round(joey_wei / 1e18, 4),
+            minter_balance=round(minter_wei / 1e18, 4),
+            seller_balance=round(seller_wei / 1e18, 4),
+            tgsv8_balance=round(tgsv8_wei / 1e18, 4),
+        )
+        holdings.append(h)
+
+        # Wallet totals
+        if price:
+            wallet_totals["Joey"] += (joey_wei / 1e18) * price
+            wallet_totals["Minter"] += (minter_wei / 1e18) * price
+            wallet_totals["Seller"] += (seller_wei / 1e18) * price
+            wallet_totals["TGSv8"] += (tgsv8_wei / 1e18) * price
+
+    # Sort by value descending (PLS first)
+    holdings.sort(key=lambda h: -(h.value_pls or 0))
+
+    total_pls = sum(h.value_pls or 0 for h in holdings)
+    total_usd = total_pls * pls_usd if pls_usd else 0
+
+    # 24h portfolio change
+    change_24h_pls = None
+    change_24h_pct = None
+    if snap_24h and snap_24h.get("portfolio_value_pls"):
+        old_total = snap_24h["portfolio_value_pls"]
+        if old_total > 0:
+            change_24h_pls = round(total_pls - old_total, 2)
+            change_24h_pct = round(((total_pls - old_total) / old_total) * 100, 2)
+
+    # Gainers / losers (tokens with 24h data, exclude PLS/WPLS)
+    with_change = [h for h in holdings if h.change_24h_pct is not None]
+    gainers = sorted([h for h in with_change if h.change_24h_pct > 0],
+                     key=lambda h: -h.change_24h_pct)[:3]
+    losers = sorted([h for h in with_change if h.change_24h_pct < 0],
+                    key=lambda h: h.change_24h_pct)[:3]
+
+    return PortfolioSummary(
+        total_value_pls=round(total_pls, 2),
+        total_value_usd=round(total_usd, 2),
+        pls_price_usd=round(pls_usd, 6),
+        change_24h_pls=change_24h_pls,
+        change_24h_pct=change_24h_pct,
+        top_gainers=gainers,
+        top_losers=losers,
+        holdings=holdings,
+        snapshot_block=block,
+        joey_total_pls=round(wallet_totals["Joey"], 2),
+        minter_total_pls=round(wallet_totals["Minter"], 2),
+        seller_total_pls=round(wallet_totals["Seller"], 2),
+        tgsv8_total_pls=round(wallet_totals["TGSv8"], 2),
+    )
+
+
 @router.get("/overview", response_model=OverviewResponse)
 async def get_overview():
     """Single endpoint for the entire dashboard.
 
     Makes ~4 RPC round-trips for wallet + gas data,
-    plus additional multicall batches for TGSv8 and TGSv8+.
+    plus additional multicall batches for TGSv8, TGSv8+, and portfolio.
     Also records a balance history point every 15 minutes.
     """
     reader = get_reader()
@@ -203,6 +306,13 @@ async def get_overview():
     wallet_resp = _build_wallet(snapshot)
     tgsv8_resp = _build_tgsv8()
     tgsv8plus_resp = _build_tgsv8plus()
+    portfolio_resp = _build_portfolio(reader, snapshot["block_number"])
+
+    # Get token prices for history recording
+    token_prices = {}
+    for h in portfolio_resp.holdings:
+        if h.price_pls is not None:
+            token_prices[h.symbol] = h.price_pls
 
     # Record balance history point (every 15 min)
     history.maybe_record({
@@ -211,8 +321,10 @@ async def get_overview():
         "tgsv8_pls": tgsv8_resp.native_pls,
         "tgsv8plus_pls": tgsv8plus_resp.native_pls,
         "total_pls": wallet_resp.pls_balance + tgsv8_resp.native_pls + tgsv8plus_resp.native_pls,
-        "gibs_price": None,  # TODO: wire up GIBS price oracle
+        "gibs_price": token_prices.get("GIBS"),
         "gas_beats": snapshot["gas_price_beats"],
+        "token_prices": token_prices,
+        "portfolio_value_pls": portfolio_resp.total_value_pls,
     })
 
     return OverviewResponse(
@@ -222,6 +334,7 @@ async def get_overview():
         strategy=_build_strategy(),
         tgsv8=tgsv8_resp,
         tgsv8plus=tgsv8plus_resp,
+        portfolio=portfolio_resp,
         recent_txs=_load_recent_txs(),
         poll_interval_sec=config.POLL_INTERVAL_SEC,
         bot_online=bot_state is not None,

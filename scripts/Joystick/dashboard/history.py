@@ -24,7 +24,8 @@ def maybe_record(snapshot: dict) -> None:
 
     Args:
         snapshot: dict with keys joey_pls, tgsv8_pls, tgsv8plus_pls,
-                  total_pls, gibs_price, gas_beats, block.
+                  total_pls, gibs_price, gas_beats, block,
+                  and optionally token_prices, portfolio_value_pls.
     """
     global _last_record_ts
 
@@ -42,6 +43,11 @@ def maybe_record(snapshot: dict) -> None:
         "gibs_price": snapshot.get("gibs_price"),
         "gas_beats": snapshot.get("gas_beats", 0.0),
     }
+    # Portfolio extensions
+    if snapshot.get("token_prices"):
+        record["token_prices"] = snapshot["token_prices"]
+    if snapshot.get("portfolio_value_pls"):
+        record["portfolio_value_pls"] = snapshot["portfolio_value_pls"]
 
     records = _load()
     records.append(record)
@@ -63,6 +69,21 @@ def get_history(span_seconds: int = None) -> list[dict]:
         cutoff = time.time() - span_seconds
         records = [r for r in records if r.get("ts", 0) >= cutoff]
     return records
+
+
+def get_snapshot_24h_ago() -> dict | None:
+    """Return the history record closest to 24h ago, or None."""
+    records = _load()
+    target = time.time() - 86400
+    closest = None
+    min_diff = float('inf')
+    for r in records:
+        diff = abs(r.get("ts", 0) - target)
+        if diff < min_diff:
+            min_diff = diff
+            closest = r
+    # Only return if within 2 hours of the target
+    return closest if closest and min_diff < 7200 else None
 
 
 def _prune(records: list[dict]) -> list[dict]:

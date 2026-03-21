@@ -25,6 +25,7 @@ SEL_SYMBOL       = Web3.keccak(text="symbol()")[:4]
 SEL_GET_RESERVES = Web3.keccak(text="getReserves()")[:4]
 SEL_TOKEN0       = Web3.keccak(text="token0()")[:4]
 SEL_TOKEN1       = Web3.keccak(text="token1()")[:4]
+SEL_GET_PAIR     = Web3.keccak(text="getPair(address,address)")[:4]
 
 # ─── TGSv8 selectors ───────────────────────────────────────────────
 SEL_OWNER        = Web3.keccak(text="owner()")[:4]
@@ -468,6 +469,185 @@ class ChainReader:
             "refs": refs,
             "refs_valid": refs_valid,
         }
+
+    # ─── Pair address cache (pairs never change) ────────────────────
+    _pair_cache: dict[str, str] = {}
+
+    def _discover_pairs(self, tokens: dict[str, str]) -> dict[str, str]:
+        """Discover best PulseX pair (V1 or V2) for each token vs WPLS.
+
+        Returns dict of symbol → pair_address. Cached after first call.
+        """
+        wpls = Web3.to_checksum_address(config.WPLS)
+        v1_factory = Web3.to_checksum_address(config.PULSEX_V1_FACTORY)
+        v2_factory = Web3.to_checksum_address(config.PULSEX_V2_FACTORY)
+
+        # Check cache first
+        uncached = {s: a for s, a in tokens.items() if s not in self._pair_cache}
+        if not uncached:
+            return {s: self._pair_cache[s] for s in tokens if s in self._pair_cache}
+
+        # getPair(tokenA, tokenB) on both factories
+        calls = []
+        call_map = []  # (symbol, factory_label)
+        for sym, addr in uncached.items():
+            tok = Web3.to_checksum_address(addr)
+            cd = SEL_GET_PAIR + abi_encode(["address", "address"], [tok, wpls])
+            calls.append((v1_factory, cd))
+            call_map.append((sym, "V1"))
+            calls.append((v2_factory, cd))
+            call_map.append((sym, "V2"))
+
+        results = self._multicall(calls)
+
+        # Collect pairs per symbol
+        pairs_found: dict[str, dict[str, str]] = {}  # sym → {V1: addr, V2: addr}
+        zero = "0x" + "0" * 40
+        for (sym, factory), (ok, data) in zip(call_map, results):
+            if ok and len(data) >= 32:
+                try:
+                    (addr,) = abi_decode(["address"], data)
+                    if addr and addr != zero:
+                        pairs_found.setdefault(sym, {})[factory] = addr
+                except Exception:
+                    pass
+
+        # For each token, pick best pair (prefer V2, fall back to V1)
+        for sym in uncached:
+            pf = pairs_found.get(sym, {})
+            pair = pf.get("V2") or pf.get("V1")
+            if pair:
+                self._pair_cache[sym] = pair
+
+        return {s: self._pair_cache[s] for s in tokens if s in self._pair_cache}
+
+    def get_token_prices_pls(self) -> dict[str, float]:
+        """Get PLS price per token for all TOKEN_REGISTRY entries.
+
+        Uses reserve ratios from the best WPLS pair for each token.
+        Returns dict of symbol → PLS-per-token. PLS=1.0, WPLS=1.0.
+        """
+        wpls_lower = config.WPLS.lower()
+
+        # Tokens that need pricing (not PLS, not WPLS)
+        priceable = {
+            sym: addr for sym, addr in config.TOKEN_REGISTRY.items()
+            if addr is not None and addr.lower() != wpls_lower
+        }
+
+        pairs = self._discover_pairs(priceable)
+        if not pairs:
+            return {"PLS": 1.0, "WPLS": 1.0}
+
+        # Batch getReserves + token0 for all pairs
+        calls = []
+        pair_syms = []
+        for sym in pairs:
+            pair = pairs[sym]
+            calls.append((pair, SEL_GET_RESERVES))
+            calls.append((pair, SEL_TOKEN0))
+            pair_syms.append(sym)
+
+        results = self._multicall(calls)
+
+        prices: dict[str, float] = {"PLS": 1.0, "WPLS": 1.0}
+        for i, sym in enumerate(pair_syms):
+            res_ok, res_data = results[i * 2]
+            t0_ok, t0_data = results[i * 2 + 1]
+            if not (res_ok and t0_ok and len(res_data) >= 96 and len(t0_data) >= 32):
+                continue
+            try:
+                r0, r1, _ = abi_decode(["uint112", "uint112", "uint32"], res_data)
+                (token0,) = abi_decode(["address"], t0_data)
+                if r0 == 0 or r1 == 0:
+                    continue
+                # Which side is WPLS?
+                if token0.lower() == wpls_lower:
+                    # token0=WPLS, token1=token → price = r0/r1
+                    prices[sym] = r0 / r1
+                else:
+                    # token0=token, token1=WPLS → price = r1/r0
+                    prices[sym] = r1 / r0
+            except Exception:
+                continue
+
+        return prices
+
+    def get_pls_usd_price(self) -> float:
+        """Get PLS price in USD from the WPLS/pDAI pair on V2."""
+        wpls = Web3.to_checksum_address(config.WPLS)
+        dai = Web3.to_checksum_address(config.DAI)
+        v2_factory = Web3.to_checksum_address(config.PULSEX_V2_FACTORY)
+
+        # Get pair address
+        cd = SEL_GET_PAIR + abi_encode(["address", "address"], [wpls, dai])
+        pair_results = self._multicall([(v2_factory, cd)])
+        if not pair_results[0][0] or len(pair_results[0][1]) < 32:
+            return 0.0
+        try:
+            (pair_addr,) = abi_decode(["address"], pair_results[0][1])
+        except Exception:
+            return 0.0
+        if pair_addr == "0x" + "0" * 40:
+            return 0.0
+
+        # Get reserves + token0
+        calls = [(pair_addr, SEL_GET_RESERVES), (pair_addr, SEL_TOKEN0)]
+        results = self._multicall(calls)
+        if not (results[0][0] and results[1][0]):
+            return 0.0
+        try:
+            r0, r1, _ = abi_decode(["uint112", "uint112", "uint32"], results[0][1])
+            (token0,) = abi_decode(["address"], results[1][1])
+            if r0 == 0 or r1 == 0:
+                return 0.0
+            # pDAI has 18 decimals, WPLS has 18 decimals — direct ratio
+            if token0.lower() == wpls.lower():
+                # token0=WPLS, token1=pDAI → pls_usd = r1/r0
+                return r1 / r0
+            else:
+                # token0=pDAI, token1=WPLS → pls_usd = r0/r1
+                return r0 / r1
+        except Exception:
+            return 0.0
+
+    def get_multi_wallet_balances(self) -> dict[str, dict[str, int]]:
+        """Fetch PLS + token balances for all portfolio wallets in one batch.
+
+        Returns dict of wallet_label → {symbol: balance_wei}.
+        """
+        wallets = config.PORTFOLIO_WALLETS
+        erc_tokens = {
+            sym: addr for sym, addr in config.TOKEN_REGISTRY.items()
+            if addr is not None
+        }
+
+        # Native PLS balances (separate — not ERC20)
+        result: dict[str, dict[str, int]] = {}
+        for label, wallet in wallets.items():
+            result[label] = {"PLS": self.get_pls_balance(wallet)}
+
+        # ERC20 balanceOf calls: wallets × tokens
+        calls = []
+        call_map = []  # (wallet_label, symbol)
+        for label, wallet in wallets.items():
+            holder = Web3.to_checksum_address(wallet)
+            for sym, addr in erc_tokens.items():
+                calls.append((addr, self._encode_balance_of(addr, holder)))
+                call_map.append((label, sym))
+
+        mc_results = self._multicall(calls)
+        for (label, sym), (ok, data) in zip(call_map, mc_results):
+            if ok and len(data) >= 32:
+                try:
+                    (bal,) = abi_decode(["uint256"], data)
+                    result[label][sym] = bal
+                except Exception:
+                    result[label][sym] = 0
+            else:
+                result[label][sym] = 0
+
+        return result
 
     def get_mint_economics(self, gas_price_impulses: int) -> dict:
         """Fetch live WM and AFF mint economics via getAmountsOut.

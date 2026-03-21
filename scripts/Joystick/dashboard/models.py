@@ -226,6 +226,40 @@ class HistoryResponse(BaseModel):
     points: list[HistoryPoint] = []
 
 
+# ─── Portfolio ──────────────────────────────────────────────────────
+
+class TokenHolding(BaseModel):
+    """Single token holding with full valuation."""
+    symbol: str
+    balance: float = 0.0
+    balance_wei: str = "0"
+    price_pls: Optional[float] = None
+    value_pls: Optional[float] = None
+    value_usd: Optional[float] = None
+    change_24h_pct: Optional[float] = None
+    joey_balance: float = 0.0
+    minter_balance: float = 0.0
+    seller_balance: float = 0.0
+    tgsv8_balance: float = 0.0
+
+
+class PortfolioSummary(BaseModel):
+    """Aggregate portfolio metrics across all wallets."""
+    total_value_pls: float = 0.0
+    total_value_usd: float = 0.0
+    pls_price_usd: float = 0.0
+    change_24h_pls: Optional[float] = None
+    change_24h_pct: Optional[float] = None
+    top_gainers: list[TokenHolding] = []
+    top_losers: list[TokenHolding] = []
+    holdings: list[TokenHolding] = []
+    snapshot_block: int = 0
+    joey_total_pls: float = 0.0
+    minter_total_pls: float = 0.0
+    seller_total_pls: float = 0.0
+    tgsv8_total_pls: float = 0.0
+
+
 # ─── Overview (single-call dashboard payload) ────────────────────────
 
 class OverviewResponse(BaseModel):
@@ -237,6 +271,7 @@ class OverviewResponse(BaseModel):
     strategy: StrategyResponse
     tgsv8: Optional[TGSv8Response] = None
     tgsv8plus: Optional[TGSv8PlusResponse] = None
+    portfolio: Optional[PortfolioSummary] = None
     recent_txs: list[TxRecord] = []
     poll_interval_sec: int = 15
     bot_online: bool = False

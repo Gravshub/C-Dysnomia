@@ -349,6 +349,43 @@
     margin-bottom: 4px;
   }
 
+  /* ─── Portfolio ───────────────────────────────────────────────────── */
+  .portfolio-total { font-size: 22px; font-weight: 700; color: var(--green); }
+  .portfolio-usd { font-size: 13px; color: var(--cyan); margin-top: 2px; }
+  .portfolio-change { font-size: 12px; margin-top: 4px; }
+  .portfolio-change.up { color: var(--green); }
+  .portfolio-change.down { color: var(--red); }
+  .wallet-toggle {
+    font-size: 11px; color: var(--text-dim); cursor: pointer;
+    margin-top: 6px; padding: 4px 0; transition: color 0.15s;
+  }
+  .wallet-toggle:hover { color: var(--cyan); }
+  .wallet-breakdown {
+    display: none; margin-top: 4px; padding: 6px 8px;
+    background: rgba(255,255,255,0.02); border-radius: 4px;
+  }
+  .wallet-breakdown.visible { display: block; }
+  .wallet-breakdown .stat-row { font-size: 11px; }
+  .holdings-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  .holdings-table th {
+    color: var(--text-dim); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.5px; text-align: left; padding: 4px 6px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .holdings-table td { padding: 3px 6px; font-size: 11px; }
+  .holdings-table td:nth-child(2), .holdings-table td:nth-child(3), .holdings-table td:nth-child(4) { text-align: right; }
+  .holdings-table th:nth-child(2), .holdings-table th:nth-child(3), .holdings-table th:nth-child(4) { text-align: right; }
+  .gl-section {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border);
+  }
+  .gl-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .gl-title.gainers { color: var(--green); }
+  .gl-title.losers { color: var(--red); }
+  .gl-item { font-size: 11px; padding: 1px 0; }
+  .gl-item.up { color: var(--green); }
+  .gl-item.down { color: var(--red); }
+
   /* ─── Chain Explorer ─────────────────────────────────────────────── */
   .explorer-bar {
     margin-bottom: 12px;
@@ -534,23 +571,30 @@
     </div>
   </div>
 
-  <!-- Wallet Holdings (merged wallet + tokens) -->
+  <!-- Portfolio -->
   <div class="card">
-    <div class="card-title">Wallet Holdings</div>
-    <div class="stat-row">
-      <span class="stat-label">PLS Balance</span>
-      <span class="stat-value green" id="w-pls">--</span>
-    </div>
-    <div class="stat-row">
+    <div class="card-title">Portfolio</div>
+    <div class="portfolio-total" id="p-total">--</div>
+    <div class="portfolio-usd" id="p-usd">--</div>
+    <div class="portfolio-change" id="p-change"></div>
+    <div class="stat-row" style="margin-top:4px">
       <span class="stat-label">Gas Buffer</span>
       <span class="stat-value" id="w-gas-buf">--</span>
     </div>
-    <table class="token-table" id="token-table" style="margin-top:8px">
+    <div class="wallet-toggle" id="wallet-toggle">Wallets ▸</div>
+    <div class="wallet-breakdown" id="wallet-breakdown">
+      <div class="stat-row"><span class="stat-label">Joey</span><span class="stat-value" id="p-joey">--</span></div>
+      <div class="stat-row"><span class="stat-label">Minter</span><span class="stat-value" id="p-minter">--</span></div>
+      <div class="stat-row"><span class="stat-label">Seller</span><span class="stat-value" id="p-seller">--</span></div>
+      <div class="stat-row"><span class="stat-label">TGSv8</span><span class="stat-value" id="p-tgsv8">--</span></div>
+    </div>
+    <table class="holdings-table" id="holdings-table">
+      <thead><tr><th>Token</th><th style="text-align:right">Balance</th><th style="text-align:right">PLS Value</th><th style="text-align:right">24h</th></tr></thead>
       <tbody></tbody>
     </table>
-    <div class="stat-row" style="margin-top:6px; border-top:1px solid var(--card-border); padding-top:6px">
-      <span class="stat-label">Address</span>
-      <span class="stat-value" style="font-size:10px" id="w-addr">--</span>
+    <div class="gl-section" id="gl-section" style="display:none">
+      <div><div class="gl-title gainers">Top Gainers</div><div id="gl-gainers"></div></div>
+      <div><div class="gl-title losers">Top Losers</div><div id="gl-losers"></div></div>
     </div>
   </div>
 
@@ -767,13 +811,14 @@ function renderOverview(d) {
   document.getElementById('hdr-bot').style.color = d.bot_online ? 'var(--green)' : 'var(--red)';
   document.getElementById('hdr-time').textContent = new Date().toLocaleTimeString();
 
-  // Wallet
-  document.getElementById('w-pls').textContent = fmtPLS(w.pls_balance) + ' PLS';
+  // Portfolio
+  if (d.portfolio) renderPortfolio(d.portfolio);
+
+  // Gas buffer
   const gasOk = w.gas_buffer_ok;
   const gBuf = document.getElementById('w-gas-buf');
   gBuf.textContent = gasOk ? '\u2713 OK (>100K)' : '\u2717 LOW';
   gBuf.className = 'stat-value ' + (gasOk ? 'green' : 'red');
-  document.getElementById('w-addr').textContent = fmtAddr(w.address);
 
   // Validator
   const pct = w.validator_progress_pct || 0;
@@ -781,15 +826,6 @@ function renderOverview(d) {
   document.getElementById('v-pct').textContent = pct.toFixed(3) + '%';
   const remaining = 32000000 - (w.pls_balance || 0);
   document.getElementById('v-remaining').textContent = fmtPLS(remaining) + ' PLS';
-
-  // Tokens
-  const tbody = document.querySelector('#token-table tbody');
-  tbody.innerHTML = '';
-  (w.tokens || []).forEach(t => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="stat-label">${t.symbol}</td><td class="stat-value">${fmtPLS(t.balance)}</td>`;
-    tbody.appendChild(tr);
-  });
 
   // Gas
   document.getElementById('g-price').textContent = g.gas_price_beats + ' Beats';
@@ -814,6 +850,65 @@ function renderOverview(d) {
     eg.appendChild(div);
   });
 
+}
+
+// ─── Portfolio ───────────────────────────────────────────────────────
+function renderPortfolio(p) {
+  // Total value
+  document.getElementById('p-total').textContent = fmtPLS(p.total_value_pls) + ' PLS';
+  document.getElementById('p-usd').textContent = p.pls_price_usd > 0
+    ? '$' + fmtPLS(p.total_value_usd)
+    : '';
+
+  // 24h change
+  const chEl = document.getElementById('p-change');
+  if (p.change_24h_pct != null) {
+    const up = p.change_24h_pls >= 0;
+    const arrow = up ? '\u25B2' : '\u25BC';
+    const sign = up ? '+' : '';
+    chEl.textContent = `${arrow} ${sign}${fmtPLS(p.change_24h_pls)} PLS (${sign}${p.change_24h_pct}%) 24h`;
+    chEl.className = 'portfolio-change ' + (up ? 'up' : 'down');
+  } else {
+    chEl.textContent = '24h data accumulating...';
+    chEl.className = 'portfolio-change';
+    chEl.style.color = 'var(--text-dim)';
+  }
+
+  // Wallet breakdown
+  document.getElementById('p-joey').textContent = fmtPLS(p.joey_total_pls) + ' PLS';
+  document.getElementById('p-minter').textContent = fmtPLS(p.minter_total_pls) + ' PLS';
+  document.getElementById('p-seller').textContent = fmtPLS(p.seller_total_pls) + ' PLS';
+  document.getElementById('p-tgsv8').textContent = fmtPLS(p.tgsv8_total_pls) + ' PLS';
+
+  // Holdings table
+  const tbody = document.querySelector('#holdings-table tbody');
+  tbody.innerHTML = '';
+  (p.holdings || []).forEach(h => {
+    const tr = document.createElement('tr');
+    const change24 = h.change_24h_pct != null
+      ? (h.change_24h_pct >= 0
+        ? `<td style="color:var(--green)">\u25B2 +${h.change_24h_pct}%</td>`
+        : `<td style="color:var(--red)">\u25BC ${h.change_24h_pct}%</td>`)
+      : '<td style="color:var(--text-dim)">--</td>';
+    tr.innerHTML = `<td>${h.symbol}</td><td style="text-align:right">${fmtPLS(h.balance)}</td><td style="text-align:right">${h.value_pls != null ? fmtPLS(h.value_pls) : '--'}</td>${change24}`;
+    tbody.appendChild(tr);
+  });
+
+  // Gainers / Losers
+  const glSection = document.getElementById('gl-section');
+  const gainers = p.top_gainers || [];
+  const losers = p.top_losers || [];
+  if (gainers.length > 0 || losers.length > 0) {
+    glSection.style.display = 'grid';
+    document.getElementById('gl-gainers').innerHTML = gainers.map(g =>
+      `<div class="gl-item up">\u25B2 ${g.symbol} +${g.change_24h_pct}%</div>`
+    ).join('') || '<div class="gl-item" style="color:var(--text-dim)">--</div>';
+    document.getElementById('gl-losers').innerHTML = losers.map(l =>
+      `<div class="gl-item down">\u25BC ${l.symbol} ${l.change_24h_pct}%</div>`
+    ).join('') || '<div class="gl-item" style="color:var(--text-dim)">--</div>';
+  } else {
+    glSection.style.display = 'none';
+  }
 }
 
 // ─── Mint Economics ──────────────────────────────────────────────────
@@ -1380,6 +1475,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initTerminal();
   initTimeframeButtons();
   initExplorer();
+  document.getElementById('wallet-toggle').addEventListener('click', () => {
+    const bd = document.getElementById('wallet-breakdown');
+    const tg = document.getElementById('wallet-toggle');
+    bd.classList.toggle('visible');
+    tg.textContent = bd.classList.contains('visible') ? 'Wallets \u25BE' : 'Wallets \u25B8';
+  });
   document.getElementById('ed-close').addEventListener('click', () => {
     document.getElementById('engine-detail').classList.remove('visible');
     document.querySelectorAll('.engine-cell').forEach(c => c.classList.remove('selected'));
