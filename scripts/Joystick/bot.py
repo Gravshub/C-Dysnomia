@@ -49,7 +49,7 @@ import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
-load_dotenv("/opt/joystick/.env")
+load_dotenv("/opt/joystick/.env.pulse")
 load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
