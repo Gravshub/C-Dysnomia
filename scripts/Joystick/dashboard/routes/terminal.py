@@ -317,6 +317,21 @@ HELP_TEXT = """
   gas                Gas conditions
   tgsv8              TGSv8 contract state
 
+ ── Bot Control ─────────────────────
+  bot cycle          Dry-run one cycle (no TXs)
+  bot cycle --live   Live-fire one cycle (real TXs!)
+  bot status         Bot engine/strategist status
+  bot wallet-status  3-wallet balances + auth + nonces
+  bot rpc-status     RPC provider health check
+  bot log-status     Event log statistics
+  bot beat           Run Beat engine only (dry-run)
+  bot beat --live    Run Beat engine only (live)
+  bot lau            Run LAU engine only (dry-run)
+  bot lau --live     Run LAU engine only (live)
+  bot e4-test        Force E4 TokenFactory test cycle
+  bot run            Start bot loop (background)
+  bot stop           Stop background bot
+
  ── Logs ────────────────────────────
   logs [N]           Last N events (default 20)
   logs engine <name> Logs for specific engine
@@ -373,6 +388,10 @@ async def _handle_command(ws: WebSocket, cmd: str):
             await _cmd_gas(ws, now)
         elif verb == "tgsv8":
             await _cmd_tgsv8(ws, now)
+
+        # ── Bot control ──
+        elif verb == "bot":
+            await _cmd_bot(ws, parts, now)
 
         # ── Logs ──
         elif verb == "logs":
@@ -552,6 +571,134 @@ async def _cmd_logs(ws: WebSocket, parts: list, now: float):
     for ev in events:
         lines.append("  " + _format_event(ev))
     await ws.send_json({"type": "result", "success": True, "ts": now, "text": "\n".join(lines)})
+
+
+# ── Bot commands ─────────────────────────────────────────────────────
+
+_BOT_MODULE = "scripts.Joystick.bot"
+
+
+async def _cmd_bot(ws: WebSocket, parts: list, now: float):
+    """Bot control commands."""
+    sub = parts[1].lower() if len(parts) >= 2 else "help"
+    is_live = "--live" in parts
+
+    if sub == "help":
+        await ws.send_json({"type": "result", "success": True, "ts": now, "text": """
+──── BOT COMMANDS ───────────────────
+  bot cycle          Dry-run one cycle
+  bot cycle --live   Live-fire one cycle
+  bot status         Engine/strategist status
+  bot wallet-status  3-wallet balances + auth
+  bot rpc-status     RPC provider health
+  bot log-status     Event log statistics
+  bot beat           Beat engine (dry-run)
+  bot beat --live    Beat engine (live)
+  bot lau            LAU engine (dry-run)
+  bot lau --live     LAU engine (live)
+  bot e4-test        Force E4 test cycle
+  bot run            Start bot loop (background)
+  bot stop           Stop background bot
+─────────────────────────────────────""".strip()})
+
+    elif sub == "cycle":
+        flags = ["--once"]
+        if not is_live:
+            flags.append("--dry-run")
+        label = "Bot cycle (LIVE)" if is_live else "Bot cycle (dry-run)"
+        if is_live:
+            await ws.send_json({"type": "system", "ts": now,
+                                "text": "⚠ LIVE MODE — real transactions will be sent!"})
+        cmd = [_PYTHON, "-m", _BOT_MODULE] + flags
+        await _run_script(ws, cmd, label, timeout=300)
+
+    elif sub == "status":
+        cmd = [_PYTHON, "-m", _BOT_MODULE, "--status"]
+        await _run_script(ws, cmd, "Bot Status", timeout=60)
+
+    elif sub in ("wallet-status", "wallet"):
+        cmd = [_PYTHON, "-m", _BOT_MODULE, "--wallet-status"]
+        await _run_script(ws, cmd, "Wallet Status", timeout=60)
+
+    elif sub in ("rpc-status", "rpc"):
+        cmd = [_PYTHON, "-m", _BOT_MODULE, "--rpc-status"]
+        await _run_script(ws, cmd, "RPC Status", timeout=30)
+
+    elif sub in ("log-status", "log"):
+        cmd = [_PYTHON, "-m", _BOT_MODULE, "--log-status"]
+        await _run_script(ws, cmd, "Log Status", timeout=30)
+
+    elif sub == "beat":
+        flags = ["--beat-only"]
+        if not is_live:
+            flags.append("--dry-run")
+        label = "Beat Engine (LIVE)" if is_live else "Beat Engine (dry-run)"
+        if is_live:
+            await ws.send_json({"type": "system", "ts": now,
+                                "text": "⚠ LIVE MODE — real transactions will be sent!"})
+        cmd = [_PYTHON, "-m", _BOT_MODULE] + flags
+        await _run_script(ws, cmd, label, timeout=180)
+
+    elif sub == "lau":
+        flags = ["--lau-only"]
+        if not is_live:
+            flags.append("--dry-run")
+        label = "LAU Engine (LIVE)" if is_live else "LAU Engine (dry-run)"
+        if is_live:
+            await ws.send_json({"type": "system", "ts": now,
+                                "text": "⚠ LIVE MODE — real transactions will be sent!"})
+        cmd = [_PYTHON, "-m", _BOT_MODULE] + flags
+        await _run_script(ws, cmd, label, timeout=180)
+
+    elif sub in ("e4-test", "e4", "factory-test"):
+        cmd = [_PYTHON, "-m", _BOT_MODULE, "--force-test", "--dry-run", "--once"]
+        await _run_script(ws, cmd, "E4 TokenFactory Test", timeout=180)
+
+    elif sub == "run":
+        # Start bot as a background process
+        if "bot" in _bg_processes and _bg_processes["bot"].poll() is None:
+            await ws.send_json({"type": "result", "success": False, "ts": now,
+                                "text": "Bot is already running (PID "
+                                        f"{_bg_processes['bot'].pid}). Use 'bot stop' first."})
+            return
+
+        await ws.send_json({"type": "system", "ts": now,
+                            "text": "▶ Starting bot loop in background (dry-run)..."})
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        proc = subprocess.Popen(
+            [_PYTHON, "-m", _BOT_MODULE, "--dry-run"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(_REPO_DIR),
+            env=env,
+        )
+        _bg_processes["bot"] = proc
+        await ws.send_json({"type": "result", "success": True, "ts": now,
+                            "text": f"✓ Bot started (PID {proc.pid}, dry-run). "
+                                    f"Logs stream via WebSocket. Use 'bot stop' to halt."})
+
+    elif sub == "stop":
+        proc = _bg_processes.get("bot")
+        if not proc or proc.poll() is not None:
+            await ws.send_json({"type": "result", "success": False, "ts": now,
+                                "text": "No bot process running."})
+            _bg_processes.pop("bot", None)
+            return
+
+        pid = proc.pid
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        _bg_processes.pop("bot", None)
+        await ws.send_json({"type": "result", "success": True, "ts": now,
+                            "text": f"✓ Bot stopped (PID {pid})"})
+
+    else:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": f"Unknown bot command: {sub}. Type 'bot help' for options."})
 
 
 # ── Test commands ────────────────────────────────────────────────────
