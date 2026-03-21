@@ -183,3 +183,12 @@ HISTORY_DIR = os.path.join(os.path.dirname(__file__), "data")
 HISTORY_FILE = os.path.join(HISTORY_DIR, "balance_history.json")
 HISTORY_RECORD_INTERVAL = 900   # 15 minutes
 HISTORY_MAX_AGE = 604800        # 7 days (1 week)
+
+# ─── VOID COMMS (chat) ───────────────────────────────────────────
+FOMALHAUTE = "0x7aE73C498A308247BE73688c09c96B3fd06dDB84"  # ZHOU SHIO — log storage
+SEI = "0x3dC54d46e030C42979f33C9992348a990acb6067"         # player management
+ZHOU = "0x5cc318d0c01fed5942b5ed2f53db07727d36e261"
+COMMS_POLL_SEC = 30             # frontend polls comms every 30s
+COMMS_CACHE_TTL = 30            # server-side cache TTL (seconds)
+COMMS_CHUNK_SIZE = 5000         # max block range per eth_getLogs call
+BLOCKS_PER_DAY = 8640           # ~10s blocks on PulseChain
