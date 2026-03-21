@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .chain_reader import get_reader
-from .routes import wallet, engines, gas, overview
+from .routes import wallet, engines, gas, overview, terminal
 from .routes import tgsv8 as tgsv8_route
 from .routes import history_route
 
@@ -49,21 +49,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Routes ──────────────────────────────────────────────────────────
-app.include_router(wallet.router, prefix="/api", tags=["wallet"])
-app.include_router(engines.router, prefix="/api", tags=["engines"])
-app.include_router(gas.router, prefix="/api", tags=["gas"])
-app.include_router(overview.router, prefix="/api", tags=["overview"])
-app.include_router(tgsv8_route.router, prefix="/api", tags=["tgsv8"])
-app.include_router(history_route.router, prefix="/api", tags=["history"])
-
-# ─── Static frontend ────────────────────────────────────────────────
-_frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
-if os.path.isdir(_frontend_dir):
-    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
-
-
 # ─── Health check ────────────────────────────────────────────────────
+# Must be defined BEFORE the static mount at "/" which catches all routes
 @app.get("/health")
 async def health():
     """Health check — also verifies RPC connectivity."""
@@ -81,6 +68,21 @@ async def health():
             "status": "degraded",
             "error": str(e),
         }
+
+# ─── Routes ──────────────────────────────────────────────────────────
+app.include_router(wallet.router, prefix="/api", tags=["wallet"])
+app.include_router(engines.router, prefix="/api", tags=["engines"])
+app.include_router(gas.router, prefix="/api", tags=["gas"])
+app.include_router(overview.router, prefix="/api", tags=["overview"])
+app.include_router(tgsv8_route.router, prefix="/api", tags=["tgsv8"])
+app.include_router(history_route.router, prefix="/api", tags=["history"])
+app.include_router(terminal.router, prefix="/api", tags=["terminal"])
+
+# ─── Static frontend ────────────────────────────────────────────────
+# Must be LAST — mount at "/" catches all unmatched routes
+_frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.isdir(_frontend_dir):
+    app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
 
 
 # ─── Startup / shutdown ─────────────────────────────────────────────

@@ -167,6 +167,68 @@
     width: 100%;
   }
 
+  /* ─── Terminal ──────────────────────────────────────────────────── */
+  .terminal-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 400px;
+  }
+  .terminal-output {
+    flex: 1;
+    background: #050709;
+    border: 1px solid var(--card-border);
+    border-radius: 4px 4px 0 0;
+    padding: 8px 12px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-all;
+    scroll-behavior: smooth;
+  }
+  .terminal-output .t-system { color: var(--cyan); }
+  .terminal-output .t-log { color: var(--text-dim); }
+  .terminal-output .t-result { color: var(--green); }
+  .terminal-output .t-error { color: var(--red); }
+  .terminal-output .t-cmd { color: var(--yellow); }
+  .terminal-input-row {
+    display: flex;
+    border: 1px solid var(--card-border);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    background: #050709;
+  }
+  .terminal-prompt {
+    padding: 8px 4px 8px 12px;
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .terminal-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 12px 8px 4px;
+    caret-color: var(--green);
+  }
+  .terminal-input::placeholder { color: var(--text-dim); opacity: 0.5; }
+  .terminal-status {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 4px 0;
+  }
+  .ws-connected { color: var(--green); }
+  .ws-disconnected { color: var(--red); }
+
   .contract-section {
     margin-bottom: 12px;
     padding-bottom: 8px;
@@ -232,6 +294,24 @@
     <div class="stat-row">
       <span class="stat-label">Remaining</span>
       <span class="stat-value" id="v-remaining">--</span>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div class="card card-full">
+    <div class="card-title">
+      Terminal
+      <span class="terminal-status">
+        <span id="term-ws-status" class="ws-disconnected">● DISCONNECTED</span>
+      </span>
+    </div>
+    <div class="terminal-wrap">
+      <div class="terminal-output" id="term-output"></div>
+      <div class="terminal-input-row">
+        <span class="terminal-prompt">JOYSTICK&gt;</span>
+        <input type="text" class="terminal-input" id="term-input"
+               placeholder="status | engines | test | recon | help" autocomplete="off" spellcheck="false">
+      </div>
     </div>
   </div>
 
@@ -681,9 +761,99 @@ async function fetchHistory() {
   }
 }
 
+// ─── Terminal ────────────────────────────────────────────────────────
+const TERM_MAX_LINES = 500;
+let termWs = null;
+let termHistory = [];
+let termHistoryIdx = -1;
+const termOutput = () => document.getElementById('term-output');
+const termInput = () => document.getElementById('term-input');
+const termStatus = () => document.getElementById('term-ws-status');
+
+function termAppend(text, cls) {
+  const el = termOutput();
+  const div = document.createElement('div');
+  div.className = cls || '';
+  div.textContent = text;
+  el.appendChild(div);
+  while (el.childElementCount > TERM_MAX_LINES) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+function termConnect() {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${proto}//${window.location.host}/api/ws/terminal`;
+  termWs = new WebSocket(url);
+
+  termWs.onopen = () => {
+    termStatus().textContent = '\u25cf CONNECTED';
+    termStatus().className = 'ws-connected';
+  };
+  termWs.onclose = () => {
+    termStatus().textContent = '\u25cf DISCONNECTED';
+    termStatus().className = 'ws-disconnected';
+    setTimeout(termConnect, 3000);
+  };
+  termWs.onerror = () => { termWs.close(); };
+
+  termWs.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'clear') { termOutput().innerHTML = ''; return; }
+      const cls = {
+        'system': 't-system',
+        'log':    't-log',
+        'result': msg.success === false ? 't-error' : 't-result',
+      }[msg.type] || 't-log';
+      (msg.text || '').split('\n').forEach(line => termAppend(line, cls));
+    } catch (e) { console.error('Terminal parse error:', e); }
+  };
+}
+
+function termSend(cmd) {
+  if (!cmd.trim()) return;
+  termAppend('JOYSTICK> ' + cmd, 't-cmd');
+  termHistory.push(cmd);
+  if (termHistory.length > 50) termHistory.shift();
+  termHistoryIdx = termHistory.length;
+  if (termWs && termWs.readyState === WebSocket.OPEN) {
+    termWs.send(JSON.stringify({ type: 'command', text: cmd }));
+  } else {
+    termAppend('Not connected. Reconnecting...', 't-error');
+    termConnect();
+  }
+}
+
+async function termLoadInitial() {
+  try {
+    const res = await fetch(API_BASE + '/api/logs?n=50');
+    if (!res.ok) return;
+    const data = await res.json();
+    (data.lines || []).forEach(l => termAppend(l.text, 't-log'));
+  } catch (e) { /* logs may not exist yet */ }
+}
+
+function initTerminal() {
+  const input = termInput();
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { termSend(input.value); input.value = ''; }
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (termHistoryIdx > 0) { termHistoryIdx--; input.value = termHistory[termHistoryIdx] || ''; }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (termHistoryIdx < termHistory.length - 1) { termHistoryIdx++; input.value = termHistory[termHistoryIdx] || ''; }
+      else { termHistoryIdx = termHistory.length; input.value = ''; }
+    }
+  });
+  termLoadInitial();
+  termConnect();
+}
+
 // ─── Init ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initChart();
+  initTerminal();
   fetchOverview();
   fetchHistory();
   setInterval(fetchOverview, OVERVIEW_POLL);
