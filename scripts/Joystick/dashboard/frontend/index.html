@@ -508,6 +508,157 @@
   .explorer-badge.reverted { background: rgba(255,68,68,0.15); color: var(--red); }
   .explorer-badge.pending { background: rgba(255,204,0,0.15); color: var(--yellow); }
 
+  /* ─── COMMS Panel ──────────────────────────────────────────────── */
+  .comms-panel { position: relative; }
+  .comms-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .comms-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .comms-badge {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s;
+  }
+  .comms-badge.new { background: var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.6); }
+  .comms-range-btns { display: flex; gap: 4px; }
+  .comms-range-btn {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .comms-range-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .comms-range-btn.active { background: var(--green); color: var(--bg); font-weight: 700; }
+  .comms-messages {
+    background: #050709;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    padding: 8px 12px;
+    height: 320px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    scroll-behavior: smooth;
+    margin-top: 8px;
+  }
+  .comms-msg { padding: 1px 0; word-break: break-word; }
+  .comms-msg .cm-block {
+    color: var(--text-dim);
+    font-size: 10px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .comms-msg .cm-block:hover { text-decoration: underline; color: var(--cyan); }
+  .comms-msg.chat { color: #00ff41; }
+  .comms-msg.system { color: #666; }
+  .comms-msg.self { background: rgba(0,255,65,0.08); border-radius: 2px; padding: 1px 4px; }
+  .comms-new-indicator {
+    display: none;
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--green);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .comms-new-indicator.visible { display: block; }
+  .comms-status {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .comms-input-row {
+    display: flex;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    background: #050709;
+    margin-top: 8px;
+    align-items: center;
+  }
+  .comms-lau-select {
+    background: var(--card-border);
+    border: none;
+    border-right: 1px solid var(--card-border);
+    border-radius: 4px 0 0 4px;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 8px 8px;
+    outline: none;
+    min-width: 140px;
+  }
+  .comms-lau-select option { background: var(--card-bg); color: var(--text); }
+  .comms-chat-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 12px;
+    caret-color: var(--green);
+  }
+  .comms-chat-input::placeholder { color: var(--text-dim); opacity: 0.5; }
+  .comms-send-btn {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--green);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 14px;
+    margin: 4px 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .comms-send-btn:hover { background: var(--green); color: var(--bg); }
+  .comms-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .comms-wallet-status {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .comms-connect-btn {
+    background: none;
+    border: 1px solid var(--cyan);
+    border-radius: 3px;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .comms-connect-btn:hover { background: var(--cyan); color: var(--bg); }
+
   @media (max-width: 768px) {
     .card-wide { grid-column: span 1; }
     .grid { grid-template-columns: 1fr; }
@@ -675,6 +826,47 @@
         <div class="engine-detail-info" id="ed-info"></div>
         <div class="engine-detail-term" id="ed-term"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- COMMS — The Void -->
+  <div class="card card-full comms-panel">
+    <div class="comms-header">
+      <div class="comms-title-row">
+        <div class="card-title" style="margin-bottom:0; padding-bottom:0; border-bottom:none">
+          COMMS &mdash; The Void
+        </div>
+        <span class="comms-badge" id="comms-badge"></span>
+      </div>
+      <div class="comms-range-btns" id="comms-range-btns">
+        <button class="comms-range-btn active" data-blocks="8640">24h</button>
+        <button class="comms-range-btn" data-blocks="25920">3d</button>
+        <button class="comms-range-btn" data-blocks="60480">7d</button>
+        <button class="comms-range-btn" data-blocks="120960">14d</button>
+        <button class="comms-range-btn" data-blocks="0">Rescan</button>
+      </div>
+    </div>
+    <div class="comms-messages" id="comms-messages">
+      <div style="color:var(--text-dim); font-style:italic">Loading VOID chat...</div>
+    </div>
+    <div class="comms-new-indicator" id="comms-new-indicator">&#x2193; New messages</div>
+    <div class="comms-status">
+      <span id="comms-scan-info">--</span>
+      <span id="comms-count">--</span>
+    </div>
+    <div class="comms-input-row">
+      <select class="comms-lau-select" id="comms-lau-select">
+        <option value="0x66a08aa12da955eb63d7ac121a88b2b210a07b03">GIBS (Joey)</option>
+        <option value="0x965B0d74591bF30327075A247C47dBf487dCff08">VOID</option>
+      </select>
+      <input type="text" class="comms-chat-input" id="comms-chat-input"
+             placeholder="Type a message to the Void..." maxlength="256"
+             autocomplete="off" spellcheck="false">
+      <button class="comms-send-btn" id="comms-send-btn" disabled>TX</button>
+    </div>
+    <div class="comms-wallet-status">
+      <span id="comms-wallet-addr">Wallet: not connected</span>
+      <button class="comms-connect-btn" id="comms-connect-btn">Connect Wallet</button>
     </div>
   </div>
 
@@ -1504,12 +1696,326 @@ function initTerminal() {
   termConnect();
 }
 
+// ─── COMMS — The Void ───────────────────────────────────────────────
+const COMMS_POLL = 30000;  // 30s
+let commsBlockRange = 8640;  // default 24h
+let commsMessages = [];
+let commsLastBlock = 0;
+let commsAutoScroll = true;
+let commsWalletAddr = null;
+
+// Joey's soul ID (for highlighting own messages)
+const JOEY_SOUL = 578;
+
+// Chat(string) selector — keccak256("Chat(string)")[:4]
+const CHAT_SELECTOR = '0xe3c55826';
+
+function encodeChatCall(message) {
+  const msgBytes = new TextEncoder().encode(message);
+  const offset = '0000000000000000000000000000000000000000000000000000000000000020';
+  const length = msgBytes.length.toString(16).padStart(64, '0');
+  let dataHex = '';
+  for (let i = 0; i < msgBytes.length; i++) {
+    dataHex += msgBytes[i].toString(16).padStart(2, '0');
+  }
+  // Pad to 32-byte boundary
+  const padLen = Math.ceil(dataHex.length / 64) * 64;
+  dataHex = dataHex.padEnd(padLen, '0');
+  return CHAT_SELECTOR + offset + length + dataHex;
+}
+
+function classifyMsg(msg) {
+  if (/\w+ says: /.test(msg)) return 'chat';
+  return 'system';
+}
+
+function renderCommsMsg(m) {
+  const div = document.createElement('div');
+  const type = classifyMsg(m.msg);
+  const isSelf = (m.soul === JOEY_SOUL);
+  div.className = 'comms-msg ' + type + (isSelf ? ' self' : '');
+
+  const blockLink = document.createElement('a');
+  blockLink.className = 'cm-block';
+  blockLink.href = 'https://scan.pulsechain.com/block/' + m.block;
+  blockLink.target = '_blank';
+  blockLink.rel = 'noopener';
+  blockLink.textContent = '[' + m.block.toLocaleString() + '] ';
+
+  const msgText = document.createTextNode(m.msg);
+  div.appendChild(blockLink);
+  div.appendChild(msgText);
+  return div;
+}
+
+async function fetchComms(forceRescan) {
+  try {
+    const res = await fetch(API_BASE + '/api/comms?blocks=' + commsBlockRange + '&tail=200');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const container = document.getElementById('comms-messages');
+    const badge = document.getElementById('comms-badge');
+    const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+
+    // Check for new messages
+    const hadNew = data.block > commsLastBlock && commsMessages.length > 0 && data.messages.length > commsMessages.length;
+    if (hadNew) {
+      badge.classList.add('new');
+      setTimeout(() => badge.classList.remove('new'), 3000);
+    }
+
+    commsMessages = data.messages;
+    commsLastBlock = data.block;
+
+    // Render
+    container.innerHTML = '';
+    if (commsMessages.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-dim); font-style:italic">No messages in range.</div>';
+    } else {
+      commsMessages.forEach(m => container.appendChild(renderCommsMsg(m)));
+    }
+
+    // Auto-scroll
+    if (wasAtBottom || commsAutoScroll) {
+      container.scrollTop = container.scrollHeight;
+      commsAutoScroll = false;
+    } else {
+      document.getElementById('comms-new-indicator').classList.toggle('visible', hadNew);
+    }
+
+    // Status
+    document.getElementById('comms-scan-info').textContent =
+      'Blocks ' + data.scan_range[0].toLocaleString() + ' \u2192 ' + data.scan_range[1].toLocaleString();
+    document.getElementById('comms-count').textContent =
+      data.total_found + ' found / ' + data.returned + ' shown';
+
+  } catch (e) {
+    console.error('COMMS fetch failed:', e);
+  }
+}
+
+function initComms() {
+  // Range buttons
+  document.querySelectorAll('.comms-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.comms-range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const blocks = parseInt(btn.dataset.blocks);
+      if (blocks > 0) commsBlockRange = blocks;
+      commsAutoScroll = true;
+      fetchComms(true);
+    });
+  });
+
+  // Scroll tracking
+  const container = document.getElementById('comms-messages');
+  container.addEventListener('scroll', () => {
+    if (container.scrollHeight - container.scrollTop - container.clientHeight < 40) {
+      document.getElementById('comms-new-indicator').classList.remove('visible');
+    }
+  });
+
+  // New message indicator click
+  document.getElementById('comms-new-indicator').addEventListener('click', () => {
+    container.scrollTop = container.scrollHeight;
+    document.getElementById('comms-new-indicator').classList.remove('visible');
+  });
+
+  // Wallet connection
+  document.getElementById('comms-connect-btn').addEventListener('click', connectCommsWallet);
+
+  // Send button
+  document.getElementById('comms-send-btn').addEventListener('click', sendCommsChat);
+  document.getElementById('comms-chat-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !document.getElementById('comms-send-btn').disabled) {
+      sendCommsChat();
+    }
+  });
+
+  // LAU select — persist in localStorage
+  const lauSelect = document.getElementById('comms-lau-select');
+  const savedLau = localStorage.getItem('comms_lau');
+  if (savedLau) {
+    const opts = Array.from(lauSelect.options).map(o => o.value.toLowerCase());
+    if (opts.includes(savedLau.toLowerCase())) {
+      lauSelect.value = savedLau;
+    }
+  }
+  lauSelect.addEventListener('change', () => {
+    localStorage.setItem('comms_lau', lauSelect.value);
+  });
+
+  // Check if wallet already connected
+  if (window.ethereum && window.ethereum.selectedAddress) {
+    commsWalletAddr = window.ethereum.selectedAddress;
+    updateCommsWalletUI();
+  }
+
+  // Initial fetch
+  commsAutoScroll = true;
+  fetchComms(false);
+
+  // Poll
+  setInterval(() => fetchComms(false), COMMS_POLL);
+}
+
+async function connectCommsWallet() {
+  if (!window.ethereum) {
+    alert('No wallet detected. Install MetaMask or Rabby.');
+    return;
+  }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    if (accounts && accounts.length > 0) {
+      commsWalletAddr = accounts[0];
+      updateCommsWalletUI();
+
+      // Ensure PulseChain network
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x171' }],
+        });
+      } catch (switchErr) {
+        if (switchErr.code === 4902) {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0x171',
+              chainName: 'PulseChain',
+              rpcUrls: ['https://rpc.pulsechain.com'],
+              nativeCurrency: { name: 'PLS', symbol: 'PLS', decimals: 18 },
+              blockExplorerUrls: ['https://scan.pulsechain.com'],
+            }],
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Wallet connect failed:', e);
+  }
+}
+
+function updateCommsWalletUI() {
+  const addrEl = document.getElementById('comms-wallet-addr');
+  const connectBtn = document.getElementById('comms-connect-btn');
+  const sendBtn = document.getElementById('comms-send-btn');
+
+  if (commsWalletAddr) {
+    addrEl.textContent = 'Wallet: ' + commsWalletAddr.slice(0, 6) + '...' + commsWalletAddr.slice(-4);
+    addrEl.style.color = 'var(--green)';
+    connectBtn.textContent = 'Connected';
+    connectBtn.style.borderColor = 'var(--green)';
+    connectBtn.style.color = 'var(--green)';
+    sendBtn.disabled = false;
+  } else {
+    addrEl.textContent = 'Wallet: not connected';
+    addrEl.style.color = '';
+    connectBtn.textContent = 'Connect Wallet';
+    connectBtn.style.borderColor = '';
+    connectBtn.style.color = '';
+    sendBtn.disabled = true;
+  }
+}
+
+async function sendCommsChat() {
+  if (!commsWalletAddr) {
+    alert('Connect wallet first.');
+    return;
+  }
+
+  const input = document.getElementById('comms-chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  const sendBtn = document.getElementById('comms-send-btn');
+  const lauAddr = document.getElementById('comms-lau-select').value;
+
+  sendBtn.disabled = true;
+  sendBtn.textContent = '...';
+
+  try {
+    const calldata = encodeChatCall(message);
+
+    // Estimate gas first
+    let gasEstimate;
+    try {
+      gasEstimate = await window.ethereum.request({
+        method: 'eth_estimateGas',
+        params: [{
+          from: commsWalletAddr,
+          to: lauAddr,
+          data: calldata,
+        }],
+      });
+    } catch (gasErr) {
+      alert('Gas estimation failed: ' + (gasErr.message || gasErr));
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'TX';
+      return;
+    }
+
+    // Send TX via wallet
+    const txHash = await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from: commsWalletAddr,
+        to: lauAddr,
+        data: calldata,
+        gas: gasEstimate,
+        chainId: '0x171',
+      }],
+    });
+
+    // Show pending status
+    input.value = '';
+    sendBtn.textContent = 'SENT';
+    sendBtn.style.color = 'var(--cyan)';
+
+    // Append optimistic message
+    const container = document.getElementById('comms-messages');
+    const optimistic = document.createElement('div');
+    optimistic.className = 'comms-msg chat self';
+    optimistic.style.opacity = '0.6';
+    optimistic.innerHTML = '<span class="cm-block" style="color:var(--yellow)">[pending] </span>' + message + ' (confirming...)';
+    container.appendChild(optimistic);
+    container.scrollTop = container.scrollHeight;
+
+    // Refresh after confirmation delay
+    setTimeout(() => {
+      fetchComms(false);
+      sendBtn.textContent = 'TX';
+      sendBtn.style.color = '';
+      sendBtn.disabled = false;
+    }, 15000);
+
+  } catch (e) {
+    if (e.code === 4001) {
+      // User rejected
+    } else {
+      alert('TX failed: ' + (e.message || e));
+    }
+    sendBtn.textContent = 'TX';
+    sendBtn.disabled = false;
+  }
+}
+
+// Listen for account changes
+if (window.ethereum) {
+  window.ethereum.on('accountsChanged', (accounts) => {
+    commsWalletAddr = accounts.length > 0 ? accounts[0] : null;
+    updateCommsWalletUI();
+  });
+}
+
 // ─── Init ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initChart();
   initTerminal();
   initTimeframeButtons();
   initExplorer();
+  initComms();
   requestAnimationFrame(tickBlockRing);
   document.getElementById('wallet-toggle').addEventListener('click', () => {
     const bd = document.getElementById('wallet-breakdown');
