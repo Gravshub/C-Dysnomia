@@ -1,5 +1,5 @@
 """
-beat.py — Engine 4: CHEON.Su() → META.Beat() → Territory metrics
+beat.py — Engine 3 (MERIDIAN): CHEON.Su() → META.Beat() → Territory metrics
 
 Wraps the logic from scripts/tx_full_beat_flow.py.
 Beat establishes territorial position (Dione, Charge, Deimos, Yeo) for GIBS QING.
@@ -42,7 +42,7 @@ BEAT_MAX_GAS_PLS = 3.0 * 10**18  # 3 PLS max gas to bother running Beat
 
 class BeatEngine(EngineBase):
     """
-    Engine 4: META.Beat() territory computation.
+    Engine 3 (MERIDIAN): META.Beat() territory computation.
     Strategic engine — provides game-layer value even without direct PLS profit.
     """
     name = "Beat"
@@ -104,7 +104,8 @@ class BeatEngine(EngineBase):
         except SimulationFailed:
             # Su() needed — estimate conservatively
             gas_est = 2_500_000
-        gas_cost_wei = int(gas_est * gas_price * 1.3)
+        # Gas cost estimate uses raw gas_est * gas_price (not the 1.3x limit multiplier)
+        gas_cost_wei = int(gas_est * gas_price)
 
         if gas_cost_wei > BEAT_MAX_GAS_PLS:
             raise SimulationFailed(

@@ -54,7 +54,7 @@ load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, PULSEX_V1_ROUTER, TGSV8PLUS,
-    CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR, AdaptiveDelay,
+    CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR, MAX_SLIPPAGE, AdaptiveDelay,
 )
 from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_health, get_read_pool
 from .core.wallet import reset_nonce, fmt_pls, pls_balance
@@ -456,9 +456,14 @@ class DysnomiaBot:
         deadline = int(time.time()) + 300
         log.info("Compounding %.4f PLS → AFFECTION", compound_wei / 1e18)
         try:
+            # Quote expected output for slippage protection
+            from .oracle.price import get_amounts_out
+            amounts = get_amounts_out(compound_wei, [WPLS, AFFECTION])
+            expected_out = amounts[-1] if amounts else 0
+            min_out = int(expected_out * (1.0 - MAX_SLIPPAGE)) if expected_out else 1
             send_tx(
                 router.functions.swapExactETHForTokens(
-                    1, [WPLS, AFFECTION], JOEY_WALLET, deadline
+                    min_out, [WPLS, AFFECTION], JOEY_WALLET, deadline
                 ),
                 "Compound PLS → AFFECTION",
                 dry_run=False,

@@ -64,10 +64,16 @@ def _load_cache() -> list[dict] | None:
 
 def _save_cache(tokens: list[dict]) -> None:
     try:
-        with open(CACHE_FILE, "w") as f:
+        tmp = CACHE_FILE + ".tmp"
+        with open(tmp, "w") as f:
             json.dump({"timestamp": time.time(), "tokens": tokens}, f)
+        os.replace(tmp, CACHE_FILE)
     except Exception as exc:
         log.debug("Cache save failed: %s", exc)
+        try:
+            os.remove(CACHE_FILE + ".tmp")
+        except OSError:
+            pass
 
 
 # ── Blockscout MAP QING discovery ─────────────────────────────────────────────
@@ -97,7 +103,7 @@ def _fetch_qings_blockscout() -> list[str]:
             for tx in data["result"]:
                 # Internal txs from MAP = contract deployments (QING contracts)
                 contract_addr = tx.get("contractAddress", "")
-                if contract_addr and contract_addr != "0x" * 21:
+                if contract_addr and contract_addr != "0x" + "0" * 40:
                     qings.append(Web3.to_checksum_address(contract_addr))
             if len(data["result"]) < 100:
                 break

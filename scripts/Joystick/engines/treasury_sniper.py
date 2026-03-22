@@ -1,5 +1,5 @@
 """
-Engine 5 — Treasury Sniper
+Engine 6 (DaVINCI) — Treasury Sniper
 |>JOYSTICK<| / Dysnomia · Atropa · PulseChain
 
 What it does:
@@ -73,7 +73,7 @@ class TreasuryTarget:
 
 class TreasurySniperEngine(EngineBase):
     """
-    Engine 5 — Treasury Sniper.
+    Engine 6 (DaVINCI) — Treasury Sniper.
 
     Reads recon_results.json (written by treasury_recon.py) and executes
     profitable claimFromTreasury operations through TGSv8.
@@ -97,20 +97,20 @@ class TreasurySniperEngine(EngineBase):
     def is_ready(self) -> bool:
         """Ready when TGSv8 is set, recon data exists, and we have WPLS."""
         if not TGSV8:
-            log.debug("E5: TGSV8_ADDRESS not set")
+            log.debug("E6: TGSV8_ADDRESS not set")
             return False
         if not os.path.exists(self._recon_path):
-            log.debug("E5: recon_results.json not found — run treasury_recon.py first")
+            log.debug("E6: recon_results.json not found — run treasury_recon.py first")
             return False
         try:
             tgsv8 = tgsv8_contract()
             wpls_bal = safe(tgsv8, "bal", Web3.to_checksum_address(WPLS)) or 0
             native_bal = safe(tgsv8, "nativeBal") or 0
             if wpls_bal + native_bal < 100 * 10**18:
-                log.debug("E5: TGSv8 working balance too low (WPLS=%.1f)", wpls_bal / 1e18)
+                log.debug("E6: TGSv8 working balance too low (WPLS=%.1f)", wpls_bal / 1e18)
                 return False
         except Exception as e:
-            log.debug("E5: TGSv8 check failed: %s", e)
+            log.debug("E6: TGSv8 check failed: %s", e)
             return False
         return True
 
@@ -160,7 +160,7 @@ class TreasurySniperEngine(EngineBase):
                     self._claimed.add(t.address.lower())
             return result
         except Exception as e:
-            log.error("E5 execute error: %s", e)
+            log.error("E6execute error: %s", e)
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
                                 notes=str(e))
 
@@ -175,7 +175,7 @@ class TreasurySniperEngine(EngineBase):
         from ..oracle.data_store import DataStore
         recon = DataStore.get().recon_data(max_age=RECON_CACHE_TTL)
         if not recon:
-            log.warning("E5: failed to load recon_results.json")
+            log.warning("E6: failed to load recon_results.json")
             return
 
         targets = []
@@ -200,7 +200,8 @@ class TreasurySniperEngine(EngineBase):
 
             qty_tokens = self_bal / (10 ** decimals)
             parent_pls = pls_per_tok
-            est_pls    = qty_tokens * parent_pls / 1e18
+            # Both qty_tokens and parent_pls are human-readable floats
+            est_pls    = qty_tokens * parent_pls
 
             if est_pls < MIN_PROFIT_PLS:
                 continue
@@ -220,7 +221,7 @@ class TreasurySniperEngine(EngineBase):
         targets.sort(key=lambda t: t.estimated_pls, reverse=True)
         self._targets = targets
         self._last_load = now
-        log.info("E5: loaded %d treasury targets from recon", len(targets))
+        log.info("E6: loaded %d treasury targets from recon", len(targets))
 
     def _pick_best_batch(self) -> list[TreasuryTarget]:
         """Choose the best batch of treasury targets for this cycle."""
@@ -228,7 +229,7 @@ class TreasurySniperEngine(EngineBase):
             return []
 
         gas_price    = w3_read.eth.gas_price
-        gas_cost_wei = GAS_PER_CLAIM * gas_price * GAS_MULT
+        gas_cost_wei = int(GAS_PER_CLAIM * gas_price * GAS_MULT)
 
         profitable = []
         for t in self._targets:
@@ -239,7 +240,7 @@ class TreasurySniperEngine(EngineBase):
             if claim_amount == 0:
                 continue
 
-            profit_est = claim_amount / (10 ** t.decimals) * t.parent_pls / 1e18
+            profit_est = claim_amount / (10 ** t.decimals) * t.parent_pls
             if int(profit_est * 10**18) > gas_cost_wei:
                 profitable.append(t)
 
@@ -295,7 +296,7 @@ class TreasurySniperEngine(EngineBase):
         if result and result.get("status") == 1:
             gas_used = result["gasUsed"] * result.get("effectiveGasPrice", gas_price)
             tx_hash = result["transactionHash"].hex()
-            log.info("E5 SUCCESS — claimed from %d treasuries", len(treasuries))
+            log.info("E6 SUCCESS — claimed from %d treasuries", len(treasuries))
             return EngineResult(
                 success=True, profit_wei=total_est_pls, gas_wei=gas_used,
                 tx_hashes=[tx_hash],

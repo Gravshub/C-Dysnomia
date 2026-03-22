@@ -16,9 +16,9 @@ from .log_names import get_logger
 
 from .config import (
     JOEY_WALLET, GIBS_LAU, AFFECTION, WPLS,
-    PULSEX_V1_ROUTER, PLS_GAS_FLOOR, PLS_REPLENISH, MAX_SLIPPAGE,
+    PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, PLS_GAS_FLOOR, PLS_REPLENISH, MAX_SLIPPAGE,
 )
-from .chain import erc20, router_contract, safe
+from .chain import erc20, router_contract, safe, ROUTER_ABI, w3_submit
 from .wallet import pls_balance, fmt_pls, account
 from .executor import send_tx, approve_if_needed
 from .simulator import SimulationFailed
@@ -74,21 +74,22 @@ class GasGuard:
 
         log.warning("Emergency refill needed: %s", fmt_pls(need_wei))
 
-        router = router_contract(w3=None)
+        # GIBS/WPLS is a V2 pair — use V2 router for GIBS sell
+        router_v2 = w3_submit.eth.contract(address=PULSEX_V2_ROUTER, abi=ROUTER_ABI)
+        router_v1 = router_contract(w3=w3_submit)
         deadline = int(time.time()) + 300
 
-        # Try GIBS first
+        # Try GIBS first (V2 pair)
         gibs = erc20(GIBS_LAU)
         gibs_bal = safe(gibs, "balanceOf", JOEY_WALLET) or 0
 
         if gibs_bal > 0:
             # Calculate how much GIBS to sell to receive need_wei PLS
             try:
-                amounts = safe(router, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
+                amounts = safe(router_v2, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
                 if amounts and amounts[-1] >= need_wei:
-                    # Partial sell — use getAmountsIn to find exact GIBS needed
                     partial_amounts = safe(
-                        router, "getAmountsIn", need_wei, [GIBS_LAU, WPLS]
+                        router_v2, "getAmountsIn", need_wei, [GIBS_LAU, WPLS]
                     )
                     sell_gibs = min(
                         partial_amounts[0] if partial_amounts else gibs_bal,
@@ -100,15 +101,15 @@ class GasGuard:
                 sell_gibs = gibs_bal
 
             min_pls = int(need_wei * (1 - MAX_SLIPPAGE))
-            log.info("Selling %.4f GIBS for PLS", sell_gibs / 1e18)
+            log.info("Selling %.4f GIBS for PLS (V2)", sell_gibs / 1e18)
 
             try:
-                approve_if_needed(gibs, PULSEX_V1_ROUTER, sell_gibs, "GIBS", dry_run=dry_run)
+                approve_if_needed(gibs, PULSEX_V2_ROUTER, sell_gibs, "GIBS", dry_run=dry_run)
                 send_tx(
-                    router.functions.swapExactTokensForETH(
+                    router_v2.functions.swapExactTokensForETH(
                         sell_gibs, min_pls, [GIBS_LAU, WPLS], JOEY_WALLET, deadline
                     ),
-                    "Emergency: GIBS → PLS",
+                    "Emergency: GIBS → PLS (V2)",
                     dry_run=dry_run,
                     skip_simulate=True,  # ETH-out functions need skip due to msg.value
                 )
@@ -117,16 +118,29 @@ class GasGuard:
             except (SimulationFailed, AssertionError) as exc:
                 log.error("GIBS sell failed: %s — trying AFFECTION fallback", exc)
 
-        # Fallback: sell AFFECTION
+        # Fallback: sell AFFECTION (try V2 first, fall back to V1)
         aff = erc20(AFFECTION)
         aff_bal = safe(aff, "balanceOf", JOEY_WALLET) or 0
 
         if aff_bal > 0:
-            # Calculate partial sell amount
+            # Try V2 first, then V1
+            aff_router = router_v2
+            aff_router_addr = PULSEX_V2_ROUTER
             try:
-                amounts = safe(router, "getAmountsOut", aff_bal, [AFFECTION, WPLS])
+                amounts = safe(aff_router, "getAmountsOut", aff_bal, [AFFECTION, WPLS])
+                if not amounts or amounts[-1] == 0:
+                    # No V2 pair — fall back to V1
+                    aff_router = router_v1
+                    aff_router_addr = PULSEX_V1_ROUTER
+                    amounts = safe(aff_router, "getAmountsOut", aff_bal, [AFFECTION, WPLS])
+            except Exception:
+                aff_router = router_v1
+                aff_router_addr = PULSEX_V1_ROUTER
+                amounts = safe(aff_router, "getAmountsOut", aff_bal, [AFFECTION, WPLS])
+
+            try:
                 if amounts and amounts[-1] >= need_wei:
-                    partial = safe(router, "getAmountsIn", need_wei, [AFFECTION, WPLS])
+                    partial = safe(aff_router, "getAmountsIn", need_wei, [AFFECTION, WPLS])
                     sell_aff = min(partial[0] if partial else aff_bal, aff_bal)
                 else:
                     sell_aff = aff_bal
@@ -136,9 +150,9 @@ class GasGuard:
             min_pls = int(need_wei * (1 - MAX_SLIPPAGE))
             log.info("Selling %.4f AFFECTION for PLS (fallback)", sell_aff / 1e18)
             try:
-                approve_if_needed(aff, PULSEX_V1_ROUTER, sell_aff, "AFFECTION", dry_run=dry_run)
+                approve_if_needed(aff, aff_router_addr, sell_aff, "AFFECTION", dry_run=dry_run)
                 send_tx(
-                    router.functions.swapExactTokensForETH(
+                    aff_router.functions.swapExactTokensForETH(
                         sell_aff, min_pls, [AFFECTION, WPLS], JOEY_WALLET, deadline
                     ),
                     "Emergency: AFFECTION → PLS",

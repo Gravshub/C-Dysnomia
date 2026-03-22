@@ -118,9 +118,6 @@ HARVEST_USE_SAFE   = os.getenv("HARVEST_USE_SAFE", "true").lower() == "true"  # 
 V4_MINTER = Web3.to_checksum_address("0x394c3D5990cEfC7Be36B82FDB07a7251ACe61cc7")
 V3_MINTER = Web3.to_checksum_address("0x0c4F73328dFCECfbecf235C9F78A4494a7EC5ddC")
 
-# PulseX V2 Router
-PULSEX_V2_ROUTER = Web3.to_checksum_address("0x165C3410fC91EF562C50559f7d2289fEbed552d9")
-
 # ── Multi-mint contracts (Helios) ────────────────────────────────────────
 MULTI_AFFECTION = Web3.to_checksum_address("0xCF138a83D739eE98D7A54159E94e5BFaa4B61988")
 

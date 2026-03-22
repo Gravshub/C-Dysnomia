@@ -11,11 +11,7 @@ Formula (Uniswap v2 amountOut with 0.3% fee):
 import logging
 
 from ..core.log_names import get_logger
-from decimal import Decimal, getcontext
 
-from ..core.chain import w3_read
-
-getcontext().prec = 28
 log = get_logger(__name__)
 
 
@@ -103,6 +99,12 @@ def arb_profit(
     payment_path = [token_record["payment"], WPLS]
     payment_amounts = get_amounts_out(payment_cost, payment_path)
     payment_pls = payment_amounts[-1] if payment_amounts else 0
+
+    if payment_pls == 0 and payment_cost > 0:
+        return {
+            "profitable": False, "profit_wei": 0, "token_amount": token_amount,
+            "reason": "Cannot price payment token — no DEX liquidity for cost estimation",
+        }
 
     # DEX output using exact Uniswap v2 formula
     dex_out = uniswap_v2_out(token_amount, r_tok, r_wpls)

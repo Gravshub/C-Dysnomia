@@ -202,8 +202,6 @@ def _mc3(calls: list[tuple[str, bytes]]) -> list[tuple[bool, bytes]]:
 
 def _encode_get_pair(token_a: str, token_b: str) -> bytes:
     """Encode factory.getPair(tokenA, tokenB) calldata."""
-    a_bytes = bytes.fromhex(token_a[2:].lower().zfill(64))
-    b_bytes = bytes.fromhex(token_b[2:].lower().zfill(64))
     # ABI encode: selector + address padded to 32 bytes each
     return (
         GET_PAIR_SIG
@@ -421,14 +419,20 @@ def batch_get_reserves(graph: PairGraph) -> None:
 # ── Cache management ─────────────────────────────────────────────────────────
 
 def save_pair_graph(graph: PairGraph) -> None:
-    """Persist the pair graph to disk."""
+    """Persist the pair graph to disk via atomic write."""
     try:
         os.makedirs(_DATA_DIR, exist_ok=True)
-        with open(REGISTRY_CACHE, "w") as f:
+        tmp = REGISTRY_CACHE + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(graph.to_dict(), f)
+        os.replace(tmp, REGISTRY_CACHE)
         log.debug("Pair graph saved: %d edges", graph.edge_count)
     except Exception as exc:
         log.warning("Failed to save pair graph: %s", exc)
+        try:
+            os.remove(REGISTRY_CACHE + ".tmp")
+        except OSError:
+            pass
 
 
 def load_pair_graph() -> Optional[PairGraph]:

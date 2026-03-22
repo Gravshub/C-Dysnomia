@@ -42,6 +42,7 @@ class WalletConfig:
     private_key: str               # raw hex key
     gas_floor:   int               # in wei
     account:     LocalAccount      # eth_account signing object
+    nonce_tracker: 'WalletNonce | None' = None  # set by WalletManager
 
 
 class WalletNonce:
@@ -137,14 +138,16 @@ class WalletManager:
                 "%s key resolves to %s, expected %s",
                 role.value, acct.address, expected_address,
             )
+        nonce = WalletNonce(Web3.to_checksum_address(acct.address), self._submit_pool)
         config = WalletConfig(
             role=role,
             address=Web3.to_checksum_address(acct.address),
             private_key=key,
             gas_floor=gas_floor,
             account=acct,
+            nonce_tracker=nonce,
         )
-        self._nonces[role] = WalletNonce(config.address, self._submit_pool)
+        self._nonces[role] = nonce
         log.info("👛 %s wallet loaded: %s", role.value.upper(), config.address)
         return config
 
@@ -165,14 +168,16 @@ class WalletManager:
                     "%s key resolves to %s, expected %s",
                     role.value, address, expected,
                 )
+        nonce = WalletNonce(address, self._submit_pool)
         config = WalletConfig(
             role=role,
             address=address,
             private_key=key,
             gas_floor=gas_floor,
             account=acct,
+            nonce_tracker=nonce,
         )
-        self._nonces[role] = WalletNonce(config.address, self._submit_pool)
+        self._nonces[role] = nonce
         log.info("👛 %s wallet loaded: %s", role.value.upper(), config.address)
         return config
 

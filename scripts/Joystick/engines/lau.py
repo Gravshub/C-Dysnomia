@@ -360,7 +360,7 @@ class LAUState:
 
 class LAUEngine(EngineBase):
     """
-    Engine 6 — LAU Mathematical State Loop + Universal Emit Sniper.
+    Engine 5 (ABUPRU) — LAU Mathematical State Loop + Universal Emit Sniper.
 
     Executes the 6-step Faung advancement sequence on Dynamic contracts
     (AFFECTION + optionally GIBS_LAU), then scans every receipt for
