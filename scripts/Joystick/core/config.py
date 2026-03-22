@@ -104,6 +104,11 @@ TGSV8 = os.getenv("TGSV8_ADDRESS", "")
 # spread selling, generic execute. Deployed alongside TGSv8 (not a replacement).
 TGSV8PLUS = os.getenv("TGSV8PLUS_ADDRESS", "")
 
+# JoystickHub (modular proxy for harvest + AFF acquisition + Purchase arb)
+JOYSTICK_HUB = os.getenv("JOYSTICK_HUB_ADDRESS", "")
+if JOYSTICK_HUB:
+    JOYSTICK_HUB = Web3.to_checksum_address(JOYSTICK_HUB)
+
 # ── E2 Harvest Cycle Configuration ──────────────────────────────────────
 # All values in basis points (0-10000). Override via env vars.
 # Default strategy: 45% sell for PLS, 55% re-LP, burn 90% of new LP tokens.
