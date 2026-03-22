@@ -103,12 +103,9 @@ def send_tx(
     log.info("  ⛽ Gas: %d  Beats: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
 
     # Step 4: Build TX with local nonce
-    # Use wallet_ctx's nonce if available, else fall back to Joey's global nonce
-    if wallet_ctx is not None:
-        from .wallet_manager import WalletNonce as _WN
-        # wallet_ctx doesn't carry its own nonce tracker — use the global one
-        # The WalletManager handles nonce tracking externally
-        nonce = wallet.next_nonce()  # fallback
+    # Use wallet_ctx's nonce tracker if available, else fall back to Joey's global nonce
+    if wallet_ctx is not None and hasattr(wallet_ctx, 'nonce_tracker') and wallet_ctx.nonce_tracker:
+        nonce = wallet_ctx.nonce_tracker.next()
     else:
         nonce = wallet.next_nonce()
 

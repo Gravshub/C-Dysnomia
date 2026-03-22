@@ -50,7 +50,7 @@ class SellQueue:
         Returns sorted by est_pls_out descending.
         """
         from .chain import erc20, get_read_pool, multicall
-        from .config import WPLS, PULSEX_V1_ROUTER, PULSEX_V1_FACTORY, PULSEX_V2_FACTORY
+        from .config import WPLS, PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, PULSEX_V1_FACTORY, PULSEX_V2_FACTORY
         from ..oracle.price import get_amounts_out
 
         if not self.tgsv8_address:
@@ -80,7 +80,7 @@ class SellQueue:
             # Estimate PLS output via both routers
             best_pls = 0
             best_dex = "V2"
-            for dex_label, router_addr in [("V1", PULSEX_V1_ROUTER), ("V2", PULSEX_V1_ROUTER)]:
+            for dex_label, router_addr in [("V1", PULSEX_V1_ROUTER), ("V2", PULSEX_V2_ROUTER)]:
                 try:
                     amounts = get_amounts_out(bal, [addr, WPLS], router=router_addr)
                     if amounts and amounts[-1] > best_pls:

@@ -1,5 +1,5 @@
 """
-Engine 6 — Spine Runner
+Engine 7 (BACKBONE) — Spine Runner
 |>JOYSTICK<| / Dysnomia · Atropa · PulseChain
 
 What it does:
@@ -80,7 +80,7 @@ class Spine:
 
 class SpineRunnerEngine(EngineBase):
     """
-    Engine 6 — Spine Runner.
+    Engine 7 (BACKBONE) — Spine Runner.
 
     Reads recon_results.json + v2_federal_tokens.json to find active spines.
     Runs batchMintAndClaim loops on active spines, then sells accumulated
@@ -107,14 +107,14 @@ class SpineRunnerEngine(EngineBase):
 
     def is_ready(self) -> bool:
         if not TGSV8:
-            log.debug("E6: TGSV8_ADDRESS not set")
+            log.debug("E7: TGSV8_ADDRESS not set")
             return False
 
         self._refresh_spines()
 
         active = [s for s in self._spines if s.active]
         if not active:
-            log.debug("E6: no active spines found")
+            log.debug("E7: no active spines found")
             return False
 
         try:
@@ -124,10 +124,10 @@ class SpineRunnerEngine(EngineBase):
                 if parent_bal > 0:
                     return True
         except Exception as e:
-            log.debug("E6: TGSv8 check failed: %s", e)
+            log.debug("E7: TGSv8 check failed: %s", e)
             return False
 
-        log.debug("E6: active spines exist but no parent token balance in TGSv8")
+        log.debug("E7: active spines exist but no parent token balance in TGSv8")
         return False
 
     def simulate(self) -> tuple[int, int]:
@@ -149,6 +149,8 @@ class SpineRunnerEngine(EngineBase):
             return (0, 0)
 
         child_out    = BATCH_ITERATIONS * amount_per_iter
+        # child_out is in wei, pls_per_child is PLS per whole token (float)
+        # Convert: (child_out_wei / 10^18) * pls_per_child * 10^18 = child_out * pls_per_child
         pls_expected = int(child_out * best.pls_per_child)
 
         gas_price = w3_read.eth.gas_price
@@ -179,14 +181,14 @@ class SpineRunnerEngine(EngineBase):
 
         if not self._live_debenture_check(spine):
             spine.active = False
-            log.warning("E6: %s Debenture flipped False — deactivating spine", spine.label)
+            log.warning("E7: %s Debenture flipped False — deactivating spine", spine.label)
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
                                 notes=f"{spine.label} debenture is now False")
 
         try:
             return self._run_spine_cycle(spine, gas_price, dry_run)
         except Exception as e:
-            log.error("E6 execute error: %s", e)
+            log.error("E7execute error: %s", e)
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
                                 notes=str(e))
 
@@ -214,15 +216,15 @@ class SpineRunnerEngine(EngineBase):
                     label    = tok.get("symbol", addr[:8])
                     pls_ptok = tok.get("pls_per_token", 0.0)
                     if pls_ptok == 0:
-                        log.debug("E6: skipping %s — no DEX price", label)
+                        log.debug("E7: skipping %s — no DEX price", label)
                         continue
                     parent = self._get_parent_from_recon(addr)
                     if not parent:
-                        log.debug("E6: skipping %s — parent address unknown", label)
+                        log.debug("E7: skipping %s — parent address unknown", label)
                         continue
                     spend_token = self._find_spend_token(addr, parent)
                     if not spend_token:
-                        log.debug("E6: skipping %s — no valid spend token found", label)
+                        log.debug("E7: skipping %s — no valid spend token found", label)
                         continue
 
                     spines.append(Spine(
@@ -230,14 +232,14 @@ class SpineRunnerEngine(EngineBase):
                         child         = Web3.to_checksum_address(addr),
                         parent        = Web3.to_checksum_address(parent),
                         spend_token   = Web3.to_checksum_address(spend_token),
-                        pls_per_child = pls_ptok * 1e18,
+                        pls_per_child = pls_ptok,
                         active        = True,
                     ))
             except Exception as e:
-                log.warning("E6: error loading v2_federal_tokens.json: %s", e)
+                log.warning("E7: error loading v2_federal_tokens.json: %s", e)
 
         if not spines:
-            log.info("E6: using hardcoded OZZY fallback spine (recon pending)")
+            log.info("E7: using hardcoded OZZY fallback spine (recon pending)")
             spines.append(Spine(
                 label         = "OZZY",
                 child         = OZZY_ADDR,
@@ -249,7 +251,7 @@ class SpineRunnerEngine(EngineBase):
 
         self._spines    = spines
         self._last_load = now
-        log.info("E6: loaded %d spines (%d active)",
+        log.info("E7: loaded %d spines (%d active)",
                  len(spines), sum(1 for s in spines if s.active))
 
     def _get_parent_from_recon(self, child_addr: str) -> Optional[str]:
@@ -333,11 +335,11 @@ class SpineRunnerEngine(EngineBase):
             ).call()
             spine.last_debenture_check = now
             if not result:
-                log.warning("E6: %s debenture=False — spine is dead", spine.label)
+                log.warning("E7: %s debenture=False — spine is dead", spine.label)
                 spine.active = False
             return result
         except Exception as e:
-            log.warning("E6: debenture check error for %s: %s", spine.label, e)
+            log.warning("E7: debenture check error for %s: %s", spine.label, e)
             return False
 
     def _run_spine_cycle(self, spine: Spine, gas_price: int,
@@ -362,7 +364,8 @@ class SpineRunnerEngine(EngineBase):
             dry_run=dry_run,
         )
 
-        pls_expected = BATCH_ITERATIONS * amount * spine.pls_per_child // (10**spine.decimals)
+        # amount is in wei, pls_per_child is PLS per whole token (float)
+        pls_expected = int(BATCH_ITERATIONS * amount * spine.pls_per_child)
 
         if result is None and dry_run:
             return EngineResult(
@@ -411,7 +414,7 @@ class SpineRunnerEngine(EngineBase):
                 return {"success": False, "reason": "no DEX output for child token"}
             min_out = int(best_out * (10000 - SLIP_BPS) / 10000)
         except Exception as e:
-            log.warning("E6 sell pre-flight failed: %s", e)
+            log.warning("E7 sell pre-flight failed: %s", e)
             return {"success": False, "reason": str(e)}
 
         tgsv8_w = tgsv8_contract(w3=w3_submit)
@@ -423,7 +426,7 @@ class SpineRunnerEngine(EngineBase):
 
         receipt = send_tx(fn_call, f"SpineRunner: sell {spine.label} → WPLS")
         if receipt and receipt.get("status") == 1:
-            log.info("E6 sell TX confirmed — ~%.2f WPLS received", min_out / 1e18)
+            log.info("E7 sell TX confirmed — ~%.2f WPLS received", min_out / 1e18)
             return {"success": True, "pls_out": min_out,
                     "tx_hash": receipt["transactionHash"].hex()}
         return {"success": False, "reason": "sell TX reverted"}

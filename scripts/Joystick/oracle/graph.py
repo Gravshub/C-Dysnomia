@@ -27,7 +27,6 @@ The math:
 import logging
 
 from ..core.log_names import get_logger
-import math
 from dataclasses import dataclass, field
 
 from web3 import Web3
