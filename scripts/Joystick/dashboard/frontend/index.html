@@ -332,6 +332,31 @@
   .engine-detail-term .t-cmd { color: var(--yellow); }
   .engine-detail-term .t-log { color: var(--text-dim); }
 
+  .engine-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .engine-action-btn {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .engine-action-btn:hover { background: var(--cyan); color: var(--bg); }
+  .engine-action-btn.live { color: var(--red); border-color: rgba(255,68,68,0.3); }
+  .engine-action-btn.live:hover { background: var(--red); color: #fff; }
+  .engine-action-btn.recon { color: var(--orange); }
+  .engine-action-btn.recon:hover { background: var(--orange); color: var(--bg); }
+  .engine-action-btn.logs { color: var(--text-dim); }
+  .engine-action-btn.logs:hover { background: var(--text-dim); color: var(--bg); }
+
   @media (max-width: 768px) {
     .engine-detail-body { flex-direction: column; height: auto; }
     .engine-detail-info { width: 100%; min-width: auto; border-right: none; border-bottom: 1px solid var(--card-border); }
@@ -1393,6 +1418,7 @@ const ENGINE_META = {
   E1: {
     title: 'E1 RAZOR — Cross-DEX Arbitrage',
     wallet: 'Seller',
+    alias: 'razor',
     info: [
       { section: 'Mechanics' },
       { label: 'Contract', value: 'TGSv8.atomicArb()' },
@@ -1402,11 +1428,17 @@ const ENGINE_META = {
       { label: 'AFF', value: '≥ 1 (Purchase mode)' },
       { label: 'PLS', value: '≥ 10 (CrossDex mode)' },
     ],
-    commands: ['logs engine arb', 'recon arb'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot razor', cls: '' },
+      { label: 'LIVE', cmd: 'bot razor --live', cls: 'live' },
+      { label: 'Recon', cmd: 'recon arb', cls: 'recon' },
+      { label: 'Logs', cmd: 'logs engine arb', cls: 'logs' },
+    ],
   },
   E2: {
     title: 'E2 CEREAL — GIBS Harvest',
     wallet: 'Joey',
+    alias: 'cereal',
     info: [
       { section: 'Mechanics' },
       { label: 'Pipeline', value: '2-TX: prime → harvestCycle' },
@@ -1417,11 +1449,17 @@ const ENGINE_META = {
       { label: 'AFF', value: '≥ 17 (in TGSv8+ or wallet)' },
       { label: 'Break-even', value: 'GIBS > 21.5 PLS' },
     ],
-    commands: ['logs engine dss', 'recon pairs'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot cereal', cls: '' },
+      { label: 'LIVE', cmd: 'bot cereal --live', cls: 'live' },
+      { label: 'Recon', cmd: 'recon pairs', cls: 'recon' },
+      { label: 'Logs', cmd: 'logs engine dss', cls: 'logs' },
+    ],
   },
   E3: {
     title: 'E3 MERIDIAN — Territory Beat',
     wallet: 'Joey',
+    alias: 'beat',
     info: [
       { section: 'Mechanics' },
       { label: 'Calls', value: 'CHEON.Su() → META.Beat()' },
@@ -1431,14 +1469,18 @@ const ENGINE_META = {
       { label: 'Fornax', value: '> 0 at GIBS_LAU' },
       { label: 'Fomalhaute', value: '> 0 at GIBS_LAU' },
       { label: 'CHO', value: '> 0 at GIBS_LAU' },
-      { section: 'Note' },
-      { label: 'Profit', value: '0 PLS (strategic positioning)' },
     ],
-    commands: ['logs engine beat', 'recon beat'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot beat', cls: '' },
+      { label: 'LIVE', cmd: 'bot beat --live', cls: 'live' },
+      { label: 'Recon', cmd: 'recon beat', cls: 'recon' },
+      { label: 'Logs', cmd: 'logs engine beat', cls: 'logs' },
+    ],
   },
   E4: {
     title: 'E4 FACTORY — Token Mint',
     wallet: 'Minter',
+    alias: 'factory',
     info: [
       { section: 'AFF Routes' },
       { label: 'MATH', value: '1 MATH = 1 AFF' },
@@ -1447,30 +1489,36 @@ const ENGINE_META = {
       { section: 'WM Minting' },
       { label: 'Contract', value: 'TGSv8.mintWM()' },
       { label: 'Gas Est.', value: '180K per mint' },
-      { section: 'Status' },
-      { label: 'AFF routes', value: 'Unprofitable (need > 118 PLS)' },
-      { label: 'WM route', value: 'Unprofitable (23 vs 17 PLS)' },
     ],
-    commands: ['logs engine tokenfactory'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot factory', cls: '' },
+      { label: 'LIVE', cmd: 'bot factory --live', cls: 'live' },
+      { label: 'Recon', cmd: 'recon aff', cls: 'recon' },
+      { label: 'Logs', cmd: 'logs engine tokenfactory', cls: 'logs' },
+    ],
   },
   E5: {
     title: 'E5 ABUPRU — LAU State Loop',
     wallet: 'Joey',
+    alias: 'lau',
     info: [
       { section: 'Sequence' },
-      { label: 'Steps', value: 'α → β → υ(F) → π → ρ → υ(T)' },
+      { label: 'Steps', value: '\u03B1 \u2192 \u03B2 \u2192 \u03C5(F) \u2192 \u03C0 \u2192 \u03C1 \u2192 \u03C5(T)' },
       { label: 'Prime', value: 'MotzkinPrime 953467954114363' },
       { label: 'Gas Est.', value: '~520K (full round)' },
       { section: 'Gate' },
       { label: 'Min PLS', value: '150,000 PLS floor' },
-      { section: 'Note' },
-      { label: 'Profit', value: 'Strategic (EmitSniper on mints)' },
     ],
-    commands: ['logs engine lau', 'bot lau'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot lau', cls: '' },
+      { label: 'LIVE', cmd: 'bot lau --live', cls: 'live' },
+      { label: 'Logs', cmd: 'logs engine lau', cls: 'logs' },
+    ],
   },
   E6: {
     title: 'E6 DaVINCI — Treasury Sniper',
     wallet: 'Minter',
+    alias: 'davinci',
     info: [
       { section: 'Mechanics' },
       { label: 'Contract', value: 'TGSv8.batchClaimTreasury()' },
@@ -1479,13 +1527,18 @@ const ENGINE_META = {
       { section: 'Prerequisites' },
       { label: 'TGSv8', value: 'Deployed' },
       { label: 'Recon', value: 'recon_results.json required' },
-      { label: 'Working bal', value: '≥ 100 PLS in TGSv8' },
     ],
-    commands: ['logs 10'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot davinci', cls: '' },
+      { label: 'LIVE', cmd: 'bot davinci --live', cls: 'live' },
+      { label: 'Recon', cmd: 'recon tgsv8', cls: 'recon' },
+      { label: 'Logs', cmd: 'logs engine treasurysniper', cls: 'logs' },
+    ],
   },
   E7: {
     title: 'E7 BACKBONE — Spine Runner',
     wallet: 'Minter',
+    alias: 'backbone',
     info: [
       { section: 'Mechanics' },
       { label: 'Contract', value: 'TGSv8.batchMintAndClaim()' },
@@ -1495,11 +1548,16 @@ const ENGINE_META = {
       { label: 'Blocker', value: 'Needs OZZY spine via E8' },
       { label: 'OZZY Deb', value: 'True (only V2 token)' },
     ],
-    commands: ['logs 10'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot backbone', cls: '' },
+      { label: 'LIVE', cmd: 'bot backbone --live', cls: 'live' },
+      { label: 'Logs', cmd: 'logs engine spinerunner', cls: 'logs' },
+    ],
   },
   E8: {
     title: 'E8 PHR3AK — Web Weaver',
     wallet: 'Minter',
+    alias: 'phreak',
     info: [
       { section: 'Modes' },
       { label: 'ARM', value: 'Buy Deb=True tokens (100 PLS)' },
@@ -1507,11 +1565,13 @@ const ENGINE_META = {
       { label: 'STITCH', value: 'New LP pairs between tokens' },
       { section: 'V3 Targets' },
       { label: 'MXDAI', value: '118 PLS/tok, 29M liq' },
-      { label: 'S&㉿500', value: '44K PLS/tok, 6M liq' },
-      { section: 'Note' },
-      { label: 'Unlock', value: 'Critical path for V3 exploitation' },
+      { label: 'S&\u327F500', value: '44K PLS/tok, 6M liq' },
     ],
-    commands: ['logs 10'],
+    actions: [
+      { label: 'Dry Run', cmd: 'bot phreak', cls: '' },
+      { label: 'LIVE', cmd: 'bot phreak --live', cls: 'live' },
+      { label: 'Logs', cmd: 'logs engine phr3ak', cls: 'logs' },
+    ],
   },
 };
 
@@ -1548,21 +1608,32 @@ function renderEngineInfo(eid) {
     }
   });
 
-  infoEl.innerHTML = html;
-
-  // Run diagnostics in the mini-terminal
-  termEl.innerHTML = '';
-  function appendLine(text, cls) {
-    const div = document.createElement('div');
-    div.className = cls || 't-log';
-    div.textContent = text;
-    termEl.appendChild(div);
-    termEl.scrollTop = termEl.scrollHeight;
+  // Action buttons
+  if (meta.actions && meta.actions.length > 0) {
+    html += `<div class="section-label" style="margin-top:10px">Actions</div>`;
+    html += `<div class="engine-actions">`;
+    meta.actions.forEach(a => {
+      html += `<button class="engine-action-btn ${a.cls || ''}" data-cmd="${a.cmd}">${a.label}</button>`;
+    });
+    html += `</div>`;
   }
 
-  appendLine(`Loading ${eid} diagnostics...`, 't-system');
+  infoEl.innerHTML = html;
 
-  // Fetch engine-specific logs via REST
+  // Wire up action buttons → stream output into this engine's mini-terminal
+  infoEl.querySelectorAll('.engine-action-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      _engineTermClear(termEl);
+      _engineTermLine(termEl, `JOYSTICK> ${cmd}`, 't-cmd');
+      _engineRunCmd(termEl, cmd);
+    });
+  });
+
+  // Load initial logs into mini-terminal
+  _engineTermClear(termEl);
+  _engineTermLine(termEl, `Loading ${eid} logs...`, 't-system');
+
   const logName = {
     E1: 'arb', E2: 'dss', E3: 'beat', E4: 'tokenfactory',
     E5: 'lau', E6: 'treasurysniper', E7: 'spinerunner', E8: 'phr3ak'
@@ -1571,16 +1642,40 @@ function renderEngineInfo(eid) {
   fetch(API_BASE + `/api/logs?n=25&engine=${logName}`)
     .then(r => r.json())
     .then(data => {
-      termEl.innerHTML = '';
+      _engineTermClear(termEl);
       if (!data.lines || data.lines.length === 0) {
-        appendLine(`No events yet for ${eid}. Engine has not executed.`, 't-system');
+        _engineTermLine(termEl, `No events yet for ${eid}. Use the action buttons above.`, 't-system');
         return;
       }
-      data.lines.forEach(l => appendLine(l.text, 't-log'));
+      data.lines.forEach(l => _engineTermLine(termEl, l.text, 't-log'));
     })
     .catch(() => {
-      appendLine('Failed to load logs.', 't-error');
+      _engineTermLine(termEl, 'Failed to load logs.', 't-error');
     });
+}
+
+// Engine mini-terminal helpers — send commands via main WebSocket, stream output to panel
+function _engineTermClear(el) { el.innerHTML = ''; }
+function _engineTermLine(el, text, cls) {
+  const div = document.createElement('div');
+  div.className = cls || 't-log';
+  div.textContent = text;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+let _engineTermTarget = null; // active engine terminal element receiving streamed output
+
+function _engineRunCmd(termEl, cmd) {
+  // Route command through the main terminal WebSocket
+  if (!termWs || termWs.readyState !== WebSocket.OPEN) {
+    _engineTermLine(termEl, 'WebSocket not connected. Reconnecting...', 't-error');
+    termConnect();
+    return;
+  }
+  // Set this terminal as the active target for streamed output
+  _engineTermTarget = termEl;
+  termWs.send(JSON.stringify({ type: 'command', text: cmd }));
 }
 
 function openEngineDetail(eid) {
@@ -1651,7 +1746,15 @@ function termConnect() {
         'log':    't-log',
         'result': msg.success === false ? 't-error' : 't-result',
       }[msg.type] || 't-log';
-      (msg.text || '').split('\n').forEach(line => termAppend(line, cls));
+
+      // Route to engine mini-terminal if active, otherwise main terminal
+      if (_engineTermTarget) {
+        (msg.text || '').split('\n').forEach(line => _engineTermLine(_engineTermTarget, line, cls));
+        // Clear target on result (command finished)
+        if (msg.type === 'result') _engineTermTarget = null;
+      } else {
+        (msg.text || '').split('\n').forEach(line => termAppend(line, cls));
+      }
     } catch (e) { console.error('Terminal parse error:', e); }
   };
 }
