@@ -123,6 +123,26 @@ def tgsv8plus_contract(w3=None) -> Any | None:
         abi=TGSV8PLUS_ABI,
     )
 
+_HUB_ABI = None
+
+def _load_hub_abi():
+    global _HUB_ABI
+    if _HUB_ABI is None:
+        _HUB_ABI = load_abi("joystick_hub")
+    return _HUB_ABI
+
+
+def joystick_hub(w3=None) -> Any:
+    """Return JoystickHub contract instance (merged ABI -- all modules)."""
+    from .config import JOYSTICK_HUB
+    if not JOYSTICK_HUB:
+        raise ValueError("JOYSTICK_HUB_ADDRESS not set in env")
+    return (w3 or w3_read).eth.contract(
+        address=Web3.to_checksum_address(JOYSTICK_HUB),
+        abi=_load_hub_abi(),
+    )
+
+
 def multi_affection_contract(w3=None) -> Any:
     """Multi AFFECTION batch minter (Helios's deployed contract)."""
     _w3 = w3 or w3_read
