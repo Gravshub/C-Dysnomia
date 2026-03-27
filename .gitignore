@@ -87,9 +87,14 @@ packages/
 # Python
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
 
 # Joystick event logs (generated at runtime, not committed)
 scripts/Joystick/data/events/*.jsonl
+
+# Project config
+.a0proj/
 
 # macOS
 .DS_Store
@@ -102,7 +107,7 @@ scripts/Joystick/dashboard/data/balance_history.json
 node_modules/
 
 # Runtime logs
-scripts/Joystick/data/dash.log
+scripts/Joystick/data/*.log
 
 # Local Claude Code settings
 .claude/settings.local.json
