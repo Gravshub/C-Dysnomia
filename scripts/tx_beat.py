@@ -1,33 +1,53 @@
 #!/usr/bin/env python3
-"""
-Execute META.Beat() for Joey's GIBS QING
+"""Execute META.Beat() — works with any LAU/QING token on PulseChain.
 
 Pre-requisite: SHIO tokens (Fornax, Fomalhaute, CHO) must already be at
-GIBS_LAU and GIBS_QING. Run tx_acquire_shio.py first.
+the LAU and QING addresses. Run tx_acquire_shio.py first.
 
 Game loop: CHEON.Su() → META.Beat() → WORLD.Code()
 This script runs Beat only.
 
 Returns: (Dione, Charge, Deimos, Yeo) — territory range and power metrics.
+
+Usage:
+  python scripts/tx_beat.py                                  # defaults (GIBS LAU, Joey wallet)
+  python scripts/tx_beat.py --lau 0x1234... --qing 0x5678... # custom LAU/QING
+  python scripts/tx_beat.py --wallet 0xABCD...               # custom wallet
+  python scripts/tx_beat.py --waat 12345                     # custom QING Waat
 """
+import argparse
 from web3 import Web3
 from eth_account import Account
 import os, sys
+
+# ── Defaults (Joey / GIBS) ───────────────────────────────────
+DEFAULT_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
+DEFAULT_LAU    = "0x66a08aa12da955eb63d7ac121a88b2b210a07b03"
+DEFAULT_QING   = "0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35"
+DEFAULT_WAAT   = 251913148994206487765525643443518492465195287520927385378321984475167864513
+
+# ── CLI ──────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--lau",    default=DEFAULT_LAU,    help="LAU token address (default: GIBS)")
+parser.add_argument("--qing",   default=DEFAULT_QING,   help="QING venue address (default: GIBS QING)")
+parser.add_argument("--waat",   default=DEFAULT_WAAT, type=int, help="QING Waat value (default: GIBS QING Waat)")
+parser.add_argument("--wallet", default=DEFAULT_WALLET, help="Wallet address (default: Joey)")
+args = parser.parse_args()
 
 SUBMIT_RPC = "https://rpc.pulsechain.com"
 w3 = Web3(Web3.HTTPProvider(SUBMIT_RPC))
 print(f"Connected: {w3.is_connected()}  Block: {w3.eth.block_number:,}")
 
 # ── Addresses ────────────────────────────────────────────────
-JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
-GIBS_LAU    = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
-GIBS_QING   = Web3.to_checksum_address("0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35")
+WALLET      = Web3.to_checksum_address(args.wallet)
+LAU_ADDR    = Web3.to_checksum_address(args.lau)
+QING_ADDR   = Web3.to_checksum_address(args.qing)
 META        = Web3.to_checksum_address("0xE77Bdae31b2219e032178d88504Cc0170a5b9B97")
 FORNAX      = Web3.to_checksum_address("0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7")
 FOMALHAUTE  = Web3.to_checksum_address("0x7aE73C498A308247BE73688c09c96B3fd06dDB84")
 CHO_TOKEN   = Web3.to_checksum_address("0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB")
 
-GIBS_QING_WAAT = 251913148994206487765525643443518492465195287520927385378321984475167864513
+QING_WAAT   = args.waat
 
 # ── Private Key ──────────────────────────────────────────────
 JOEY_PKEY = os.environ.get("DYSNOMIA_PRIVATE_KEY", "")
@@ -36,7 +56,7 @@ if not JOEY_PKEY:
     sys.exit(1)
 
 account = Account.from_key(JOEY_PKEY)
-assert account.address.lower() == JOEY_WALLET.lower(), "Key mismatch!"
+assert account.address.lower() == WALLET.lower(), "Key mismatch!"
 
 # ── ABIs ─────────────────────────────────────────────────────
 ERC20_ABI = [
@@ -61,7 +81,7 @@ meta     = w3.eth.contract(address=META, abi=META_ABI)
 fornax   = w3.eth.contract(address=FORNAX, abi=ERC20_ABI)
 fomalh   = w3.eth.contract(address=FOMALHAUTE, abi=ERC20_ABI)
 cho      = w3.eth.contract(address=CHO_TOKEN, abi=ERC20_ABI)
-gibs_q   = w3.eth.contract(address=GIBS_QING, abi=QING_ABI)
+gibs_q   = w3.eth.contract(address=QING_ADDR, abi=QING_ABI)
 
 def fmt(val):
     return f"{val / 1e18:.6f}"
@@ -72,11 +92,11 @@ print(f"  PRE-FLIGHT: SHIO BALANCE CHECK")
 print(f"{'='*60}")
 
 checks = [
-    ("Fornax",     fornax, "GIBS_LAU",  GIBS_LAU),
-    ("Fornax",     fornax, "GIBS_QING", GIBS_QING),
-    ("Fomalhaute", fomalh, "GIBS_LAU",  GIBS_LAU),
-    ("CHO",        cho,    "GIBS_LAU",  GIBS_LAU),
-    ("CHO",        cho,    "GIBS_QING", GIBS_QING),
+    ("Fornax",     fornax, "LAU",  LAU_ADDR),
+    ("Fornax",     fornax, "QING", QING_ADDR),
+    ("Fomalhaute", fomalh, "LAU",  LAU_ADDR),
+    ("CHO",        cho,    "LAU",  LAU_ADDR),
+    ("CHO",        cho,    "QING", QING_ADDR),
 ]
 
 all_ok = True
@@ -95,17 +115,17 @@ if not all_ok:
 # Verify QING Waat
 qing_waat = gibs_q.functions.Waat().call()
 qing_entropy = gibs_q.functions.Entropy().call()
-print(f"\nGIBS_QING Waat: {qing_waat}")
-print(f"GIBS_QING Entropy: {qing_entropy}")
-assert qing_waat == GIBS_QING_WAAT, f"Waat mismatch! Expected {GIBS_QING_WAAT}, got {qing_waat}"
+print(f"\nQING Waat: {qing_waat}")
+print(f"QING Entropy: {qing_entropy}")
+assert qing_waat == QING_WAAT, f"Waat mismatch! Expected {QING_WAAT}, got {qing_waat}"
 
 # ── Dry-run Beat ─────────────────────────────────────────────
 print(f"\n{'='*60}")
-print(f"  DRY-RUN: META.Beat({GIBS_QING_WAAT})")
+print(f"  DRY-RUN: META.Beat({QING_WAAT})")
 print(f"{'='*60}")
 
 try:
-    result = meta.functions.Beat(GIBS_QING_WAAT).call({'from': JOEY_WALLET, 'gas': 5000000})
+    result = meta.functions.Beat(QING_WAAT).call({'from': WALLET, 'gas': 5000000})
     dione, charge, deimos, yeo = result
     print(f"\n  DRY-RUN SUCCESS!")
     print(f"  Dione:  {dione}")
@@ -121,16 +141,16 @@ except Exception as e:
 
 # ── Execute Beat ─────────────────────────────────────────────
 print(f"\n{'='*60}")
-print(f"  EXECUTE: META.Beat({GIBS_QING_WAAT})")
+print(f"  EXECUTE: META.Beat({QING_WAAT})")
 print(f"{'='*60}")
 
-nonce     = w3.eth.get_transaction_count(JOEY_WALLET)
+nonce     = w3.eth.get_transaction_count(WALLET)
 gas_price = w3.eth.gas_price
-gas_est   = meta.functions.Beat(GIBS_QING_WAAT).estimate_gas({'from': JOEY_WALLET})
+gas_est   = meta.functions.Beat(QING_WAAT).estimate_gas({'from': WALLET})
 print(f"  Nonce: {nonce}  Gas est: {gas_est:,}  Cost: {gas_est * gas_price / 1e18:.4f} PLS")
 
-tx = meta.functions.Beat(GIBS_QING_WAAT).build_transaction({
-    'from': JOEY_WALLET, 'nonce': nonce,
+tx = meta.functions.Beat(QING_WAAT).build_transaction({
+    'from': WALLET, 'nonce': nonce,
     'gas': int(gas_est * 1.3), 'gasPrice': gas_price, 'chainId': 369,
 })
 signed = account.sign_transaction(tx)
@@ -155,7 +175,7 @@ print(f"  Charge: {charge}")
 print(f"  Deimos: {deimos}")
 print(f"  Yeo:    {yeo}")
 
-pls_remaining = w3.eth.get_balance(JOEY_WALLET)
+pls_remaining = w3.eth.get_balance(WALLET)
 print(f"\n  PLS remaining: {pls_remaining / 1e18:.2f}")
-print(f"\nBeat complete! Joey's GIBS QING has been measured.")
+print(f"\nBeat complete! QING has been measured.")
 print(f"Next step: WORLD.Code() for territory claiming (when WORLD is deployed)")
