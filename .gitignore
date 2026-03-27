@@ -103,3 +103,10 @@ node_modules/
 
 # Runtime logs
 scripts/Joystick/data/dash.log
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# NPM (Hardhat tooling, not part of project)
+package.json
+package-lock.json
