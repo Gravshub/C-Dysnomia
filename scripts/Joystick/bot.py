@@ -53,7 +53,7 @@ load_dotenv("/opt/joystick/.env.pulse")
 load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
-    JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, PULSEX_V1_ROUTER, TGSV8PLUS,
+    JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, PULSEX_V1_ROUTER, TGSV8PLUS, JOYSTICK_HUB,
     CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR, MAX_SLIPPAGE, AdaptiveDelay,
 )
 from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_health, get_read_pool
@@ -228,24 +228,31 @@ class DysnomiaBot:
                 if key in snap:
                     log.info("  %s=%.1f", key, snap[key] / 1e18)
 
-        # TGSv8+ balance tracking (if configured)
-        if TGSV8PLUS:
+        # Contract balance tracking
+        _track_addr = JOYSTICK_HUB or TGSV8PLUS
+        if _track_addr:
             from .core.chain import erc20, safe, multicall
             aff_c = erc20(AFFECTION)
             gibs_c = erc20(GIBS_LAU)
             wpls_c = erc20(WPLS)
-            plus_bals = multicall([
-                (aff_c, "balanceOf", [TGSV8PLUS]),
-                (gibs_c, "balanceOf", [TGSV8PLUS]),
-                (wpls_c, "balanceOf", [TGSV8PLUS]),
+            contract_bals = multicall([
+                (aff_c, "balanceOf", [_track_addr]),
+                (gibs_c, "balanceOf", [_track_addr]),
+                (wpls_c, "balanceOf", [_track_addr]),
             ])
-            snap["aff_plus"] = plus_bals[0] or 0
-            snap["gibs_plus"] = plus_bals[1] or 0
-            snap["wpls_plus"] = plus_bals[2] or 0
-            log.info("  TGSv8+: AFF=%.1f  GIBS=%.1f  WPLS=%.1f",
-                     snap["aff_plus"] / 1e18,
-                     snap["gibs_plus"] / 1e18,
-                     snap["wpls_plus"] / 1e18)
+            snap["aff_hub"] = contract_bals[0] or 0
+            snap["gibs_hub"] = contract_bals[1] or 0
+            snap["wpls_hub"] = contract_bals[2] or 0
+            _label = "Hub" if JOYSTICK_HUB else "TGSv8+"
+            log.info("  %s: AFF=%.1f  GIBS=%.1f  WPLS=%.1f",
+                     _label,
+                     snap["aff_hub"] / 1e18,
+                     snap["gibs_hub"] / 1e18,
+                     snap["wpls_hub"] / 1e18)
+            # Keep legacy keys for dashboard compat
+            snap["aff_plus"] = snap["aff_hub"]
+            snap["gibs_plus"] = snap["gibs_hub"]
+            snap["wpls_plus"] = snap["wpls_hub"]
 
         _events.log_balance_snapshot(snap)
 

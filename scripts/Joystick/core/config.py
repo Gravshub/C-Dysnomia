@@ -63,6 +63,9 @@ FORNAX     = Web3.to_checksum_address("0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D
 FOMALHAUTE = Web3.to_checksum_address("0x7aE73C498A308247BE73688c09c96B3fd06dDB84")
 CHO        = Web3.to_checksum_address("0xB6be11F0A788014C1F68C92F8D6CcC1AbF78F2aB")
 
+# ── Key ecosystem tokens ─────────────────────────────────────────────────────
+FED = Web3.to_checksum_address("0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff")
+
 # ── Atropa ecosystem tokens (pDAI routes) ────────────────────────────────────
 PINDEPENDENCE = Web3.to_checksum_address("0xA2262D7728C689526693aE893D0fD8a352C7073C")
 GIMME_FIVE    = Web3.to_checksum_address("0x2fc636E7fDF9f3E8d61033103052079781a6e7D2")

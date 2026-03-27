@@ -16,13 +16,14 @@ CHAIN_ID = 369
 JOEY_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
 TGSV8 = "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32"
 TGSV8PLUS = os.getenv("TGSV8PLUS_ADDRESS", "0xA5D7771f16204d26770657eac186A6167e69e736")
+JOYSTICK_HUB = os.getenv("JOYSTICK_HUB_ADDRESS", "0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14")
 JV8A = "0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30"
 GIBS_LAU = "0x66a08aa12da955eb63d7ac121a88b2b210a07b03"
 DSS = "0x91Df693177eE5C81016d0B7c4c2052A7d229c031"
 
 # ─── Multi-wallet addresses (for auth checks) ─────────────────────
-MINTER_WALLET = os.getenv("MINTER_WALLET", "0x924C0E0900eCA99D3bfA96D2E02B65f2c5F3e11a")
-SELLER_WALLET = os.getenv("SELLER_WALLET", "0xf8D37fBe8682676Ad21C09e907d48bFB4DaAb1d8")
+MINTER_WALLET = os.getenv("MINTER_WALLET", "0x924C0E09154C6fA548Ef57019cF75FA59157Ae93")
+SELLER_WALLET = os.getenv("SELLER_WALLET", "0xf8D37fBe432eE58a003874eec221378c6bEF513b")
 
 # ─── Token addresses (for balance reads) ─────────────────────────────
 WPLS = "0xA1077a294dDE1B09bB078844df40758a5D0f9a27"
@@ -71,6 +72,16 @@ TGSV8PLUS_EXPECTED_REFS = {
     "factory_v2": "0x29eA7545DEf87022BAdc76323F373EA1e707C523",
 }
 
+# ─── JoystickHub module addresses ─────────────────────────────────
+JOYSTICK_HUB_HARVEST = "0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2"
+JOYSTICK_HUB_AFFECTION = "0xfb7C1A1Ef0Ce8AB527998a1c2Ca12C6CA400da4B"
+JOYSTICK_HUB_PURCHASE = "0xc59cb7229872E72B7349Ef7DFa170A2444a8264E"
+
+# ─── Stablecoins for PLS/USD pricing & AFF BuyWith ───────────────
+DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"    # pDAI (18 decimals)
+USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # pUSDC (6 decimals)
+USDC_DECIMALS = 6
+
 # ─── AFFECTION BuyWith payment tokens ─────────────────────────────
 AFF_MATH  = "0xB680F0cc810317933F234f67EB6A9E923407f05D"   # MATH v1.1
 AFF_PI    = "0xA2262D7728C689526693aE893D0fD8a352C7073C"   # pINDEPENDENCE
@@ -83,7 +94,9 @@ AFF_FAUNG = "0x73A19FaFb359faf519C9707b781dfdB88407d10d"   # libDynamic v1.0
 #   MATH=3, PI=0.01, G5=0.6, Fa=12, Faung=6
 # ⇒ Cost per 1 AFF:
 AFF_ROUTES = [
-    {"name": "MATH",  "addr": AFF_MATH,  "per_aff": 1.0},       # 1 MATH / AFF
+    {"name": "pDAI",  "addr": DAI,       "per_aff": 1.0},        # BuyWithDAI: 1 pDAI / AFF
+    {"name": "pUSDC", "addr": USDC,      "per_aff": 1.0, "decimals": 6},  # BuyWithUSDC: 1 pUSDC / AFF
+    {"name": "MATH",  "addr": AFF_MATH,  "per_aff": 1.0},        # 1 MATH / AFF
     {"name": "PI",    "addr": AFF_PI,    "per_aff": 0.003333},   # ~0.00333 PI / AFF
     {"name": "G5",    "addr": AFF_G5,    "per_aff": 0.2},        # 0.2 G5 / AFF
     {"name": "Fa",    "addr": AFF_FA,    "per_aff": 4.0},        # 4 Fa / AFF
@@ -96,16 +109,13 @@ WM_MINT_GAS_PER_TOKEN = 130_000   # gas units per WM minted
 AFF_BUYWITH_GAS_BASE = 4_200_000  # base gas for 1 loop of multiBuyWith
 AFF_SWAP_OVERHEAD     = 200_000   # approvals + token swap
 
-# ─── Stablecoins for PLS/USD pricing ──────────────────────────────
-DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"    # pDAI (18 decimals)
-USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # pUSDC (6 decimals)
-
 # ─── Multi-wallet portfolio tracking ──────────────────────────────
 PORTFOLIO_WALLETS = {
     "Joey":   JOEY_WALLET,
     "Minter": MINTER_WALLET,
     "Seller": SELLER_WALLET,
     "TGSv8":  TGSV8,
+    "Hub":    JOYSTICK_HUB,
 }
 
 # ─── Infrastructure ──────────────────────────────────────────────────
@@ -116,7 +126,7 @@ VALIDATOR_TARGET_PLS = 32_000_000  # 32M PLS
 
 # ─── Gas ─────────────────────────────────────────────────────────────
 GAS_BUFFER_FLOOR = 100_000  # 100K PLS minimum buffer
-GAS_CEILING_BEATS = int(os.getenv("GAS_CEILING_BEATS", "50").replace(",", ""))
+GAS_CEILING_BEATS = int((os.getenv("GAS_CEILING_BEATS") or "50").replace(",", ""))
 
 # ─── Engine definitions ─────────────────────────────────────────────
 # Static metadata for each engine — runtime state comes from chain/bot

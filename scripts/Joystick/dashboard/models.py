@@ -96,6 +96,7 @@ class AffMintEconomics(BaseModel):
     dex_value: float = Field(0.0, description="PLS received selling 1 AFF on DEX")
     cheapest_route: Optional[str] = None
     cheapest_cost: Optional[float] = None
+    mint_multiplier: float = Field(0.0, description="DEX value / cheapest mint cost (>1 = profitable)")
     routes: list[AffRouteEconomics] = []
 
 
@@ -241,6 +242,7 @@ class TokenHolding(BaseModel):
     minter_balance: float = 0.0
     seller_balance: float = 0.0
     tgsv8_balance: float = 0.0
+    hub_balance: float = 0.0
 
 
 class PortfolioSummary(BaseModel):
@@ -254,10 +256,12 @@ class PortfolioSummary(BaseModel):
     top_losers: list[TokenHolding] = []
     holdings: list[TokenHolding] = []
     snapshot_block: int = 0
+    wallet_addresses: dict[str, str] = {}
     joey_total_pls: float = 0.0
     minter_total_pls: float = 0.0
     seller_total_pls: float = 0.0
     tgsv8_total_pls: float = 0.0
+    hub_total_pls: float = 0.0
 
 
 # ─── Overview (single-call dashboard payload) ────────────────────────

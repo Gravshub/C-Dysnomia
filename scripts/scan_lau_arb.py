@@ -58,7 +58,7 @@ ENTEH_LAU     = Web3.to_checksum_address("0xccE83CfF8B531EaDdcf11AB414C59DC046D1
 
 # Additional payment tokens (beyond AFFECTION)
 PDAI          = Web3.to_checksum_address("0xefD766cCb38EaF1dfd701853BFCe31359239F305")  # pDAI from ETH
-PUSDC         = Web3.to_checksum_address("0x15D38573d2feeb82e7ad5187aB8c1D52810B880")   # pUSDC
+PUSDC         = Web3.to_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")   # pUSDC
 
 # Atropa ecosystem tokens (from affection.gitbook.io/docs)
 # These accept pDAI (or pUSDC) as payment — same Purchase() mechanic as LAU/AFFECTION
