@@ -1,31 +1,21 @@
 #!/usr/bin/env python3
-"""
-|>JOYSTICK<| — GIBS LAU FULL LP DEPLOYMENT | CLAUDE SONNET 4.6
-Deploy 10 PulseX liquidity pools for GIBS LAU token.
+"""LAU LP Deployment — works with any LAU token on PulseChain.
 
-Pool 0: GIBS/WPLS  (price anchor, addLiquidityETH on V2)
-Pool 1: GIBS/FED   (V2 Router)
-Pool 2: GIBS/ATROPA (V1 Router)
-Pool 3: GIBS/WM    (V2 Router)
-Pool 4: GIBS/PROOF_RES (V2)
-Pool 5: GIBS/ZHENG (V2)
-Pool 6: GIBS/VOID  (V2)
-Pool 7: GIBS/DFM   (V2)
-Pool 8: GIBS/PARADE (V2)
-Pool 9: GIBS/TLRz  (V2)
+Deploy PulseX liquidity pools for a LAU token against configured partners.
+Default configuration deploys 10 pools for GIBS LAU.
 
 Usage:
-  source .env
-  python3 scripts/GIBS_LP_depl0y.py --status             # check pair existence + balances
-  python3 scripts/GIBS_LP_depl0y.py --dry-run --all       # simulate all pools
-  python3 scripts/GIBS_LP_depl0y.py --pool 0              # deploy GIBS/WPLS only
-  python3 scripts/GIBS_LP_depl0y.py --pool 0 --pool 1     # deploy specific pools
-  python3 scripts/GIBS_LP_depl0y.py --all                 # deploy all 10 pools
+  python scripts/lp_deploy.py --status                   # defaults (GIBS LAU, Joey wallet)
+  python scripts/lp_deploy.py --lau 0x1234... --status   # custom LAU token status
+  python scripts/lp_deploy.py --dry-run --all            # simulate all pools
+  python scripts/lp_deploy.py --pool 0                   # deploy LAU/WPLS only
+  python scripts/lp_deploy.py --pool 0 --pool 1          # deploy specific pools
+  python scripts/lp_deploy.py --all                      # deploy all 10 pools
 
 Requires:
-  - JOEY_WALLET_PRIVKEY
+  - JOEY_WALLET_PRIVKEY env var
   - RPC_URL env var (default: http://127.0.0.1:8545 for Anvil)
-  - Joey wallet holds sufficient GIBS + partner tokens + PLS for gas
+  - Wallet holds sufficient LAU + partner tokens + PLS for gas
 """
 import os
 import sys
@@ -47,10 +37,10 @@ SLIPPAGE = float(os.getenv("LP_SLIPPAGE", "0.01"))  # 1%
 DEADLINE_SECS = 600  # 10 minutes
 
 # ---------------------------------------------------------------------------
-# Addresses
+# Defaults (overridable via argparse)
 # ---------------------------------------------------------------------------
-JOEY       = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
-GIBS_LAU   = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
+DEFAULT_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
+DEFAULT_LAU    = "0x66a08aa12da955eb63d7ac121a88b2b210a07b03"
 WPLS       = Web3.to_checksum_address("0xA1077a294dDE1B09bB078844df40758a5D0f9a27")
 FED        = Web3.to_checksum_address("0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff")
 ATROPA     = Web3.to_checksum_address("0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6")
@@ -142,15 +132,16 @@ PAIR_ABI = [
 ]
 
 # ---------------------------------------------------------------------------
-# Pool definitions — exact amounts from the deployment plan
+# Pool definitions — exact amounts from the GIBS deployment plan (default)
+# Used when --lau matches DEFAULT_LAU. Custom LAU tokens need their own config.
 # ---------------------------------------------------------------------------
 # partner_amount is in human-readable units (will be multiplied by 10**18)
-POOLS = [
+DEFAULT_PARTNERS = [
     {
         "name": "GIBS/WPLS",
         "partner": WPLS,
         "partner_symbol": "WPLS",
-        "gibs_amount": 806,
+        "lau_amount": 806,
         "partner_amount": 18_135,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -160,7 +151,7 @@ POOLS = [
         "name": "GIBS/FED",
         "partner": FED,
         "partner_symbol": "FED",
-        "gibs_amount": 854,
+        "lau_amount": 854,
         "partner_amount": 324_390,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -170,7 +161,7 @@ POOLS = [
         "name": "GIBS/ATROPA",
         "partner": ATROPA,
         "partner_symbol": "ATROPA",
-        "gibs_amount": 781,
+        "lau_amount": 781,
         "partner_amount": Decimal("181.38"),
         "router": V1_ROUTER,
         "factory": V1_FACTORY,
@@ -180,7 +171,7 @@ POOLS = [
         "name": "GIBS/WM",
         "partner": WM,
         "partner_symbol": "WM",
-        "gibs_amount": 476,
+        "lau_amount": 476,
         "partner_amount": 23_501,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -190,7 +181,7 @@ POOLS = [
         "name": "GIBS/PROOF_RES",
         "partner": PROOF_RES,
         "partner_symbol": "PROOF_RES",
-        "gibs_amount": 59,
+        "lau_amount": 59,
         "partner_amount": 25_156_996_094,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -200,7 +191,7 @@ POOLS = [
         "name": "GIBS/ZHENG",
         "partner": ZHENG,
         "partner_symbol": "ZHENG",
-        "gibs_amount": 50,
+        "lau_amount": 50,
         "partner_amount": Decimal("506.14"),
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -210,7 +201,7 @@ POOLS = [
         "name": "GIBS/VOID",
         "partner": VOID,
         "partner_symbol": "VOID",
-        "gibs_amount": 50,
+        "lau_amount": 50,
         "partner_amount": Decimal("556.39"),
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -220,7 +211,7 @@ POOLS = [
         "name": "GIBS/DFM",
         "partner": DFM,
         "partner_symbol": "DFM",
-        "gibs_amount": 50,
+        "lau_amount": 50,
         "partner_amount": 1_285_014_632_271_340,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -230,7 +221,7 @@ POOLS = [
         "name": "GIBS/PARADE",
         "partner": PARADE,
         "partner_symbol": "PARADE",
-        "gibs_amount": 50,
+        "lau_amount": 50,
         "partner_amount": 16_025_853_197_523_384,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
@@ -240,13 +231,18 @@ POOLS = [
         "name": "GIBS/TLRz",
         "partner": TLRz,
         "partner_symbol": "TLRz",
-        "gibs_amount": 50,
+        "lau_amount": 50,
         "partner_amount": 51_994_051_485_760_528,
         "router": V2_ROUTER,
         "factory": V2_FACTORY,
         "is_eth": False,
     },
 ]
+
+# Runtime references — set in main() from argparse
+GIBS_LAU = None  # set from --lau
+JOEY = None      # set from --wallet
+POOLS = DEFAULT_PARTNERS  # may be swapped at runtime for custom LAU
 
 
 # ---------------------------------------------------------------------------
@@ -365,17 +361,17 @@ def deploy_pool(w3, acct, pool_idx, dry_run=False):
     factory_addr = pool["factory"]
     is_eth = pool["is_eth"]
 
-    gibs_wei = to_wei(pool["gibs_amount"])
+    lau_wei = to_wei(pool["lau_amount"])
     partner_wei = to_wei(pool["partner_amount"])
 
-    gibs_min = int(gibs_wei * (1 - SLIPPAGE))
+    lau_min = int(lau_wei * (1 - SLIPPAGE))
     partner_min = int(partner_wei * (1 - SLIPPAGE))
 
     router_label = "V1" if router_addr == V1_ROUTER else "V2"
     print(f"\n{'='*60}")
     print(f"POOL {pool_idx}: {name}  [{router_label} Router]")
     print(f"{'='*60}")
-    print(f"  GIBS:    {pool['gibs_amount']}")
+    print(f"  LAU:     {pool['lau_amount']}")
     print(f"  {pool['partner_symbol']}: {pool['partner_amount']}")
 
     # Check if pair already exists
@@ -385,11 +381,11 @@ def deploy_pool(w3, acct, pool_idx, dry_run=False):
         return True
 
     # Check balances
-    gibs_token = w3.eth.contract(address=GIBS_LAU, abi=ERC20_ABI)
-    gibs_bal = safe(gibs_token, "balanceOf", acct.address) or 0
+    lau_token = w3.eth.contract(address=GIBS_LAU, abi=ERC20_ABI)
+    lau_bal = safe(lau_token, "balanceOf", acct.address) or 0
 
-    if gibs_bal < gibs_wei:
-        print(f"  ERROR: Insufficient GIBS. Have {gibs_bal/1e18:.2f}, need {pool['gibs_amount']}")
+    if lau_bal < lau_wei:
+        print(f"  ERROR: Insufficient LAU. Have {lau_bal/1e18:.2f}, need {pool['lau_amount']}")
         return False
 
     if is_eth:
@@ -410,16 +406,16 @@ def deploy_pool(w3, acct, pool_idx, dry_run=False):
     router = w3.eth.contract(address=router_addr, abi=ROUTER_ABI)
     deadline = w3.eth.get_block("latest")["timestamp"] + DEADLINE_SECS
 
-    # Approve GIBS to router
+    # Approve LAU to router
     nonce = approve_if_needed(
-        w3, acct, GIBS_LAU, router_addr, gibs_wei,
-        f"GIBS->{router_label}", nonce, dry_run=dry_run
+        w3, acct, GIBS_LAU, router_addr, lau_wei,
+        f"LAU->{router_label}", nonce, dry_run=dry_run
     )
 
     if is_eth:
         # addLiquidityETH — native PLS wraps to WPLS
         fn = router.functions.addLiquidityETH(
-            GIBS_LAU, gibs_wei, gibs_min, partner_min, acct.address, deadline
+            GIBS_LAU, lau_wei, lau_min, partner_min, acct.address, deadline
         )
         receipt, nonce = send_tx(
             w3, acct, fn, f"addLiquidityETH {name}", nonce,
@@ -433,8 +429,8 @@ def deploy_pool(w3, acct, pool_idx, dry_run=False):
         )
 
         fn = router.functions.addLiquidity(
-            GIBS_LAU, partner, gibs_wei, partner_wei,
-            gibs_min, partner_min, acct.address, deadline
+            GIBS_LAU, partner, lau_wei, partner_wei,
+            lau_min, partner_min, acct.address, deadline
         )
         receipt, nonce = send_tx(
             w3, acct, fn, f"addLiquidity {name}", nonce, dry_run=dry_run
@@ -468,15 +464,16 @@ def deploy_pool(w3, acct, pool_idx, dry_run=False):
 # Status display
 # ---------------------------------------------------------------------------
 def show_status(w3, wallet_addr):
-    """Display status of all 10 pools."""
+    """Display status of all pools."""
     print(f"\n{'='*70}")
-    print(f"|>JOYSTICK<| GIBS LP STATUS — Wallet: {wallet_addr}")
+    print(f"|>JOYSTICK<| LAU LP STATUS — Wallet: {wallet_addr}")
+    print(f"  LAU: {GIBS_LAU}")
     print(f"{'='*70}")
 
-    gibs_token = w3.eth.contract(address=GIBS_LAU, abi=ERC20_ABI)
-    gibs_bal = safe(gibs_token, "balanceOf", wallet_addr) or 0
+    lau_token = w3.eth.contract(address=GIBS_LAU, abi=ERC20_ABI)
+    lau_bal = safe(lau_token, "balanceOf", wallet_addr) or 0
     pls_bal = w3.eth.get_balance(wallet_addr)
-    print(f"  GIBS balance: {gibs_bal / 1e18:.4f}")
+    print(f"  LAU balance:  {lau_bal / 1e18:.4f}")
     print(f"  PLS balance:  {pls_bal / 1e18:.0f}")
 
     total_lp_value = 0
@@ -499,7 +496,7 @@ def show_status(w3, wallet_addr):
             print(f"    LP:       {lp_bal / 1e18:.6f}")
             print(f"    Reserves: ({reserves[0]/1e18:.4f}, {reserves[1]/1e18:.4f})")
         else:
-            print(f"    GIBS needed:    {pool['gibs_amount']}")
+            print(f"    LAU needed:     {pool['lau_amount']}")
             print(f"    Partner needed: {pool['partner_amount']} {pool['partner_symbol']}")
 
     # Check partner token balances
@@ -520,9 +517,15 @@ def show_status(w3, wallet_addr):
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global GIBS_LAU, JOEY, POOLS
+
     parser = argparse.ArgumentParser(
-        description="|>JOYSTICK<| GIBS LAU LP Deployment"
+        description="|>JOYSTICK<| LAU LP Deployment"
     )
+    parser.add_argument("--lau", type=str, default=DEFAULT_LAU,
+                        help=f"LAU token address to pair (default: GIBS {DEFAULT_LAU})")
+    parser.add_argument("--wallet", type=str, default=DEFAULT_WALLET,
+                        help=f"Wallet address (default: Joey {DEFAULT_WALLET})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Simulate via eth_call, no TX broadcast")
     parser.add_argument("--pool", type=int, action="append",
@@ -534,6 +537,11 @@ def main():
     parser.add_argument("--rpc", type=str, default=None,
                         help="Override RPC URL")
     args = parser.parse_args()
+
+    # Set runtime globals from args
+    GIBS_LAU = Web3.to_checksum_address(args.lau)
+    JOEY = Web3.to_checksum_address(args.wallet)
+    POOLS = DEFAULT_PARTNERS  # future: load custom partner config for non-GIBS LAU
 
     rpc = args.rpc or RPC_URL
     w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 60}))
