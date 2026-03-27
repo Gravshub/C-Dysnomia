@@ -498,6 +498,118 @@ contract HarvestModule is HubStorage {
         emit PairsReseeded(pairs.length, totalGibs);
     }
 
+    /// @notice LP + sell GIBS already deposited in the Hub (skip Purchase).
+    ///         Use with DSS.mintToSelf(N) → Joey deposits GIBS → harvestPreloaded.
+    function harvestPreloaded(
+        uint256 lpBps,
+        uint256 burnBps,
+        uint8   lpDex,
+        uint256 minSellOut,
+        address[] calldata sellPath,
+        uint8   sellDex
+    )
+        external payable onlyAuth whenNotPaused nonReentrant
+        returns (uint256 lpMinted, uint256 plsReceived)
+    {
+        address gibsLau = address(uint160(_config[keccak256("harvest.gibsLau")]));
+        require(gibsLau != address(0), "harv:gibsLau not set");
+
+        // Step 1 — Wrap PLS for LP
+        if (msg.value > 0) {
+            IWPLS(_wpls).deposit{value: msg.value}();
+        }
+
+        // Step 2 — Use GIBS already in Hub (no Purchase)
+        uint256 gibsTotal = IERC20(gibsLau).balanceOf(address(this));
+        require(gibsTotal > 0, "harv:no GIBS in hub");
+
+        uint256 gibsForLP;
+        uint256 lpBurned;
+
+        // Step 3 — LP First
+        if (lpBps > 0) {
+            gibsForLP = gibsTotal * lpBps / 10000;
+
+            IPulseXFactory factory = IPulseXFactory(lpDex == 0 ? _factoryV1 : _factoryV2);
+            address pair = factory.getPair(gibsLau, _wpls);
+            require(pair != address(0), "harv:no LP pair");
+
+            (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+            address token0 = IUniswapV2Pair(pair).token0();
+
+            uint256 reserveGibs;
+            uint256 reserveWpls;
+            if (token0 == gibsLau) {
+                reserveGibs = uint256(r0);
+                reserveWpls = uint256(r1);
+            } else {
+                reserveGibs = uint256(r1);
+                reserveWpls = uint256(r0);
+            }
+
+            uint256 wplsForLP = (gibsForLP * reserveWpls) / reserveGibs;
+            require(IERC20(_wpls).balanceOf(address(this)) >= wplsForLP, "harv:insufficient WPLS for LP");
+
+            IPulseXRouter router = IPulseXRouter(lpDex == 0 ? _routerV1 : _routerV2);
+            _approve(gibsLau, address(router), gibsForLP);
+            _approve(_wpls, address(router), wplsForLP);
+
+            (,, lpMinted) = router.addLiquidity(
+                gibsLau, _wpls,
+                gibsForLP, wplsForLP,
+                gibsForLP * 9500 / 10000,
+                wplsForLP * 9500 / 10000,
+                address(this),
+                block.timestamp
+            );
+
+            // Optional LP Burn
+            if (burnBps > 0 && lpMinted > 0) {
+                lpBurned = lpMinted * burnBps / 10000;
+                if (lpBurned > 0) {
+                    _safeTransfer(pair, 0x000000000000000000000000000000000000dEaD, lpBurned);
+                }
+            }
+        }
+
+        // Step 4 — Sell Second
+        uint256 gibsToSell = gibsTotal - gibsForLP;
+        if (gibsToSell > 0 && sellPath.length >= 2) {
+            require(sellPath[0] == gibsLau, "harv:sellPath[0] != gibsLau");
+
+            IPulseXRouter sellRouter = IPulseXRouter(sellDex == 0 ? _routerV1 : _routerV2);
+            _approve(gibsLau, address(sellRouter), gibsToSell);
+
+            uint256[] memory amounts = sellRouter.swapExactTokensForTokens(
+                gibsToSell,
+                minSellOut,
+                sellPath,
+                address(this),
+                block.timestamp
+            );
+            plsReceived = amounts[amounts.length - 1];
+        }
+
+        // Step 5 — Sweep
+        _sweepToken(gibsLau);
+        _sweepToken(_wpls);
+        if (lpMinted > lpBurned) {
+            IPulseXFactory factory = IPulseXFactory(lpDex == 0 ? _factoryV1 : _factoryV2);
+            address pair = factory.getPair(gibsLau, _wpls);
+            _sweepToken(pair);
+        }
+
+        _opNonce++;
+        emit HarvestExecuted(gibsTotal, lpMinted, plsReceived, lpBurned);
+    }
+
+    function _sweepToken(address token) internal {
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal > 0) {
+            _safeTransfer(token, _owner, bal);
+        }
+    }
+
     /// @notice View: read current harvest config.
     function harvestConfig() external view returns (
         address gibsLau,

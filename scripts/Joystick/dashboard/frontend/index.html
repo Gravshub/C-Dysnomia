@@ -104,6 +104,54 @@
   .stat-value.cyan { color: var(--cyan); }
   .stat-value.yellow { color: var(--yellow); }
 
+  .wm-profit-bar {
+    width: 100%;
+    height: 10px;
+    background: var(--card-border);
+    border-radius: 3px;
+    overflow: visible;
+    margin: 6px 0 14px 0;
+    position: relative;
+  }
+  .wm-profit-fill {
+    position: absolute;
+    top: 1px;
+    height: 8px;
+    border-radius: 2px;
+    opacity: 0.6;
+    transition: left 0.5s ease, width 0.5s ease, background 0.5s ease;
+  }
+  .wm-profit-center {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: var(--text);
+    opacity: 0.9;
+    z-index: 1;
+    transform: translateX(-1px);
+  }
+  .wm-profit-center-label {
+    position: absolute;
+    left: 50%;
+    bottom: -13px;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: var(--text-dim);
+    z-index: 1;
+    letter-spacing: 0.5px;
+  }
+  .wm-profit-label {
+    position: absolute;
+    right: 4px;
+    bottom: -13px;
+    font-size: 9px;
+    font-weight: 700;
+    z-index: 2;
+    white-space: nowrap;
+  }
+
   .progress-bar {
     width: 100%;
     height: 20px;
@@ -393,6 +441,13 @@
   }
   .wallet-breakdown.visible { display: block; }
   .wallet-breakdown .stat-row { font-size: 11px; }
+  .addr-copy {
+    cursor: pointer; opacity: 0.4; font-size: 10px;
+    transition: opacity 0.15s, color 0.15s;
+    margin-left: 4px; vertical-align: middle;
+  }
+  .addr-copy:hover { opacity: 1; color: var(--cyan); }
+  .addr-copy.copied { opacity: 1; color: var(--green); }
   .holdings-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
   .holdings-table th {
     color: var(--text-dim); font-size: 10px; text-transform: uppercase;
@@ -746,12 +801,24 @@
         <span class="stat-label">DEX Value (10)</span>
         <span class="stat-value" id="m-wm-dex10">--</span>
       </div>
+      <div class="wm-profit-bar" id="m-wm-bar">
+        <div class="wm-profit-fill" id="m-wm-bar-fill"></div>
+        <div class="wm-profit-center"></div>
+        <div class="wm-profit-center-label">0%</div>
+        <span class="wm-profit-label" id="m-wm-bar-label">--</span>
+      </div>
     </div>
     <div class="contract-section">
       <div class="contract-label">AFFECTION — WPLS per 1 AFF</div>
       <div class="stat-row">
         <span class="stat-label">DEX Value</span>
         <span class="stat-value cyan" id="m-aff-dex">--</span>
+      </div>
+      <div class="wm-profit-bar" id="m-aff-bar">
+        <div class="wm-profit-fill" id="m-aff-bar-fill"></div>
+        <div class="wm-profit-center"></div>
+        <div class="wm-profit-center-label">0%</div>
+        <span class="wm-profit-label" id="m-aff-bar-label">--</span>
       </div>
       <div id="m-aff-routes"></div>
     </div>
@@ -769,10 +836,26 @@
     </div>
     <div class="wallet-toggle" id="wallet-toggle">Wallets ▸</div>
     <div class="wallet-breakdown" id="wallet-breakdown">
-      <div class="stat-row"><span class="stat-label">Joey</span><span class="stat-value" id="p-joey">--</span></div>
-      <div class="stat-row"><span class="stat-label">Minter</span><span class="stat-value" id="p-minter">--</span></div>
-      <div class="stat-row"><span class="stat-label">Seller</span><span class="stat-value" id="p-seller">--</span></div>
-      <div class="stat-row"><span class="stat-label">TGSv8</span><span class="stat-value" id="p-tgsv8">--</span></div>
+      <div class="stat-row wallet-row">
+        <span class="stat-label">Joey <span class="addr-copy" data-wallet="Joey" title="Copy address">&#x2398;</span></span>
+        <span class="stat-value" id="p-joey">--</span>
+      </div>
+      <div class="stat-row wallet-row">
+        <span class="stat-label">Minter <span class="addr-copy" data-wallet="Minter" title="Copy address">&#x2398;</span></span>
+        <span class="stat-value" id="p-minter">--</span>
+      </div>
+      <div class="stat-row wallet-row">
+        <span class="stat-label">Seller <span class="addr-copy" data-wallet="Seller" title="Copy address">&#x2398;</span></span>
+        <span class="stat-value" id="p-seller">--</span>
+      </div>
+      <div class="stat-row wallet-row">
+        <span class="stat-label">TGSv8 <span class="addr-copy" data-wallet="TGSv8" title="Copy address">&#x2398;</span></span>
+        <span class="stat-value" id="p-tgsv8">--</span>
+      </div>
+      <div class="stat-row wallet-row">
+        <span class="stat-label">Hub <span class="addr-copy" data-wallet="Hub" title="Copy address">&#x2398;</span></span>
+        <span class="stat-value" id="p-hub">--</span>
+      </div>
     </div>
     <table class="holdings-table" id="holdings-table">
       <thead><tr><th>Token</th><th style="text-align:right">Balance</th><th style="text-align:right">PLS Value</th><th style="text-align:right">24h</th></tr></thead>
@@ -1131,6 +1214,33 @@ function renderPortfolio(p) {
   document.getElementById('p-minter').textContent = fmtPLS(p.minter_total_pls) + ' PLS';
   document.getElementById('p-seller').textContent = fmtPLS(p.seller_total_pls) + ' PLS';
   document.getElementById('p-tgsv8').textContent = fmtPLS(p.tgsv8_total_pls) + ' PLS';
+  document.getElementById('p-hub').textContent = fmtPLS(p.hub_total_pls) + ' PLS';
+
+  // Bind wallet address copy buttons
+  if (p.wallet_addresses) {
+    document.querySelectorAll('.addr-copy').forEach(el => {
+      const walletKey = el.dataset.wallet;
+      const addr = p.wallet_addresses[walletKey];
+      if (addr) {
+        el.title = addr;
+        el.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          // Fallback copy that works over HTTP (no clipboard API needed)
+          const ta = document.createElement('textarea');
+          ta.value = addr;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          el.classList.add('copied');
+          el.textContent = '\u2713';
+          setTimeout(() => { el.classList.remove('copied'); el.innerHTML = '\u2398'; }, 1500);
+        };
+      }
+    });
+  }
 
   // Holdings table
   const tbody = document.querySelector('#holdings-table tbody');
@@ -1182,8 +1292,69 @@ function renderMintEconomics(m) {
   el('m-wm-dex1', fmtPLS(wm.dex_value_1) + ' PLS', 'cyan');
   el('m-wm-dex10', fmtPLS(wm.dex_value_10) + ' PLS', 'cyan');
 
+  // WM profitability bar — centered at breakeven (50% = 0%)
+  // Profit % = (dex - cost) / cost * 100
+  const wmFill = document.getElementById('m-wm-bar-fill');
+  const wmLabel = document.getElementById('m-wm-bar-label');
+  const wmCost = wm.mint_cost_1 || 0;
+  const wmDex = wm.dex_value_1 || 0;
+  if (wmCost > 0) {
+    const wmProfPct = ((wmDex - wmCost) / wmCost) * 100;
+    // Map profit % to bar: center (50%) = 0%, ±100% maps to 0% or 100%
+    // Clamp visual to 0–100% but show real number
+    const barPos = Math.max(0, Math.min(100, 50 + (wmProfPct / 2)));
+    if (wmProfPct >= 0) {
+      // Profitable: fill from center rightward
+      wmFill.style.left = '50%';
+      wmFill.style.width = Math.min(wmProfPct / 2, 50) + '%';
+    } else {
+      // Unprofitable: fill from bar position leftward to center
+      const lossWidth = Math.min(Math.abs(wmProfPct) / 2, 50);
+      wmFill.style.left = (50 - lossWidth) + '%';
+      wmFill.style.width = lossWidth + '%';
+    }
+    // Color: red < -10%, yellow -10% to +10%, green > +10%
+    const wmColor = wmProfPct < -10 ? 'var(--red)'
+      : wmProfPct > 10 ? 'var(--green)' : 'var(--yellow)';
+    wmFill.style.background = wmColor;
+    const sign = wmProfPct >= 0 ? '+' : '';
+    wmLabel.textContent = sign + wmProfPct.toFixed(1) + '%';
+    wmLabel.style.color = wmColor;
+  } else {
+    wmFill.style.width = '0%';
+    wmLabel.textContent = '--';
+    wmLabel.style.color = 'var(--text-dim)';
+  }
+
   // AFF DEX value
   el('m-aff-dex', fmtPLS(aff.dex_value) + ' PLS', '');
+
+  // AFF profitability bar — centered at breakeven, % based on cheapest route
+  const affFill = document.getElementById('m-aff-bar-fill');
+  const affLabel = document.getElementById('m-aff-bar-label');
+  const affDex = aff.dex_value || 0;
+  const affCost = aff.cheapest_cost || 0;
+  if (affCost > 0 && affDex > 0) {
+    const affProfPct = ((affDex - affCost) / affCost) * 100;
+    if (affProfPct >= 0) {
+      affFill.style.left = '50%';
+      affFill.style.width = Math.min(affProfPct / 2, 50) + '%';
+    } else {
+      const lossWidth = Math.min(Math.abs(affProfPct) / 2, 50);
+      affFill.style.left = (50 - lossWidth) + '%';
+      affFill.style.width = lossWidth + '%';
+    }
+    const affColor = affProfPct < -10 ? 'var(--red)'
+      : affProfPct > 10 ? 'var(--green)' : 'var(--yellow)';
+    affFill.style.background = affColor;
+    const affSign = affProfPct >= 0 ? '+' : '';
+    affLabel.textContent = affSign + affProfPct.toFixed(1) + '%';
+    affLabel.style.color = affColor;
+  } else {
+    affFill.style.width = '0%';
+    affLabel.textContent = '--';
+    affLabel.style.color = 'var(--text-dim)';
+  }
 
   // AFF routes — WPLS total only, sorted cheapest first
   const routesEl = document.getElementById('m-aff-routes');
@@ -1193,7 +1364,7 @@ function renderMintEconomics(m) {
       const isCheapest = i === 0;
       const isProfit = r.payment_pls < aff.dex_value;
       const cls = isProfit ? 'green' : (isCheapest ? 'yellow' : '');
-      const tag = isCheapest ? ' ◀' : '';
+      const tag = isCheapest ? ' \u25C0' : '';
       return `<div class="stat-row"><span class="stat-label">${r.name}</span><span class="stat-value ${cls}">${fmtPLS(r.payment_pls)} PLS${tag}</span></div>`;
     }).join('');
   }

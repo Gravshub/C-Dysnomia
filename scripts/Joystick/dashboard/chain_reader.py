@@ -679,9 +679,12 @@ class ChainReader:
         for i, route in enumerate(config.AFF_ROUTES):
             idx = len(calls)
             route_indices[route["name"]] = idx
+            # Use token-specific decimals (e.g. pUSDC = 6, default 18)
+            token_decimals = route.get("decimals", 18)
+            one_token_wei = 10 ** token_decimals
             calls.append((
                 router_v2,
-                _amounts_out_calldata(int(1e18), [route["addr"], wpls]),
+                _amounts_out_calldata(one_token_wei, [route["addr"], wpls]),
             ))
 
         results = self._multicall(calls)
@@ -719,7 +722,7 @@ class ChainReader:
             name = route["name"]
             per_aff = route["per_aff"]
             idx = route_indices[name]
-            # PLS value of 1 payment token
+            # PLS value of 1 payment token (raw result is in wei/1e18)
             tok_pls = _parse_amounts_out(idx) / 1e18
             if tok_pls <= 0:
                 continue
@@ -740,6 +743,11 @@ class ChainReader:
             if cheapest is None or total_per_aff < cheapest["total_pls"]:
                 cheapest = entry
 
+        # Mint multiplier: DEX sell value / cheapest mint cost
+        mint_multiplier = 0.0
+        if cheapest and cheapest["total_pls"] > 0:
+            mint_multiplier = round(aff_dex_value / cheapest["total_pls"], 4)
+
         return {
             "wm": {
                 "mint_cost_1": wm_mint_cost_1,
@@ -751,6 +759,7 @@ class ChainReader:
                 "dex_value": round(aff_dex_value, 4),
                 "cheapest_route": cheapest["name"] if cheapest else None,
                 "cheapest_cost": cheapest["total_pls"] if cheapest else None,
+                "mint_multiplier": mint_multiplier,
                 "routes": aff_routes,
             },
         }

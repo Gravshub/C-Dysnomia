@@ -1,63 +1,36 @@
 """
-dss.py — Engine 2: CEREAL (Silent GIBS Harvest via TGSv8+)
+dss.py — Engine 2: CEREAL (Silent GIBS Harvest via JoystickHub)
 
 === HISTORY ===
-Originally used DysnomiaSelfSnipev4 (DSS) contract at 0x91Df693177eE5C81016d0B7c4c2052A7d229c031.
-DSS called GIBS_LAU.Chat(text) + GIBS_LAU.Purchase(AFF, 1e18) × multiplier.
-This worked but:
-  - Spammed the VOID chat with every mint (Chat is mandatory in DSS)
-  - Required 3+ separate TXs per cycle (mint → approve → swap → optionally addLP)
-  - Front-running exposure between the sell TX and the LP TX
-  - DSS needed GIBS and AFF pre-loaded into the contract
+V1: DysnomiaSelfSnipev4 (DSS) — chatAndClaim, spammed VOID chat. DEPRECATED.
+V2: TGSv8+ — harvestCycle(sellBps=10000), 100% sell, no LP. Sell-first order.
+V3: JoystickHub — mintLPAndSell. LP-first, sell-second, modular proxy.
 
-=== CURRENT (TGSv8+) ===
-Uses TGSv8+ contract at 0xA5D7771f16204d26770657eac186A6167e69e736.
+=== CURRENT (JoystickHub) ===
+Hub at 0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14 (block 26,092,219).
+HarvestModule via delegatecall.
 
-Two-TX pipeline (workaround for TWO harvestCycle limitations):
+Two-TX pipeline:
+  TX1: hub.primeGibs(N) — calls GIBS_LAU.Generate() × N to prime self-balance
+  TX2: hub.mintLPAndSell{value: wplsNeeded}(N, lpBps, burnBps, lpDex, minSellOut, sellPath, sellDex)
+       - Purchase(AFF, N) extracts GIBS from primed self-balance
+       - LP first: 50% GIBS + proportional WPLS → addLiquidity (undisturbed price)
+       - Sell second: remaining 50% GIBS via best route (oracle-calculated)
+       - Optional LP burn → sweep to owner
 
-  LIMITATION 1: harvestCycle uses silentMint pattern (no mintToCap before Purchase).
-    GIBS self-balance must be pre-primed or Purchase reverts (ERC20InsufficientBalance).
-    FIX: TX1 calls batchExecute(mintToCap × N) to prime GIBS self-balance.
-
-  LIMITATION 2: harvestCycle's addLiquidity step uses 95% minimums that don't account
-    for price impact from the sell step. The sell changes the GIBS/WPLS ratio, then
-    addLiquidity reverts with INSUFFICIENT_A_AMOUNT because the new ratio doesn't
-    match the minimum amounts.
-    FIX: Use sellBps=10000 (100% sell, 0% LP). LP+burn done separately if desired.
-
-  TX1: batchExecute — calls GIBS_LAU.mintToCap() × N to prime LAU self-balance (~196K gas)
-  TX2: harvestCycle(N, 10000, minPls, 0, dex, dex) — mint + sell 100% → WPLS (~391K gas)
-       Sweeps all WPLS to owner (Joey).
-
-Default: 17 LAU per cycle, 100% sell, V2 DEX.
-All values configurable via env vars (HARVEST_MINT_COUNT, HARVEST_SELL_DEX, etc.).
-
-=== PROVEN ON MAINNET ===
-Block 26066631: harvestCycle(17, 10000, 0, 0, 1, 1) — 17 GIBS → 2991.64 PLS
-Gas: 196K (prime) + 391K (harvest) = 587K total ≈ 307 PLS
-Net profit: 2,684 PLS per cycle
-
-=== DSS DEPRECATION NOTE ===
-The old DSS contract (0x91Df...) is NOT used for minting anymore. It remains
-available ONLY for broadcasting messages to the VOID chat via DSS.chat(text).
-All minting revenue now flows through TGSv8+.
-
-=== ECONOMICS ===
-Per cycle (batchExecute prime + harvestCycle):
+=== ECONOMICS (LP Loop mode) ===
+Per cycle (primeGibs + mintLPAndSell):
   - Mints: 17 GIBS (costs 17 AFFECTION)
-  - Sells: 17 GIBS (100%) → WPLS (~2992 PLS at current price)
-  - Gas: ~196K (prime) + ~391K (harvest) = ~587K total ≈ 307 PLS
-  - Net: ~2685 PLS per cycle
+  - LP: 8.5 GIBS + ~1,678 WPLS → LP tokens (deepens pool, earns fees)
+  - Sell: 8.5 GIBS → ~1,580 PLS (recovers most WPLS)
+  - Gas: ~200K (prime) + ~550K (harvest) ≈ 390 PLS
+  - Net: ~1,190 PLS + LP position value (~1,678 PLS recoverable)
   - VOID spam: ZERO
 
-Break-even: GIBS price > gas_cost / mint_count
-At 587K gas, 656K Beats: ~385 PLS gas → break-even at ~23 PLS/GIBS
-Current GIBS: ~176 PLS → 7.7x above break-even
-
 Prerequisites:
-  - TGSv8+ deployed and owner=Joey
-  - AFFECTION deposited into TGSv8+ (17 per cycle)
-  - GIBS/WPLS pair exists on PulseX V2
+  - JoystickHub deployed, owner=Joey, selectors wired, config set
+  - AFFECTION deposited into Hub (17 per cycle)
+  - GIBS/WPLS V2 pair exists on PulseX
   - GIBS price above break-even
 """
 
@@ -67,48 +40,57 @@ from web3 import Web3
 
 from .base import EngineBase, EngineResult
 from ..core.config import (
-    JOEY_WALLET, GIBS_LAU, WPLS, AFFECTION, TGSV8PLUS,
-    PULSEX_V2_FACTORY,
-    HARVEST_MINT_COUNT, HARVEST_SELL_DEX,
+    JOEY_WALLET, GIBS_LAU, WPLS, AFFECTION, JOYSTICK_HUB,
+    PULSEX_V2_FACTORY, PULSEX_V1_FACTORY, FED,
+    PULSEX_V1_ROUTER,
+    HARVEST_MINT_COUNT, HARVEST_SELL_DEX, HARVEST_LP_DEX,
+    HARVEST_SELL_BPS, HARVEST_BURN_BPS,
+    AFF_MATH,
 )
 from ..core.chain import (
     erc20, factory_contract, safe, w3_read, w3_submit,
-    tgsv8plus_contract,
+    joystick_hub, router_contract,
 )
 from ..core.executor import send_tx, approve_if_needed
 from ..core.simulator import SimulationFailed
-from ..oracle.price import token_price_pls
+from ..oracle.price import get_amounts_out, get_amounts_out_v2
 
 log = get_logger(__name__)
 
-# Gas estimates — measured on mainnet block 26066612/26066631
-PRIME_GAS_ESTIMATE = 200_000     # batchExecute with 17 mintToCap calls (measured: 196K)
-HARVEST_GAS_ESTIMATE = 400_000   # harvestCycle 100% sell, no LP (measured: 391K)
-TOTAL_GAS_ESTIMATE = PRIME_GAS_ESTIMATE + HARVEST_GAS_ESTIMATE  # ~600K total
+# Gas estimates
+PRIME_GAS_ESTIMATE = 200_000      # primeGibs(17) via Generate() × 17
+HARVEST_GAS_ESTIMATE = 550_000    # mintLPAndSell with LP + sell (~550K est)
+TOTAL_GAS_ESTIMATE = PRIME_GAS_ESTIMATE + HARVEST_GAS_ESTIMATE
 
-# mintToCap() function selector — keccak256("mintToCap()")[:4]
-MINT_TO_CAP_SELECTOR = Web3.keccak(text="mintToCap()")[:4]
+# Extra gas per hop in multi-hop sell route
+GAS_PER_EXTRA_HOP = 80_000
+
+# Gas for AFF acquisition (wrap + swap + approve + deposit)
+AFF_ACQUIRE_GAS_ESTIMATE = 250_000
+
+# BuyWithMATH selector — keccak256("BuyWithMATH(uint256)")[:4]
+BUYWITH_MATH_SELECTOR = Web3.keccak(text="BuyWithMATH(uint256)")[:4]
 
 
 class DSSEngine(EngineBase):
     """
-    Engine 2: CEREAL — Silent GIBS harvest via TGSv8+ harvestCycle.
+    Engine 2: CEREAL — Silent GIBS harvest via JoystickHub.
 
-    Two-TX pipeline: batchExecute(mintToCap×N) → harvestCycle(N, ...).
-    Replaces the old DSS chatAndClaimWithMultiplier path.
-    Wallet role: joey (owner of TGSv8+).
+    Two-TX pipeline: primeGibs(N) → mintLPAndSell{value}(N, ...).
+    LP first (undisturbed price), sell second (best route).
+    Wallet role: joey (owner of JoystickHub).
     """
     name = "DSS"  # Keep registry name for Strategist/bot.py compatibility
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
-    def _get_plus(self):
-        """Return TGSv8+ contract instance (read RPC)."""
-        return tgsv8plus_contract()
+    def _get_hub(self):
+        """Return JoystickHub contract instance (read RPC)."""
+        return joystick_hub()
 
-    def _get_plus_submit(self):
-        """Return TGSv8+ contract instance (submit RPC)."""
-        return tgsv8plus_contract(w3=w3_submit)
+    def _get_hub_submit(self):
+        """Return JoystickHub contract instance (submit RPC)."""
+        return joystick_hub(w3=w3_submit)
 
     def _get_gibs_wpls_pair(self) -> str | None:
         """Return GIBS/WPLS V2 pair address, or None if it doesn't exist."""
@@ -117,36 +99,271 @@ class DSSEngine(EngineBase):
         pair = store.lookup_pair(GIBS_LAU, WPLS)
         if pair:
             return pair
-        # Fallback: live query
         factory = factory_contract(PULSEX_V2_FACTORY)
         pair_addr = safe(factory, "getPair", GIBS_LAU, WPLS)
         if not pair_addr or pair_addr == "0x" + "0" * 40:
             return None
         return pair_addr
 
-    def _aff_in_plus(self) -> int:
-        """Return AFFECTION balance inside TGSv8+."""
-        return safe(erc20(AFFECTION), "balanceOf", TGSV8PLUS) or 0
+    def _gibs_price_v2(self, amount: int = 10**18) -> int | None:
+        """GIBS price in PLS via V2 router (GIBS/WPLS pair is V2 only)."""
+        result = get_amounts_out_v2(amount, [
+            Web3.to_checksum_address(GIBS_LAU),
+            Web3.to_checksum_address(WPLS),
+        ])
+        return result[-1] if result else None
 
-    def _quote_sell(self, gibs_amount: int) -> int:
-        """Use TGSv8+ quoteSell view to estimate WPLS output."""
-        plus = self._get_plus()
-        if not plus:
+    def _aff_in_hub(self) -> int:
+        """Return AFFECTION balance inside JoystickHub."""
+        return safe(erc20(AFFECTION), "balanceOf", JOYSTICK_HUB) or 0
+
+    def _gibs_wpls_reserves(self) -> tuple[int, int] | None:
+        """Return (gibs_reserve, wpls_reserve) from the GIBS/WPLS V2 pair."""
+        pair_addr = self._get_gibs_wpls_pair()
+        if not pair_addr:
+            return None
+        from ..core.chain import pair_contract
+        pair_c = pair_contract(pair_addr)
+        reserves = safe(pair_c, "getReserves")
+        if not reserves:
+            return None
+        token0 = safe(pair_c, "token0")
+        if not token0:
+            return None
+        r0, r1 = reserves[0], reserves[1]
+        if token0.lower() == GIBS_LAU.lower():
+            return r0, r1
+        return r1, r0
+
+    def _wpls_needed_for_lp(self, gibs_for_lp_wei: int) -> int:
+        """Calculate WPLS needed to LP given GIBS amount at current pool ratio."""
+        reserves = self._gibs_wpls_reserves()
+        if not reserves or reserves[0] == 0:
             return 0
-        return safe(plus, "quoteSell", gibs_amount, HARVEST_SELL_DEX) or 0
+        gibs_r, wpls_r = reserves
+        # Proportional: wplsNeeded = gibsForLP * wplsReserve / gibsReserve
+        # Add 2% buffer to ensure addLiquidity doesn't revert
+        wpls_needed = (gibs_for_lp_wei * wpls_r) // gibs_r
+        return int(wpls_needed * 102 / 100)
+
+    def _best_sell_route(self, gibs_sell_wei: int) -> tuple[list[str], int, int]:
+        """
+        Find the best sell route for GIBS among candidate paths.
+
+        Returns (path, dex, expected_output_wei).
+        Candidates:
+          - [GIBS, WPLS] on V2 — direct, lowest gas
+          - [GIBS, FED, WPLS] on V2 — 2-hop via deeper FED pool
+        """
+        gibs_cs = Web3.to_checksum_address(GIBS_LAU)
+        wpls_cs = Web3.to_checksum_address(WPLS)
+        fed_cs = Web3.to_checksum_address(FED)
+
+        candidates = []
+
+        # Direct: GIBS → WPLS on V2
+        direct = get_amounts_out_v2(gibs_sell_wei, [gibs_cs, wpls_cs])
+        if direct and len(direct) >= 2:
+            candidates.append(([gibs_cs, wpls_cs], 1, direct[-1], 0))
+
+        # 2-hop: GIBS → FED → WPLS on V2
+        two_hop = get_amounts_out_v2(gibs_sell_wei, [gibs_cs, fed_cs, wpls_cs])
+        if two_hop and len(two_hop) >= 3:
+            candidates.append(([gibs_cs, fed_cs, wpls_cs], 1, two_hop[-1], GAS_PER_EXTRA_HOP))
+
+        if not candidates:
+            # Absolute fallback: direct on V2
+            return [gibs_cs, wpls_cs], 1, 0
+
+        # Pick best net output (output minus extra gas cost)
+        gas_price = w3_read.eth.gas_price
+        best = max(candidates, key=lambda c: c[2] - (c[3] * gas_price))
+        path, dex, output, _ = best
+
+        log.debug("E2 best sell route: %s on dex=%d → %d wei",
+                  [Web3.to_checksum_address(a)[-6:] for a in path], dex, output)
+        return path, dex, output
+
+    # ── AFF acquisition ─────────────────────────────────────────────────
+
+    def _cheapest_aff_route(self, amount_aff_wei: int) -> tuple[str, int]:
+        """
+        Compare DEX buy vs Hub buyAffection for acquiring AFF.
+        Returns ('dex' or 'buywith', estimated_pls_cost_wei).
+        """
+        wpls_cs = Web3.to_checksum_address(WPLS)
+        aff_cs = Web3.to_checksum_address(AFFECTION)
+
+        # DEX quote: how much WPLS to buy `amount_aff_wei` AFF?
+        # Use V1 (typically slightly cheaper for AFF)
+        dex_cost = None
+        # Forward quote: try increasing PLS amounts until we get enough AFF
+        # Start with rough estimate: ~43 PLS/AFF
+        est_pls = int(amount_aff_wei * 45 / 1e18)  # 45 PLS/AFF estimate
+        est_pls_wei = est_pls * 10**18
+        v1_out = get_amounts_out(est_pls_wei, [wpls_cs, aff_cs])
+        if v1_out and v1_out[-1] > 0:
+            # Scale: cost = est_pls * (amount_needed / amount_got)
+            got = v1_out[-1]
+            dex_cost = int(est_pls_wei * amount_aff_wei / got)
+            # Add 3% buffer for slippage
+            dex_cost = int(dex_cost * 103 / 100)
+
+        # BuyWith quote via Hub (MATH route)
+        buywith_cost = None
+        try:
+            hub = self._get_hub()
+            math_cs = Web3.to_checksum_address(AFF_MATH)
+            loops = int(amount_aff_wei / 10**18)
+            # Quote: how much PLS to buy `loops` AFF via MATH route?
+            quote = safe(hub, "quoteBuyAffection", math_cs, est_pls_wei, loops, 1)
+            if quote and quote[0] > 0:
+                # quote[0] = est payment tokens needed (MATH)
+                # We need to price MATH in PLS: WPLS → MATH
+                math_in_pls = get_amounts_out_v2(
+                    int(quote[0]), [math_cs, wpls_cs]
+                )
+                if math_in_pls:
+                    # This gives us how much WPLS we'd get selling the MATH
+                    # But we need the reverse: how much WPLS to BUY that much MATH
+                    # Approximate: the PLS cost is the msg.value we'd send to buyAffection
+                    wpls_for_math = get_amounts_out_v2(
+                        est_pls_wei, [wpls_cs, math_cs]
+                    )
+                    if wpls_for_math and wpls_for_math[-1] > 0:
+                        math_got = wpls_for_math[-1]
+                        math_needed = int(quote[0])
+                        buywith_cost = int(est_pls_wei * math_needed / math_got)
+                        buywith_cost = int(buywith_cost * 103 / 100)
+        except Exception as exc:
+            log.debug("E2: BuyWith quote failed: %s", exc)
+
+        # Compare
+        if dex_cost and buywith_cost:
+            if dex_cost <= buywith_cost:
+                log.info("E2 AFF: DEX cheaper (%d vs %d PLS)", dex_cost // 10**18, buywith_cost // 10**18)
+                return "dex", dex_cost
+            else:
+                log.info("E2 AFF: BuyWith cheaper (%d vs %d PLS)", buywith_cost // 10**18, dex_cost // 10**18)
+                return "buywith", buywith_cost
+        elif dex_cost:
+            return "dex", dex_cost
+        elif buywith_cost:
+            return "buywith", buywith_cost
+        else:
+            # Fallback estimate
+            return "dex", int(amount_aff_wei * 45)  # ~45 PLS/AFF rough
+
+    def _acquire_aff(self, shortfall_wei: int, hub, dry_run: bool) -> tuple[list[str], int]:
+        """
+        Acquire AFFECTION via cheapest route and deposit into Hub.
+        Returns (tx_hashes, gas_spent_wei).
+        """
+        tx_hashes = []
+        gas_spent = 0
+        route, pls_cost = self._cheapest_aff_route(shortfall_wei)
+
+        if route == "buywith":
+            # Hub buyAffection: send PLS, Hub wraps + swaps + BuyWith atomically
+            math_cs = Web3.to_checksum_address(AFF_MATH)
+            loops = int(shortfall_wei / 10**18)
+            min_aff = int(shortfall_wei * 90 / 100)  # 10% slippage tolerance
+
+            log.info("E2: Acquiring %d AFF via Hub buyAffection(MATH), cost ~%d PLS",
+                      loops, pls_cost // 10**18)
+
+            r = send_tx(
+                hub.functions.buyAffection(
+                    math_cs, BUYWITH_MATH_SELECTOR, loops, min_aff, 1
+                ),
+                f"buyAffection(MATH, {loops} loops)",
+                dry_run=dry_run,
+                value=pls_cost,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+        else:
+            # DEX buy: swap PLS → WPLS → AFF on V1 router, then deposit
+            wpls_cs = Web3.to_checksum_address(WPLS)
+            aff_cs = Web3.to_checksum_address(AFFECTION)
+            hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
+
+            log.info("E2: Acquiring %d AFF via DEX (PLS→WPLS→AFF), cost ~%d PLS",
+                      int(shortfall_wei / 10**18), pls_cost // 10**18)
+
+            # Wrap PLS → WPLS
+            WPLS_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                         "outputs": [], "payable": True, "type": "function"}]
+            wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_ABI)
+            r = send_tx(
+                wpls_c.functions.deposit(),
+                f"Wrap {pls_cost // 10**18} PLS → WPLS",
+                dry_run=dry_run,
+                value=pls_cost,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Swap WPLS → AFF on V1
+            router = router_contract(w3=w3_submit)
+            r = approve_if_needed(
+                w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+                Web3.to_checksum_address(PULSEX_V1_ROUTER), pls_cost,
+                "WPLS→Router", dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            min_aff = int(shortfall_wei * 90 / 100)
+            import time
+            r = send_tx(
+                router.functions.swapExactTokensForTokens(
+                    pls_cost, min_aff,
+                    [wpls_cs, aff_cs],
+                    JOEY_WALLET,
+                    int(time.time()) + 300,
+                ),
+                f"Swap WPLS → {int(shortfall_wei / 10**18)} AFF",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # Now deposit AFF from Joey → Hub
+            aff_c_submit = w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi)
+            r = approve_if_needed(aff_c_submit, hub_addr, shortfall_wei,
+                                  "AFF→Hub", dry_run=dry_run)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            r = send_tx(
+                hub.functions.deposit(aff_cs, shortfall_wei),
+                f"Deposit {int(shortfall_wei / 10**18)} AFF → Hub",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+        return tx_hashes, gas_spent
 
     # ── EngineBase interface ──────────────────────────────────────────────
 
     def is_ready(self) -> bool:
         """
         Ready when:
-        1. TGSv8+ is deployed and configured
-        2. GIBS/WPLS V2 pair exists
+        1. JoystickHub is deployed and configured
+        2. GIBS/WPLS V2 pair exists with reserves
         3. GIBS price exceeds break-even
-        4. Enough AFFECTION available (in TGSv8+ or Joey's wallet)
+        4. AFF acquirable (Hub has AFF, or Joey has AFF, or Joey has PLS to buy AFF)
         """
-        if not TGSV8PLUS:
-            log.debug("E2 not ready: TGSV8PLUS_ADDRESS not set")
+        if not JOYSTICK_HUB:
+            log.debug("E2 not ready: JOYSTICK_HUB_ADDRESS not set")
             return False
 
         pair = self._get_gibs_wpls_pair()
@@ -154,85 +371,95 @@ class DSSEngine(EngineBase):
             log.debug("E2 not ready: no GIBS/WPLS V2 pair")
             return False
 
-        gibs_price = token_price_pls(GIBS_LAU, 10**18)
+        # Use V2 router — GIBS/WPLS pair is on PulseX V2
+        gibs_price = self._gibs_price_v2()
         if not gibs_price:
             log.debug("E2 not ready: GIBS price oracle failed")
             return False
 
-        # Check AFF availability (in TGSv8+ OR Joey wallet)
+        # Check AFF availability (in Hub, Joey wallet, or acquirable with PLS)
         aff_needed = HARVEST_MINT_COUNT * 10**18
-        aff_in_plus = self._aff_in_plus()
+        aff_in_hub = self._aff_in_hub()
         aff_in_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-        aff_total = aff_in_plus + aff_in_joey
+        aff_total = aff_in_hub + aff_in_joey
         if aff_total < aff_needed:
-            log.debug("E2 not ready: AFF %d < %d needed (plus=%d joey=%d)",
-                      aff_total // 10**18, HARVEST_MINT_COUNT,
-                      aff_in_plus // 10**18, aff_in_joey // 10**18)
-            return False
+            # Can Joey buy the shortfall with PLS?
+            shortfall = aff_needed - aff_total
+            _, acquire_cost = self._cheapest_aff_route(shortfall)
+            joey_pls = w3_read.eth.get_balance(JOEY_WALLET)
+            if joey_pls < acquire_cost + 200_000 * 10**18:  # need PLS for AFF + gas buffer
+                log.debug("E2 not ready: AFF %d < %d, PLS too low to acquire (%d PLS)",
+                          aff_total // 10**18, HARVEST_MINT_COUNT, joey_pls // 10**18)
+                return False
+            log.debug("E2: AFF shortfall %d — will auto-acquire (~%d PLS)",
+                      shortfall // 10**18, acquire_cost // 10**18)
 
-        # Break-even check (accounts for both TXs, 100% sell)
+        # Break-even check: sell portion revenue must exceed total gas
+        lp_bps = 10000 - HARVEST_SELL_BPS  # LP portion
+        sell_count = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
         gas_price = w3_read.eth.gas_price
         gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
-        revenue_wei = gibs_price * HARVEST_MINT_COUNT  # 100% sell
+        revenue_wei = gibs_price * max(sell_count, 1)
 
         log.debug(
-            "E2: GIBS=%.2f PLS, mint=%d, 100%% sell, gas=%.1f PLS (2-TX)",
-            gibs_price / 1e18, HARVEST_MINT_COUNT, gas_cost_wei / 1e18,
+            "E2: GIBS=%.2f PLS, mint=%d, sell=%d%%, LP=%d%%, gas=%.1f PLS",
+            gibs_price / 1e18, HARVEST_MINT_COUNT,
+            HARVEST_SELL_BPS / 100, lp_bps / 100, gas_cost_wei / 1e18,
         )
 
         return revenue_wei > gas_cost_wei
 
     def simulate(self) -> tuple[int, int]:
         """
-        Estimate (profit_wei, gas_cost_wei) for one harvest cycle.
-        Gas includes both batchExecute (prime) and harvestCycle TXs.
-        Uses quoteSell() for accurate DEX output estimation.
-        100% sell — no LP step.
+        Estimate (profit_wei, gas_cost_wei) for one LP loop cycle.
+        Profit = sell revenue. LP value tracked separately.
         """
-        if not TGSV8PLUS:
-            raise SimulationFailed("TGSV8PLUS_ADDRESS not configured")
+        if not JOYSTICK_HUB:
+            raise SimulationFailed("JOYSTICK_HUB_ADDRESS not configured")
 
         pair = self._get_gibs_wpls_pair()
         if not pair:
             raise SimulationFailed("No GIBS/WPLS V2 pair")
 
-        # 100% sell — all minted GIBS go to DEX
-        sell_gibs_wei = HARVEST_MINT_COUNT * 10**18
+        # Calculate sell portion
+        sell_count = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
+        if sell_count == 0:
+            sell_count = 1  # Always sell at least 1 for gas recovery
+        sell_gibs_wei = sell_count * 10**18
 
-        # Use quoteSell for accurate WPLS estimate
-        pls_out = self._quote_sell(sell_gibs_wei)
+        # Quote via best route
+        _, _, pls_out = self._best_sell_route(sell_gibs_wei)
         if not pls_out:
-            # Fallback to price oracle
-            gibs_price = token_price_pls(GIBS_LAU, 10**18)
+            gibs_price = self._gibs_price_v2()
             if not gibs_price:
                 raise SimulationFailed("GIBS price oracle failed")
-            pls_out = gibs_price * HARVEST_MINT_COUNT
+            pls_out = gibs_price * sell_count
 
+        # Gas estimate (2 TXs, extra hop may add gas)
         gas_price = w3_read.eth.gas_price
         gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
 
         if pls_out <= gas_cost_wei:
             raise SimulationFailed(
-                f"E2 unprofitable: sell {HARVEST_MINT_COUNT} GIBS → {pls_out/1e18:.1f} PLS "
-                f"<= gas {gas_cost_wei/1e18:.1f} PLS (2-TX)"
+                f"E2 unprofitable: sell {sell_count} GIBS → {pls_out/1e18:.1f} PLS "
+                f"<= gas {gas_cost_wei/1e18:.1f} PLS"
             )
 
         return pls_out, gas_cost_wei
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """
-        Two-TX harvest pipeline via TGSv8+:
+        Two-TX LP loop via JoystickHub:
 
-        1. Ensure AFF is deposited in TGSv8+
-        2. TX1: batchExecute — call mintToCap() on GIBS_LAU × mintCount
-           This primes the LAU contract's self-balance so Purchase works.
-        3. TX2: harvestCycle — atomic sell+LP+burn pipeline
-           Purchase × N succeeds because self-balance was primed in TX1.
+        1. Ensure AFF is deposited in Hub
+        2. TX1: primeGibs(N) — Generate() × N to prime LAU self-balance
+        3. TX2: mintLPAndSell{value}(N, lpBps, ...) — LP first, sell second
         """
-        plus = self._get_plus_submit()
-        if not plus:
+        try:
+            hub = self._get_hub_submit()
+        except (ValueError, Exception) as exc:
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
-                                tx_hashes=[], notes="TGSv8+ not configured")
+                                tx_hashes=[], notes=f"Hub not configured: {exc}")
 
         tx_hashes = []
         gas_spent = 0
@@ -244,96 +471,96 @@ class DSSEngine(EngineBase):
                                 tx_hashes=[], notes=str(exc))
 
         try:
-            # Step 1: Ensure TGSv8+ has enough AFFECTION
-            aff_needed = HARVEST_MINT_COUNT * 10**18
-            aff_in_plus = self._aff_in_plus()
-
-            if aff_in_plus < aff_needed:
-                deposit_amount = aff_needed - aff_in_plus
-                log.info("E2: Depositing %d AFF into TGSv8+", deposit_amount // 10**18)
-
-                # Approve TGSv8+ to pull AFF from Joey
-                aff_c = erc20(AFFECTION)
-                aff_c_submit = w3_submit.eth.contract(
-                    address=Web3.to_checksum_address(AFFECTION),
-                    abi=aff_c.abi,
-                )
-                r = approve_if_needed(aff_c_submit, TGSV8PLUS, deposit_amount,
-                                      "AFF→TGSv8+", dry_run=dry_run)
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-
-                # Deposit AFF into TGSv8+
-                r = send_tx(
-                    plus.functions.deposit(
-                        Web3.to_checksum_address(AFFECTION), deposit_amount
-                    ),
-                    f"Deposit {deposit_amount // 10**18} AFF → TGSv8+",
-                    dry_run=dry_run,
-                )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-
-            # Step 2: Prime GIBS self-balance via batchExecute(mintToCap × N)
-            # harvestCycle uses silent Purchase (no mintToCap), so we must
-            # prime N tokens into GIBS_LAU's self-balance first.
             mint_count = HARVEST_MINT_COUNT
-            gibs_addr = Web3.to_checksum_address(GIBS_LAU)
-            targets = [gibs_addr] * mint_count
-            datas = [MINT_TO_CAP_SELECTOR] * mint_count
+            lp_bps = 10000 - HARVEST_SELL_BPS  # e.g., 10000-4500 = 5500
+            hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
+            gibs_cs = Web3.to_checksum_address(GIBS_LAU)
 
-            log.info("E2: Priming GIBS self-balance — batchExecute(mintToCap × %d)", mint_count)
+            # ── TX1: DSS.mintToSelf(N) — 1 TX, N GIBS land in Joey's wallet ──
+            from ..core.config import DSS
+            dss_addr = Web3.to_checksum_address(DSS)
+            DSS_ABI = [{"inputs": [{"name": "_amount", "type": "uint64"}],
+                        "name": "mintToSelf", "outputs": [], "type": "function"}]
+            dss_c = w3_submit.eth.contract(address=dss_addr, abi=DSS_ABI)
+
+            log.info("E2: DSS.mintToSelf(%d) — single TX mint", mint_count)
 
             r = send_tx(
-                plus.functions.batchExecute(targets, datas),
-                f"Prime GIBS mintToCap × {mint_count}",
+                dss_c.functions.mintToSelf(mint_count),
+                f"DSS.mintToSelf({mint_count})",
                 dry_run=dry_run,
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                log.info("E2: Prime TX confirmed — gas %d", r["gasUsed"])
+                log.info("E2: Minted %d GIBS in 1 TX — gas %d", mint_count, r["gasUsed"])
 
-            # Step 3: Compute minPlsOut with slippage protection (100% sell)
-            sell_gibs_wei = HARVEST_MINT_COUNT * 10**18
-            expected_pls = self._quote_sell(sell_gibs_wei)
-            min_pls_out = int(expected_pls * 95 / 100) if expected_pls else 0
+            # ── TX2: Deposit GIBS into Hub ──
+            gibs_amount = mint_count * 10**18
+            gibs_c_submit = w3_submit.eth.contract(
+                address=gibs_cs, abi=erc20(GIBS_LAU).abi,
+            )
+            r = approve_if_needed(gibs_c_submit, hub_addr, gibs_amount,
+                                  "GIBS→Hub", dry_run=dry_run)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Step 4: Execute harvestCycle — 100% sell, no LP (LP step has
-            # INSUFFICIENT_A_AMOUNT bug due to tight minimums after price impact)
+            r = send_tx(
+                hub.functions.deposit(gibs_cs, gibs_amount),
+                f"Deposit {mint_count} GIBS → Hub",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # ── TX3: harvestPreloaded — LP first, sell second ──
+            gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
+            wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
+
+            sell_gibs_wei = gibs_amount - gibs_for_lp_wei
+            sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
+            min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
+
             log.info(
-                "E2: harvestCycle(mint=%d, sell=100%%, minPLS=%.1f, dex=%d)",
-                HARVEST_MINT_COUNT, min_pls_out / 1e18, HARVEST_SELL_DEX,
+                "E2: harvestPreloaded(lp=%d%%, burn=%d%%, lpDex=%d, "
+                "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS)",
+                lp_bps / 100, HARVEST_BURN_BPS / 100,
+                HARVEST_LP_DEX, min_sell_out / 1e18,
+                [a[-6:] for a in sell_path], sell_dex,
+                wpls_needed / 1e18,
             )
 
             r = send_tx(
-                plus.functions.harvestCycle(
-                    HARVEST_MINT_COUNT,
-                    10000,         # 100% sell — all GIBS → WPLS
-                    min_pls_out,
-                    0,             # 0% burn (no LP created)
-                    HARVEST_SELL_DEX,
-                    HARVEST_SELL_DEX,  # lpDex irrelevant (no LP step)
+                hub.functions.harvestPreloaded(
+                    lp_bps,
+                    HARVEST_BURN_BPS,
+                    HARVEST_LP_DEX,
+                    min_sell_out,
+                    sell_path,
+                    sell_dex,
                 ),
-                f"HarvestCycle({HARVEST_MINT_COUNT}, 100% sell, dex={HARVEST_SELL_DEX})",
+                f"harvestPreloaded(LP={lp_bps/100:.0f}%, "
+                f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
                 dry_run=dry_run,
+                value=wpls_needed,
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            log.info("E2 complete: %d GIBS minted + sold → PLS",
-                     HARVEST_MINT_COUNT)
+            log.info("E2 complete: %d GIBS — %d%% LP, %d%% sold (3 TXs)",
+                     mint_count, lp_bps / 100, HARVEST_SELL_BPS / 100)
 
             return EngineResult(
                 success=True,
                 profit_wei=revenue_wei,
                 gas_wei=gas_spent,
                 tx_hashes=tx_hashes,
-                notes=f"HarvestCycle: {HARVEST_MINT_COUNT} GIBS → PLS "
-                      f"(2-TX: prime+sell, dex={HARVEST_SELL_DEX})",
+                notes=f"LP Loop: {mint_count} GIBS — {lp_bps/100:.0f}% LP, "
+                      f"{HARVEST_SELL_BPS/100:.0f}% sell via "
+                      f"{'→'.join(a[-6:] for a in sell_path)}",
             )
 
         except Exception as exc:

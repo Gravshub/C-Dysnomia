@@ -417,6 +417,28 @@ C-Dysnomia is our fork of `atropa_pulsechain`. It adds:
 | **TGSv8** | **`0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32`** | 25,943,194 | **ACTIVE** execution substrate |
 | JV8A | `0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30` | 25,943,266 | V4 treasury token (unminted) |
 | DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | 25,887,000 | DysnomiaSelfSnipev4 for GIBS |
+| **JoystickHub** | **`0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14`** | 26,092,219 | **ACTIVE** modular proxy (replaces TGSv8+ for E2) |
+| Hub:Harvest | `0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2` | 26,092,219 | HarvestModule (primeGibs, mintLPAndSell, batchReseed) |
+| Hub:Affection | `0xfb7C1A1Ef0Ce8AB527998a1c2Ca12C6CA400da4B` | 26,092,219 | AffectionModule (buyAffection, quoteBuyAffection) |
+| Hub:Purchase | `0xc59cb7229872E72B7349Ef7DFa170A2444a8264E` | 26,092,219 | PurchaseModule (purchaseAndSell, batchPurchaseAndSell) |
+
+### JoystickHub — Modular Proxy
+Single-file deploy: Hub + 3 modules via delegatecall. Hot-swappable selectors.
+
+**HarvestModule** (E2 CEREAL — LP Loop):
+- `primeGibs(count)` — calls GIBS_LAU.Generate() × N to prime self-balance
+- `mintLPAndSell(mintCount, lpBps, burnBps, lpDex, minSellOut, sellPath, sellDex)` — LP first, sell second, payable (wraps PLS→WPLS)
+- `batchReseed(pairs, amounts)` — reseed drained LP pairs
+- `harvestConfig()` — view current config
+
+**AffectionModule** (E4 fuel):
+- `buyAffection(paymentToken, buySelector, loops, minAffOut, dex)` — PLS → payment → BuyWith → AFF
+- `quoteBuyAffection(paymentToken, plsAmount, loops, dex)` — quote
+
+**PurchaseModule** (E1 arb):
+- `purchaseAndSell(targetToken, affAmount, sellPath, dex, minPLSOut)` — AFF → Purchase → sell
+- `batchPurchaseAndSell(targets, affAmounts, sellPaths, dexes, minOuts)` — batch with try/catch
+- `quotePurchase(targetToken, affAmount, sellPath, dex)` — profitability check
 
 ### TGSv8 Capabilities
 Full source in project file `TGSv8`. Key functions:
@@ -469,7 +491,7 @@ Full source in project file `TGSv8`. Key functions:
 | # | Name | File | Description | Status |
 |---|------|------|-------------|--------|
 | E1 | RAZOR (Arb) | `arb.py` | Cross-DEX QING arbitrage via `atomicArb()` | Ready — net-negative per recon |
-| E2 | CEREAL (DSS) | `dss.py` | `chatAndClaim` / `chatAndClaimWithMultiplier` → GIBS → PLS | **UNLOCKED** — 10x above break-even |
+| E2 | CEREAL (Hub) | `dss.py` | JoystickHub `primeGibs` + `mintLPAndSell` — LP first, sell second | **UNLOCKED** — Hub deployed, ~846 PLS/cycle net |
 | E3 | MERIDIAN (Beat) | `beat.py` | Territory positioning (`CHEON.Su` + `META.Beat`) | Running (Dione=41) |
 | E4 | Token Factory | `token_factory.py` | TGSv8 `mintWM()` + mint-and-sell | + AFFECTION — BuyWith routes |
 | E5 | LAU (ABUPRU) | `lau.py` | Mathematical state loop + EmitSniper | Gated (150K PLS floor) |

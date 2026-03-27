@@ -97,3 +97,9 @@ scripts/Joystick/data/events/*.jsonl
 # JetBrains / Rider
 .idea/
 scripts/Joystick/dashboard/data/balance_history.json
+
+# Node
+node_modules/
+
+# Runtime logs
+scripts/Joystick/data/dash.log

@@ -216,7 +216,8 @@ def _build_portfolio(reader, block: int) -> PortfolioSummary:
         minter_wei = wallet_bals.get("Minter", {}).get(sym, 0)
         seller_wei = wallet_bals.get("Seller", {}).get(sym, 0)
         tgsv8_wei = wallet_bals.get("TGSv8", {}).get(sym, 0)
-        total_wei = joey_wei + minter_wei + seller_wei + tgsv8_wei
+        hub_wei = wallet_bals.get("Hub", {}).get(sym, 0)
+        total_wei = joey_wei + minter_wei + seller_wei + tgsv8_wei + hub_wei
 
         bal = total_wei / 1e18
         price = prices.get(sym)
@@ -242,6 +243,7 @@ def _build_portfolio(reader, block: int) -> PortfolioSummary:
             minter_balance=round(minter_wei / 1e18, 4),
             seller_balance=round(seller_wei / 1e18, 4),
             tgsv8_balance=round(tgsv8_wei / 1e18, 4),
+            hub_balance=round(hub_wei / 1e18, 4),
         )
         holdings.append(h)
 
@@ -251,6 +253,7 @@ def _build_portfolio(reader, block: int) -> PortfolioSummary:
             wallet_totals["Minter"] += (minter_wei / 1e18) * price
             wallet_totals["Seller"] += (seller_wei / 1e18) * price
             wallet_totals["TGSv8"] += (tgsv8_wei / 1e18) * price
+            wallet_totals["Hub"] += (hub_wei / 1e18) * price
 
     # Sort by value descending (PLS first)
     holdings.sort(key=lambda h: -(h.value_pls or 0))
@@ -284,10 +287,12 @@ def _build_portfolio(reader, block: int) -> PortfolioSummary:
         top_losers=losers,
         holdings=holdings,
         snapshot_block=block,
+        wallet_addresses=config.PORTFOLIO_WALLETS,
         joey_total_pls=round(wallet_totals["Joey"], 2),
         minter_total_pls=round(wallet_totals["Minter"], 2),
         seller_total_pls=round(wallet_totals["Seller"], 2),
         tgsv8_total_pls=round(wallet_totals["TGSv8"], 2),
+        hub_total_pls=round(wallet_totals.get("Hub", 0), 2),
     )
 
 
