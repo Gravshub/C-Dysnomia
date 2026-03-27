@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""
-gibs_pair_creator.py — GIBS Liquidity Pair Creation (dry-run by default)
+"""LAU Liquidity Pair Creator — works with any LAU token on PulseChain.
 
-Evaluates three pairing options for GIBS LAU token:
-  Option A: GIBS / WPLS (PulseX V1) — unlocks Engine 2 DSS immediately
-  Option B: GIBS / AFFECTION — intra-ecosystem pair
-  Option C: GIBS / top Atropa tokens (ATROPA, TBILL, HAR)
+Evaluates three pairing options for a LAU token:
+  Option A: LAU / WPLS (PulseX V1) — unlocks Engine 2 DSS immediately
+  Option B: LAU / AFFECTION — intra-ecosystem pair
+  Option C: LAU / top Atropa tokens (ATROPA, TBILL, HAR)
 
 Usage:
-  python scripts/gibs_pair_creator.py --query          # query on-chain state only
-  python scripts/gibs_pair_creator.py --option A --dry-run  # simulate Option A
-  python scripts/gibs_pair_creator.py --option B --dry-run  # simulate Option B
-  python scripts/gibs_pair_creator.py --option C --dry-run  # simulate Option C
+  python scripts/lp_create_pair.py --query                     # defaults (GIBS LAU, Joey wallet)
+  python scripts/lp_create_pair.py --lau 0x1234... --query     # custom LAU token
+  python scripts/lp_create_pair.py --option A --dry-run        # simulate Option A
+  python scripts/lp_create_pair.py --partner 0xABCD... --dex v2 --option A --dry-run
 
 NEVER runs live TXs without explicit --live flag (not yet implemented).
 """
@@ -32,8 +31,12 @@ from web3 import Web3
 RPC_READ = os.getenv("PULSECHAIN_READ_RPC", "https://rpc-pulsechain.g4mm4.io")
 RPC_SUBMIT = os.getenv("PULSECHAIN_RPC", "https://rpc.pulsechain.com")
 
-JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
-GIBS_LAU    = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
+DEFAULT_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
+DEFAULT_LAU    = "0x66a08aa12da955eb63d7ac121a88b2b210a07b03"
+
+# Runtime references — set in main() from argparse
+JOEY_WALLET = None
+GIBS_LAU    = None
 AFFECTION   = Web3.to_checksum_address("0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D")
 WPLS        = Web3.to_checksum_address("0xA1077a294dDE1B09bB078844df40758a5D0f9a27")
 TGSV8       = Web3.to_checksum_address(os.getenv("TGSV8_ADDRESS", "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32"))
@@ -358,12 +361,26 @@ def simulate_option(option: str, state: dict):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="GIBS Liquidity Pair Creator")
+    global JOEY_WALLET, GIBS_LAU
+
+    parser = argparse.ArgumentParser(description="LAU Liquidity Pair Creator")
+    parser.add_argument("--lau", type=str, default=DEFAULT_LAU,
+                        help=f"LAU token address (default: GIBS {DEFAULT_LAU})")
+    parser.add_argument("--wallet", type=str, default=DEFAULT_WALLET,
+                        help=f"Wallet address (default: Joey {DEFAULT_WALLET})")
+    parser.add_argument("--partner", type=str, default=None,
+                        help="Partner token address (overrides option's default partner)")
+    parser.add_argument("--dex", choices=["v1", "v2"], default=None,
+                        help="DEX version for pair creation (v1 or v2)")
     parser.add_argument("--query", action="store_true", help="Query on-chain state only")
     parser.add_argument("--option", choices=["A", "B", "C"], help="Pair option to simulate")
     parser.add_argument("--dry-run", action="store_true", default=True,
                         help="Simulate only (default, always on)")
     args = parser.parse_args()
+
+    # Set runtime globals from args
+    JOEY_WALLET = Web3.to_checksum_address(args.wallet)
+    GIBS_LAU = Web3.to_checksum_address(args.lau)
 
     print("Querying on-chain state...")
     state = query_state()

@@ -336,67 +336,196 @@ HELP_TEXT = """
 
  ── Status ──────────────────────────
   status             Bot & engine overview
-  engines            All 8 engines with status
+  engines            All 8 engines w/ status
   wallet             Joey wallet balances
   gas                Gas conditions
   tgsv8              TGSv8 contract state
+  hub                JoystickHub module status
 
- ── Engines (dry-run, add --live) ───
-  bot razor          E1 Cross-DEX arb scan
-  bot cereal         E2 GIBS harvest
-  bot beat           E3 Territory Beat
-  bot factory        E4 AFF/WM mint
-  bot lau            E5 ABUPRU state loop
-  bot davinci        E6 Treasury sniper
-  bot backbone       E7 Spine runner
-  bot phreak         E8 Web weaver
+ ── Engines ─────────────────────────
+  bot <engine>       Run engine (bot help)
+  bot cycle          Full cycle (dry-run)
+  bot run / stop     Background loop
 
- ── Bot Control ─────────────────────
-  bot cycle          Dry-run one full cycle
-  bot cycle --live   Live-fire one cycle
-  bot status         Engine/strategist status
-  bot wallet-status  3-wallet balances + auth
-  bot rpc-status     RPC provider health
-  bot log-status     Event log statistics
-  bot run            Start bot loop (background)
-  bot stop           Stop background bot
+ ── Recon ───────────────────────────
+  recon <target>     Chain scans (recon help)
 
- ── Recon (read-only) ───────────────
-  recon arb          Scan 272 QINGs for arb opps
-  recon aff          AFF + WM profitability check
-  recon beat         Beat prerequisites
-  recon tgsv8        TGSv8 state verification
-  recon pairs        GIBS LP pair discovery
-  recon players      Active player scan
-  recon crows        CROWS bouncer analysis
-  recon shio         SHIO availability + pricing
-  recon void         VOID active users
-  recon fornax       Fornax whale mapping
+ ── Scripts ─────────────────────────
+  scripts            List all by category
+  scripts <category> Filter (tx, recon, deploy...)
+  run <script> [args] Execute a script
+
+ ── Oracle ──────────────────────────
+  price <token>      DEX price in PLS
+  reserves <pair>    LP pair reserves
+  pair <tokenA> <tokenB>  Find/create pair info
+
+ ── Wallet ──────────────────────────
+  balance [token] [addr]   Token or PLS balance
+  nonce [addr]             Current nonce
+  approve <tok> <spender>  Check allowance
 
  ── Logs ────────────────────────────
   logs [N]           Last N events (default 20)
-  logs engine <name> Logs for specific engine
-  tail               Toggle live log streaming
+  logs engine <name> Engine-specific logs
+  tail               Live log stream
 
  ── Tests ───────────────────────────
-  test               Run full test suite
-  test anvil         Anvil fork integration tests
-  test data          Data store tests
-  test engines       Engine simulation tests
-  test tgsv8         TGSv8+ contract tests
-  test razor         RAZOR PulseChain tests
-  test <file.py>     Run specific test file
+  test [target]      Run tests (test help)
 
- ── Tools ───────────────────────────
-  run <script.py>    Run a script from scripts/
-  ps                 Show running background jobs
-  kill <job>         Kill a background job
+ ── Process ─────────────────────────
+  ps                 Background jobs
+  kill <job>         Kill a job
 
  ── Terminal ────────────────────────
   clear              Clear terminal
   help               This message
+  help <section>     Detailed section help
 ════════════════════════════════════════
 """.strip()
+
+
+HELP_SECTIONS = {
+    "status": """
+──── STATUS COMMANDS ────────────────────
+  status           Full bot overview: PLS balance, engine summary,
+                   gas conditions, strategist state, validator %
+  engines          All 8 engines with: status, last run time,
+                   profit, gas spent, win rate, circuit breaker
+  wallet           Joey + Minter + Seller balances (PLS + all tokens)
+  gas              Gas price (Beats), ceiling, trend, skip condition
+  tgsv8            TGSv8 contract: owner, paused, authorized wallets,
+                   opNonce, registry, native PLS, token balances
+  hub              JoystickHub: deployed modules, selectors, balances
+─────────────────────────────────────────""",
+
+    "engines": """
+──── ENGINE COMMANDS ────────────────────
+  All engines default to dry-run. Add --live for real TXs.
+
+  bot razor          E1 Cross-DEX arb scan           [seller]
+  bot cereal         E2 GIBS harvest (DSS)           [joey]
+  bot beat           E3 Territory Beat positioning   [joey]
+  bot factory        E4 AFF/WM dual-mode mint        [minter]
+  bot lau            E5 ABUPRU state loop            [joey]
+  bot davinci        E6 Treasury sniper              [minter]
+  bot backbone       E7 Spine runner                 [minter]
+  bot phreak         E8 Web weaver (DEPLOY/ARM/STITCH) [minter]
+
+  bot cycle          Run full strategist cycle
+  bot cycle --live   Live-fire cycle (real TXs!)
+  bot status         Engine/strategist P&L table
+  bot wallet-status  3-wallet balances + auth check
+  bot rpc-status     RPC provider health + latency
+  bot log-status     Event log statistics
+  bot run            Start bot loop (background)
+  bot stop           Stop background bot
+
+  Aliases: e1=razor e2=cereal e3=beat e4=factory
+           e5=lau e6=davinci e7=backbone e8=phreak
+─────────────────────────────────────────""",
+
+    "recon": """
+──── RECON COMMANDS ─────────────────────
+  All recon is read-only. No TXs sent.
+
+  recon arb          Scan 272 QINGs for arb opps
+  recon aff          AFF + WM profitability check
+  recon beat         Beat prerequisites (SHIO, CHEON)
+  recon tgsv8        TGSv8 state verification
+  recon pairs        GIBS LP pair reserve scan
+  recon players      Active player balance scan
+  recon crows        CROWS bouncer analysis
+  recon shio         SHIO availability + pricing
+  recon void         VOID active users
+  recon fornax       Fornax whale mapping
+  recon player       Single player deep scan
+  recon zuo          ZUO ownership
+  recon zurich       Zurich sources
+─────────────────────────────────────────""",
+
+    "scripts": """
+──── SCRIPTS ────────────────────────────
+  scripts            List all scripts by category
+  scripts tx         Transaction scripts only
+  scripts recon      Recon/scan scripts only
+  scripts deploy     Contract deployment scripts
+  scripts chat       VOID chat scripts
+  scripts intel      Competitor analysis scripts
+  scripts lp         LP management scripts
+  scripts tools      Bot tools (tests, diagnostics)
+
+  run <script.py> [args]     Execute any script
+  run <script.py> --help     Script-specific help
+
+  Scripts live in two locations:
+    scripts/              <- standalone ops
+    scripts/Joystick/tools/  <- bot-integrated tools
+─────────────────────────────────────────""",
+
+    "oracle": """
+──── ORACLE COMMANDS ────────────────────
+  price <token>        Get token price in PLS via DEX
+                       Accepts: symbol (AFF, GIBS, WM, ATROPA...)
+                       or address (0x...)
+  price <token> --usd  Include USD conversion
+
+  reserves <pair_addr> Raw reserves for any LP pair
+
+  pair <tokenA> <tokenB>       Find pair on V1+V2
+  pair <tokenA> <tokenB> --v2  V2 only
+─────────────────────────────────────────""",
+
+    "wallet": """
+──── WALLET COMMANDS ────────────────────
+  balance                All token balances (Joey)
+  balance <token>        Specific token balance
+  balance <token> <addr> Balance for any address
+  balance pls [addr]     Native PLS balance
+
+  nonce                  Joey's current nonce
+  nonce <addr>           Nonce for any address
+  nonce all              All 3 wallets + TGSv8
+
+  approve <token> <spender>       Check allowance
+  approve <token> <spender> --set Set max approval (TX!)
+
+  Token shortcuts: aff, gibs, wm, atropa, wpls, void,
+                   fed, prvx, fornax, crows
+─────────────────────────────────────────""",
+
+    "logs": """
+──── LOG COMMANDS ───────────────────────
+  logs               Last 20 events
+  logs <N>           Last N events
+  logs engine razor  E1 RAZOR logs only
+  logs engine cereal E2 CEREAL logs only
+  logs tx            Transaction logs only
+  logs error         Errors/warnings only
+  tail               Toggle live streaming
+                     (always active via WebSocket)
+─────────────────────────────────────────""",
+
+    "tests": """
+──── TEST COMMANDS ──────────────────────
+  test               Full test suite
+  test anvil         Anvil fork integration
+  test data          Data store tests
+  test engines       Engine simulation tests
+  test tgsv8         TGSv8+ contract tests
+  test razor         RAZOR PulseChain tests
+  test hub           JoystickHub tests
+  test <file.py>     Run specific test file
+─────────────────────────────────────────""",
+
+    "process": """
+──── PROCESS COMMANDS ───────────────────
+  ps                 List all background jobs
+                     Shows: name, PID, status
+  kill <job>         Kill by name
+  kill all           Kill all background jobs
+─────────────────────────────────────────""",
+}
 
 
 async def _handle_command(ws: WebSocket, cmd: str):
@@ -409,7 +538,17 @@ async def _handle_command(ws: WebSocket, cmd: str):
     try:
         # ── Help ──
         if verb in ("help", "?"):
-            await ws.send_json({"type": "result", "success": True, "ts": now, "text": HELP_TEXT})
+            if len(parts) >= 2:
+                section = parts[1].lower()
+                if section in HELP_SECTIONS:
+                    await ws.send_json({"type": "result", "success": True, "ts": now,
+                                        "text": HELP_SECTIONS[section].strip()})
+                else:
+                    available = ", ".join(sorted(HELP_SECTIONS.keys()))
+                    await ws.send_json({"type": "result", "success": True, "ts": now,
+                                        "text": f"Unknown section: {section}\nAvailable: {available}"})
+            else:
+                await ws.send_json({"type": "result", "success": True, "ts": now, "text": HELP_TEXT})
 
         # ── Status commands ──
         elif verb == "status":
@@ -422,10 +561,32 @@ async def _handle_command(ws: WebSocket, cmd: str):
             await _cmd_gas(ws, now)
         elif verb == "tgsv8":
             await _cmd_tgsv8(ws, now)
+        elif verb == "hub":
+            await _cmd_hub(ws, now)
 
         # ── Bot control ──
         elif verb == "bot":
             await _cmd_bot(ws, parts, now)
+
+        # ── Oracle ──
+        elif verb == "price":
+            await _cmd_price(ws, parts, now)
+        elif verb == "reserves":
+            await _cmd_reserves(ws, parts, now)
+        elif verb == "pair":
+            await _cmd_pair(ws, parts, now)
+
+        # ── Wallet ──
+        elif verb == "balance":
+            await _cmd_balance(ws, parts, now)
+        elif verb == "nonce":
+            await _cmd_nonce(ws, parts, now)
+        elif verb == "approve":
+            await _cmd_approve(ws, parts, now)
+
+        # ── Scripts ──
+        elif verb == "scripts":
+            await _cmd_scripts(ws, parts, now)
 
         # ── Logs ──
         elif verb == "logs":
@@ -575,6 +736,529 @@ async def _cmd_tgsv8(ws: WebSocket, now: float):
             lines.append(f"  {sym:10s} {bal:,.4f}")
     lines.append("─────────────────────────────────────")
     await ws.send_json({"type": "result", "success": True, "ts": now, "text": "\n".join(lines)})
+
+
+# ── Token shortcuts for oracle/wallet commands ──────────────────────
+
+TOKEN_SHORTCUTS = {
+    "gibs":    "0x66a08aa12da955eb63d7ac121a88b2b210a07b03",
+    "aff":     "0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D",
+    "wm":      "0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29",
+    "atropa":  "0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6",
+    "wpls":    "0xA1077a294dDE1B09bB078844df40758a5D0f9a27",
+    "void":    "0x965B0d74591bF30327075A247C47dBf487dCff08",
+    "fed":     "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "prvx":    "0xf6f8db0aba00007681f8faf16a0fda1c9b030b11",
+    "fornax":  "0xF6C50fFE7efbDeE63A92E52A4D5E9afF7fb4A4D7",
+    "crows":   "0x203e366A1821570b2f84Ff5ae8B3BdeB48Dc4fa1",
+    "dai":     "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+    "affection": "0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D",
+}
+
+JOEY_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
+READ_RPC = "https://rpc-pulsechain.g4mm4.io"
+
+PULSEX_V1_FACTORY = "0x1715a3E4A142d8b698131108995174F37aEBA10D"
+PULSEX_V2_FACTORY = "0x29eA7545DEf87022BAdc76323F373EA1e707C523"
+PULSEX_V2_ROUTER = "0x165C3410fC91EF562C50559f7d2289fEbed552d9"
+
+
+def _resolve_token(token_str: str) -> str:
+    """Resolve a token shortcut or address to a checksummed address."""
+    lower = token_str.lower()
+    if lower in TOKEN_SHORTCUTS:
+        return TOKEN_SHORTCUTS[lower]
+    if token_str.startswith("0x") and len(token_str) == 42:
+        return token_str
+    return ""
+
+
+# ── Hub command ─────────────────────────────────────────────────────
+
+async def _cmd_hub(ws: WebSocket, now: float):
+    """JoystickHub module status."""
+    script = '''
+import json, os, requests
+
+RPC = "{rpc}"
+JOEY = "{joey}"
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+def balance_of(token, holder):
+    sel = "0x70a08231"
+    data = sel + holder[2:].lower().zfill(64)
+    res = eth_call(token, data)
+    if len(res) < 66: return 0
+    return int(res, 16) / 1e18
+
+hub_addr = os.getenv("JOYSTICK_HUB_ADDRESS", "")
+if not hub_addr:
+    print("JoystickHub address not configured.")
+    print("Set JOYSTICK_HUB_ADDRESS env var to enable.")
+else:
+    print(f"──── JOYSTICK HUB ───────────────────")
+    print(f"  Address: {{hub_addr[:10]}}...{{hub_addr[-4:]}}")
+    # Check PLS balance
+    pls_r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_getBalance","params":[hub_addr,"latest"],"id":1}})
+    pls_bal = int(json.loads(pls_r.text).get("result","0x0"), 16) / 1e18
+    print(f"  PLS:     {{pls_bal:,.2f}}")
+    # Check owner
+    owner_res = eth_call(hub_addr, "0x8da5cb5b")
+    if len(owner_res) >= 42:
+        owner = "0x" + owner_res[-40:]
+        is_joey = owner.lower() == JOEY.lower()
+        print(f"  Owner:   {{'Joey' if is_joey else owner[:14]+'...'}}")
+    print(f"─────────────────────────────────────")
+'''.format(rpc=READ_RPC, joey=JOEY_WALLET)
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, "JoystickHub Status", timeout=30)
+
+
+# ── Oracle commands ─────────────────────────────────────────────────
+
+async def _cmd_price(ws: WebSocket, parts: list, now: float):
+    """Get DEX price for a token."""
+    if len(parts) < 2:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Usage: price <token|address> [--usd]\n"
+                                    "Shortcuts: " + ", ".join(sorted(TOKEN_SHORTCUTS.keys()))})
+        return
+
+    token_arg = parts[1]
+    show_usd = "--usd" in parts
+    token_addr = _resolve_token(token_arg)
+    if not token_addr:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": f"Unknown token: {token_arg}\n"
+                                    "Use address (0x...) or shortcut: " +
+                                    ", ".join(sorted(TOKEN_SHORTCUTS.keys()))})
+        return
+
+    script = '''
+import json, requests
+
+RPC = "{rpc}"
+TOKEN = "{token}"
+TOKEN_NAME = "{name}"
+WPLS = "0xA1077a294dDE1B09bB078844df40758a5D0f9a27"
+ROUTER_V2 = "{router}"
+SHOW_USD = {show_usd}
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+# getAmountsOut(uint256,address[]) on V2 Router
+amount_in = 1 * 10**18  # 1 token
+path = [TOKEN, WPLS]
+# Encode: selector + amountIn + offset + length + addr0 + addr1
+sel = "0xd06ca61f"
+data = sel + hex(amount_in)[2:].zfill(64) + "0000000000000000000000000000000000000000000000000000000000000040" + "0000000000000000000000000000000000000000000000000000000000000002" + TOKEN[2:].lower().zfill(64) + WPLS[2:].lower().zfill(64)
+res = eth_call(ROUTER_V2, data)
+if len(res) < 194 or res == "0x":
+    print(f"No V2 liquidity found for {{TOKEN_NAME}}/WPLS")
+else:
+    # Parse amounts array: offset(32) + length(32) + amount0(32) + amount1(32)
+    amounts_offset = int(res[2:66], 16) * 2 + 2
+    amounts_len = int(res[amounts_offset:amounts_offset+64], 16)
+    amount_out = int(res[amounts_offset+128:amounts_offset+192], 16)
+    pls_price = amount_out / 1e18
+    print(f"{{TOKEN_NAME}}: {{pls_price:,.4f}} PLS per token")
+    if SHOW_USD:
+        print(f"  (USD conversion requires external price feed)")
+'''.format(rpc=READ_RPC, token=token_addr, name=token_arg.upper(),
+           router=PULSEX_V2_ROUTER, show_usd=show_usd)
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, f"Price: {token_arg}", timeout=30)
+
+
+async def _cmd_reserves(ws: WebSocket, parts: list, now: float):
+    """Get raw reserves for an LP pair."""
+    if len(parts) < 2:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Usage: reserves <pair_address>"})
+        return
+
+    pair_addr = parts[1]
+    if not pair_addr.startswith("0x") or len(pair_addr) != 42:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Invalid pair address. Must be 0x... (42 chars)"})
+        return
+
+    script = '''
+import json, requests
+
+RPC = "{rpc}"
+PAIR = "{pair}"
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+# getReserves()
+res = eth_call(PAIR, "0x0902f1ac")
+if len(res) < 194:
+    print(f"Failed to read reserves from {{PAIR}}")
+else:
+    r0 = int(res[2:66], 16)
+    r1 = int(res[66:130], 16)
+    # token0/token1
+    t0 = eth_call(PAIR, "0x0dfe1681")
+    t1 = eth_call(PAIR, "0xd21220a7")
+    t0_addr = "0x" + t0[-40:] if len(t0) >= 42 else "?"
+    t1_addr = "0x" + t1[-40:] if len(t1) >= 42 else "?"
+    print(f"──── PAIR RESERVES ──────────────────")
+    print(f"  Pair:    {{PAIR[:10]}}...{{PAIR[-4:]}}")
+    print(f"  Token0:  {{t0_addr[:10]}}...  Reserve: {{r0/1e18:,.4f}}")
+    print(f"  Token1:  {{t1_addr[:10]}}...  Reserve: {{r1/1e18:,.4f}}")
+    if r0 > 0 and r1 > 0:
+        print(f"  Rate:    1 T0 = {{r1/r0:,.6f}} T1")
+        print(f"           1 T1 = {{r0/r1:,.6f}} T0")
+    print(f"─────────────────────────────────────")
+'''.format(rpc=READ_RPC, pair=pair_addr)
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, f"Reserves: {pair_addr[:10]}...", timeout=30)
+
+
+async def _cmd_pair(ws: WebSocket, parts: list, now: float):
+    """Find LP pair for two tokens."""
+    if len(parts) < 3:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Usage: pair <tokenA> <tokenB> [--v2]\n"
+                                    "Accepts shortcuts or addresses."})
+        return
+
+    token_a = _resolve_token(parts[1])
+    token_b = _resolve_token(parts[2])
+    if not token_a or not token_b:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": f"Unknown token. Available shortcuts: " +
+                                    ", ".join(sorted(TOKEN_SHORTCUTS.keys()))})
+        return
+
+    v2_only = "--v2" in parts
+
+    script = '''
+import json, requests
+
+RPC = "{rpc}"
+TOKEN_A = "{token_a}"
+TOKEN_B = "{token_b}"
+NAME_A = "{name_a}"
+NAME_B = "{name_b}"
+V2_ONLY = {v2_only}
+
+FACTORIES = {{}}
+if not V2_ONLY:
+    FACTORIES["V1"] = "{v1_factory}"
+FACTORIES["V2"] = "{v2_factory}"
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+def get_pair(factory, t0, t1):
+    sel = "0xe6a43905"
+    data = sel + t0[2:].lower().zfill(64) + t1[2:].lower().zfill(64)
+    res = eth_call(factory, data)
+    if len(res) < 66: return None
+    addr = "0x" + res[-40:]
+    return addr if addr != "0x" + "0"*40 else None
+
+print(f"──── PAIR LOOKUP: {{NAME_A}}/{{NAME_B}} ──────")
+found = False
+for dex, factory in FACTORIES.items():
+    pair = get_pair(factory, TOKEN_A, TOKEN_B)
+    if pair:
+        found = True
+        # Get reserves
+        res = eth_call(pair, "0x0902f1ac")
+        if len(res) >= 194:
+            r0 = int(res[2:66], 16) / 1e18
+            r1 = int(res[66:130], 16) / 1e18
+            print(f"  {{dex}}: {{pair}}")
+            print(f"       R0: {{r0:,.4f}}  R1: {{r1:,.4f}}")
+        else:
+            print(f"  {{dex}}: {{pair}} (empty)")
+    else:
+        print(f"  {{dex}}: No pair found")
+if not found:
+    print(f"  No pairs exist for {{NAME_A}}/{{NAME_B}}")
+print(f"─────────────────────────────────────")
+'''.format(rpc=READ_RPC, token_a=token_a, token_b=token_b,
+           name_a=parts[1].upper(), name_b=parts[2].upper(),
+           v2_only=v2_only, v1_factory=PULSEX_V1_FACTORY,
+           v2_factory=PULSEX_V2_FACTORY)
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, f"Pair: {parts[1]}/{parts[2]}", timeout=30)
+
+
+# ── Wallet commands ─────────────────────────────────────────────────
+
+async def _cmd_balance(ws: WebSocket, parts: list, now: float):
+    """Check token or PLS balance."""
+    if len(parts) == 1:
+        # No args — show full wallet (reuse existing handler)
+        await _cmd_wallet(ws, now)
+        return
+
+    token_arg = parts[1].lower()
+    addr = parts[2] if len(parts) >= 3 else JOEY_WALLET
+
+    if token_arg == "pls":
+        script = '''
+import json, requests
+RPC = "{rpc}"
+ADDR = "{addr}"
+r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_getBalance","params":[ADDR,"latest"],"id":1}})
+bal = int(json.loads(r.text).get("result","0x0"), 16) / 1e18
+print(f"PLS balance: {{bal:,.2f}}")
+print(f"Address: {{ADDR[:10]}}...{{ADDR[-4:]}}")
+'''.format(rpc=READ_RPC, addr=addr)
+    else:
+        token_addr = _resolve_token(token_arg)
+        if not token_addr:
+            await ws.send_json({"type": "result", "success": False, "ts": now,
+                                "text": f"Unknown token: {token_arg}\n"
+                                        "Shortcuts: " + ", ".join(sorted(TOKEN_SHORTCUTS.keys()))})
+            return
+        script = '''
+import json, requests
+RPC = "{rpc}"
+TOKEN = "{token}"
+ADDR = "{addr}"
+NAME = "{name}"
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+sel = "0x70a08231"
+data = sel + ADDR[2:].lower().zfill(64)
+res = eth_call(TOKEN, data)
+bal = int(res, 16) / 1e18 if len(res) >= 66 else 0
+print(f"{{NAME}} balance: {{bal:,.6f}}")
+print(f"Address: {{ADDR[:10]}}...{{ADDR[-4:]}}")
+'''.format(rpc=READ_RPC, token=token_addr, addr=addr, name=token_arg.upper())
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, f"Balance: {token_arg}", timeout=30)
+
+
+async def _cmd_nonce(ws: WebSocket, parts: list, now: float):
+    """Check current nonce."""
+    if len(parts) >= 2 and parts[1].lower() == "all":
+        # Show all wallets
+        script = '''
+import json, os, requests
+RPC = "{rpc}"
+wallets = {{
+    "Joey": "{joey}",
+}}
+minter = os.getenv("MINTER_WALLET", "")
+seller = os.getenv("SELLER_WALLET", "")
+if minter: wallets["Minter"] = minter
+if seller: wallets["Seller"] = seller
+
+tgsv8 = os.getenv("TGSV8_ADDRESS", "")
+print("──── NONCES ─────────────────────────")
+for name, addr in wallets.items():
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":[addr,"latest"],"id":1}})
+    nonce = int(json.loads(r.text).get("result","0x0"), 16)
+    print(f"  {{name:10s}} {{addr[:10]}}...{{addr[-4:]}}  nonce={{nonce}}")
+if tgsv8:
+    # Read opNonce from TGSv8
+    def eth_call(to, data):
+        r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+        return json.loads(r.text).get("result","0x")
+    # opNonce() selector
+    res = eth_call(tgsv8, "0x5fd0d1e3")
+    if len(res) >= 66:
+        op_nonce = int(res, 16)
+        print(f"  TGSv8      {{tgsv8[:10]}}...{{tgsv8[-4:]}}  opNonce={{op_nonce}}")
+print("─────────────────────────────────────")
+'''.format(rpc=READ_RPC, joey=JOEY_WALLET)
+        cmd = [_PYTHON, "-c", script]
+        await _run_script(ws, cmd, "All Nonces", timeout=30)
+    else:
+        addr = parts[1] if len(parts) >= 2 else JOEY_WALLET
+        script = '''
+import json, requests
+RPC = "{rpc}"
+ADDR = "{addr}"
+r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":[ADDR,"latest"],"id":1}})
+nonce = int(json.loads(r.text).get("result","0x0"), 16)
+print(f"Nonce: {{nonce}}")
+print(f"Address: {{ADDR[:10]}}...{{ADDR[-4:]}}")
+'''.format(rpc=READ_RPC, addr=addr)
+        cmd = [_PYTHON, "-c", script]
+        await _run_script(ws, cmd, "Nonce", timeout=30)
+
+
+async def _cmd_approve(ws: WebSocket, parts: list, now: float):
+    """Check or set token approval."""
+    if len(parts) < 3:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Usage: approve <token> <spender> [--set]\n"
+                                    "  approve gibs 0x1234...  (check allowance)\n"
+                                    "  approve gibs 0x1234... --set  (set max approval - TX!)"})
+        return
+
+    token_addr = _resolve_token(parts[1])
+    if not token_addr:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": f"Unknown token: {parts[1]}"})
+        return
+
+    spender = parts[2]
+    if not spender.startswith("0x") or len(spender) != 42:
+        # Try resolving as shortcut
+        spender = _resolve_token(parts[2])
+        if not spender:
+            await ws.send_json({"type": "result", "success": False, "ts": now,
+                                "text": f"Invalid spender address: {parts[2]}"})
+            return
+
+    if "--set" in parts:
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": "Approval TX not available from terminal. Use:\n"
+                                    "  run tx_approve.py --token <addr> --spender <addr>"})
+        return
+
+    script = '''
+import json, requests
+RPC = "{rpc}"
+TOKEN = "{token}"
+OWNER = "{owner}"
+SPENDER = "{spender}"
+TOKEN_NAME = "{name}"
+
+def eth_call(to, data):
+    r = requests.post(RPC, json={{"jsonrpc":"2.0","method":"eth_call","params":[{{"to":to,"data":data}},"latest"],"id":1}})
+    return json.loads(r.text).get("result","0x")
+
+# allowance(address,address)
+sel = "0xdd62ed3e"
+data = sel + OWNER[2:].lower().zfill(64) + SPENDER[2:].lower().zfill(64)
+res = eth_call(TOKEN, data)
+allowance = int(res, 16) / 1e18 if len(res) >= 66 else 0
+max_uint = 2**256 - 1
+raw = int(res, 16) if len(res) >= 66 else 0
+status = "MAX" if raw > max_uint / 2 else f"{{allowance:,.4f}}"
+print(f"{{TOKEN_NAME}} allowance: {{status}}")
+print(f"  Owner:   {{OWNER[:10]}}...{{OWNER[-4:]}}")
+print(f"  Spender: {{SPENDER[:10]}}...{{SPENDER[-4:]}}")
+'''.format(rpc=READ_RPC, token=token_addr, owner=JOEY_WALLET,
+           spender=spender, name=parts[1].upper())
+
+    cmd = [_PYTHON, "-c", script]
+    await _run_script(ws, cmd, f"Allowance: {parts[1]}", timeout=30)
+
+
+# ── Scripts command ─────────────────────────────────────────────────
+
+_SCRIPT_CATEGORIES = {
+    "tx":      ("Transaction Scripts",        lambda f: f.startswith("tx_")),
+    "recon":   ("Recon & Scanning",           lambda f: f.startswith("recon_") or f.endswith("_recon.py")),
+    "deploy":  ("Contract Deployment",        lambda f: f.startswith("deploy_")),
+    "chat":    ("VOID Chat",                  lambda f: f.startswith("chat_")),
+    "intel":   ("Intelligence & Analysis",    lambda f: f.startswith("intel_") or f.startswith("analyze_")),
+    "lp":      ("LP Management",              lambda f: f.startswith("lp_")),
+    "scan":    ("Token/Arb Scanning",         lambda f: f.startswith("scan_")),
+    "browser": ("Browser Console (JS)",       lambda f: f.endswith(".js")),
+}
+
+
+def _get_script_docstring(path: Path) -> str:
+    """Extract first line of module docstring."""
+    try:
+        text = path.read_text(errors="replace")
+        for marker in ('"""', "'''"):
+            idx = text.find(marker)
+            if idx >= 0:
+                end = text.find(marker, idx + 3)
+                if end > idx:
+                    doc = text[idx+3:end].strip().split("\n")[0]
+                    return doc[:60]
+        return ""
+    except Exception:
+        return ""
+
+
+def _categorize_scripts() -> dict:
+    """Scan scripts/ and tools/ directories, return {category: [(filename, docstring)]}."""
+    result = {k: [] for k in list(_SCRIPT_CATEGORIES.keys()) + ["tools", "misc"]}
+
+    # Scan scripts/ directory (Python files, exclude archive/ and __*)
+    for f in sorted(_SCRIPTS_DIR.glob("*.py")):
+        if f.name.startswith("__"):
+            continue
+        name = f.name
+        doc = _get_script_docstring(f)
+        matched = False
+        for cat, (label, matcher) in _SCRIPT_CATEGORIES.items():
+            if matcher(name):
+                result[cat].append((name, doc))
+                matched = True
+                break
+        if not matched:
+            result["misc"].append((name, doc))
+
+    # Scan JS files
+    for f in sorted(_SCRIPTS_DIR.glob("*.js")):
+        doc = _get_script_docstring(f)
+        result["browser"].append((f.name, doc))
+
+    # Scan tools/ directory
+    for f in sorted(_TOOLS_DIR.glob("*.py")):
+        if f.name.startswith("__"):
+            continue
+        doc = _get_script_docstring(f)
+        result["tools"].append((f"tools/{f.name}", doc))
+
+    # Remove empty categories
+    return {k: v for k, v in result.items() if v}
+
+
+async def _cmd_scripts(ws: WebSocket, parts: list, now: float):
+    """List available scripts by category."""
+    filter_cat = parts[1].lower() if len(parts) >= 2 else None
+    cats = _categorize_scripts()
+
+    if filter_cat and filter_cat not in cats:
+        available = ", ".join(sorted(cats.keys()))
+        await ws.send_json({"type": "result", "success": False, "ts": now,
+                            "text": f"Unknown category: {filter_cat}\nAvailable: {available}"})
+        return
+
+    lines = ["──── SCRIPTS ────────────────────────────────"]
+
+    cat_labels = {k: v[0] for k, v in _SCRIPT_CATEGORIES.items()}
+    cat_labels["tools"] = "Bot Tools"
+    cat_labels["misc"] = "Miscellaneous"
+
+    for cat, scripts in cats.items():
+        if filter_cat and cat != filter_cat:
+            continue
+        label = cat_labels.get(cat, cat.title())
+        lines.append(f"\n  {label} ({len(scripts)}):")
+        for fname, doc in scripts:
+            doc_str = f" -- {doc}" if doc else ""
+            lines.append(f"    {fname:<35s}{doc_str}")
+
+    lines.append("\n─────────────────────────────────────────────")
+    lines.append("  run <script.py> [args]")
+    lines.append("  scripts <category> to filter")
+
+    await ws.send_json({"type": "result", "success": True, "ts": now,
+                        "text": "\n".join(lines)})
 
 
 async def _cmd_logs(ws: WebSocket, parts: list, now: float):
@@ -777,6 +1461,7 @@ _TEST_MAP = {
     "engines": "test_engines_5_6.py",
     "tgsv8": "test_tgsv8plus.py",
     "razor": "test_razor_pulsechain.py",
+    "hub": "test_joystick_hub.py",
 }
 
 
@@ -824,13 +1509,16 @@ async def _cmd_test(ws: WebSocket, parts: list, now: float):
 _RECON_SCRIPTS = {
     "tgsv8":     ("scripts/Joystick/tools/tgsv8_recon.py",       "TGSv8 Recon"),
     "arb":       ("scripts/scan_lau_arb.py",                      "QING Arb Scanner (272 venues)"),
-    "beat":      ("scripts/beat_recon.py",                         "Beat Prerequisites"),
-    "players":   ("scripts/player_recon.py",                       "Player Scanner"),
-    "crows":     ("scripts/crows_recon.py",                        "CROWS Recon"),
-    "shio":      ("scripts/shio_acquisition_recon.py",             "SHIO Acquisition Recon"),
+    "beat":      ("scripts/recon_beat.py",                         "Beat Prerequisites"),
+    "players":   ("scripts/recon_players.py",                      "Player Scanner"),
+    "crows":     ("scripts/recon_crows.py",                        "CROWS Recon"),
+    "shio":      ("scripts/recon_shio.py",                         "SHIO Acquisition Recon"),
     "aff":       ("scripts/Joystick/tools/test_aff_wm_cycle.py",  "AFF + WM Profitability"),
-    "void":      ("scripts/void_scan.py",                          "VOID Active Users"),
-    "fornax":    ("scripts/fornax_holders_recon.py",               "Fornax Whale Mapping"),
+    "void":      ("scripts/recon_void.py",                         "VOID Active Users"),
+    "fornax":    ("scripts/recon_fornax.py",                       "Fornax Whale Mapping"),
+    "player":    ("scripts/recon_player.py",                       "Single Player Deep Scan"),
+    "zuo":       ("scripts/recon_zuo.py",                          "ZUO Ownership"),
+    "zurich":    ("scripts/recon_zurich.py",                       "Zurich Sources"),
 }
 
 

@@ -1,11 +1,27 @@
 #!/usr/bin/env python3
+"""MAP.New() — Create a QING venue for any LAU token on PulseChain.
+
+Calls MAP.New(LAU_ADDR) from the wallet to deploy a new QING with the LAU as Asset.
+
+Usage:
+  python scripts/tx_map_new.py                         # defaults (GIBS LAU, Joey wallet)
+  python scripts/tx_map_new.py --lau 0x1234...         # custom LAU
+  python scripts/tx_map_new.py --wallet 0x5678...      # custom wallet
 """
-TX 2: MAP.New() — Create GIBS QING venue.
-Call MAP.New(GIBS_ADDR) from Joey's wallet to deploy a new QING with GIBS as Asset.
-"""
+import argparse
 from web3 import Web3
 from eth_account import Account
 import json, os
+
+# ── Defaults (Joey / GIBS) ───────────────────────────────────
+DEFAULT_WALLET = "0x17367877aF5A8D0Eb33ba5689A880f696386E24D"
+DEFAULT_LAU    = "0x66a08aa12da955eb63d7ac121a88b2b210a07b03"
+
+# ── CLI ──────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--lau",    default=DEFAULT_LAU,    help="LAU token address (default: GIBS)")
+parser.add_argument("--wallet", default=DEFAULT_WALLET, help="Wallet address (default: Joey)")
+args = parser.parse_args()
 
 RPC = "https://rpc.pulsechainstats.com"
 w3 = Web3(Web3.HTTPProvider(RPC))
@@ -13,8 +29,8 @@ print(f"Connected: {w3.is_connected()}  Block: {w3.eth.block_number:,}")
 
 # Addresses
 MAP_ADDR    = Web3.to_checksum_address("0xD3a7A95012Edd46Ea115c693B74c5e524b3DdA75")
-GIBS_ADDR   = Web3.to_checksum_address("0x66a08aa12da955eb63d7ac121a88b2b210a07b03")
-JOEY_WALLET = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
+LAU_ADDR    = Web3.to_checksum_address(args.lau)
+WALLET      = Web3.to_checksum_address(args.wallet)
 
 # Joey's private key — read from DYSNOMIA_PRIVATE_KEY env var (same as Accounts.cs)
 JOEY_PKEY = os.environ.get("DYSNOMIA_PRIVATE_KEY", "")
@@ -26,7 +42,7 @@ if not JOEY_PKEY:
 
 account = Account.from_key(JOEY_PKEY)
 print(f"Account: {account.address}")
-assert account.address.lower() == JOEY_WALLET.lower(), "Key mismatch!"
+assert account.address.lower() == WALLET.lower(), "Key mismatch!"
 
 # MAP.New() ABI
 new_abi = [{
@@ -44,15 +60,15 @@ new_abi = [{
 map_contract = w3.eth.contract(address=MAP_ADDR, abi=new_abi)
 
 # Check current state
-nonce = w3.eth.get_transaction_count(JOEY_WALLET)
-balance = w3.eth.get_balance(JOEY_WALLET) / 1e18
+nonce = w3.eth.get_transaction_count(WALLET)
+balance = w3.eth.get_balance(WALLET) / 1e18
 print(f"Nonce: {nonce}  PLS balance: {balance:.4f}")
 
 # Simulate first
-print(f"\nSimulating MAP.New(GIBS)...")
+print(f"\nSimulating MAP.New(LAU)...")
 try:
-    result = map_contract.functions.New(GIBS_ADDR).call(
-        {'from': JOEY_WALLET}
+    result = map_contract.functions.New(LAU_ADDR).call(
+        {'from': WALLET}
     )
     print(f"  Simulation OK — QING would be at: {result}")
 except Exception as e:
@@ -60,16 +76,16 @@ except Exception as e:
     import sys; sys.exit(1)
 
 # Gas estimate
-gas_est = map_contract.functions.New(GIBS_ADDR).estimate_gas(
-    {'from': JOEY_WALLET}
+gas_est = map_contract.functions.New(LAU_ADDR).estimate_gas(
+    {'from': WALLET}
 )
 gas_price = w3.eth.gas_price
 cost_pls = gas_est * gas_price / 1e18
 print(f"\nGas estimate: {gas_est:,} @ {gas_price/1e9:.2f} Gwei = {cost_pls:.4f} PLS")
 
 # Build transaction
-tx = map_contract.functions.New(GIBS_ADDR).build_transaction({
-    'from':     JOEY_WALLET,
+tx = map_contract.functions.New(LAU_ADDR).build_transaction({
+    'from':     WALLET,
     'nonce':    nonce,
     'gas':      int(gas_est * 1.2),  # 20% buffer
     'gasPrice': gas_price,
@@ -78,7 +94,7 @@ tx = map_contract.functions.New(GIBS_ADDR).build_transaction({
 
 # Sign
 signed = account.sign_transaction(tx)
-print(f"\nSending MAP.New(GIBS) transaction...")
+print(f"\nSending MAP.New(LAU) transaction...")
 
 # Send
 tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
@@ -104,7 +120,7 @@ else:
 print(f"\nVerifying QING deployment...")
 # Re-simulate to get address (should be same as what was actually deployed)
 try:
-    qing_addr = map_contract.functions.New(GIBS_ADDR).call({'from': JOEY_WALLET})
+    qing_addr = map_contract.functions.New(LAU_ADDR).call({'from': WALLET})
     # Note: this sim will return a new address after the real one was deployed
     # Better to check by probing the address from the receipt
     # The receipt logs contain the QING address
@@ -124,9 +140,9 @@ for log in receipt.logs:
     try:
         qing = w3.eth.contract(address=addr, abi=asset_abi)
         asset = qing.functions.Asset().call()
-        if asset.lower() == GIBS_ADDR.lower():
+        if asset.lower() == LAU_ADDR.lower():
             print(f"  ★ QING FOUND: {addr}")
-            print(f"    Asset = {asset} (== GIBS ✓)")
-            print(f"\n*** UPDATE CLAUDE.md: GIBS-QING = {addr} ***")
+            print(f"    Asset = {asset} (== LAU ✓)")
+            print(f"\n*** UPDATE CLAUDE.md: QING = {addr} ***")
     except:
         pass
