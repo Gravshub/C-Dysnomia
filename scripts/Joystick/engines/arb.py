@@ -899,29 +899,27 @@ class ArbEngine(EngineBase):
                     tx_hashes.append(tx_hash.hex())
                     gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Pre-flight: verify swap path doesn't overflow via getAmountsOut
+            # Pre-flight: full eth_call simulation of swapExactTokensForTokens
+            # getAmountsOut can pass even when the actual swap overflows
             router_read = w3_read.eth.contract(
                 address=Web3.to_checksum_address(router_addr),
                 abi=router.abi,
             )
             try:
-                amounts = router_read.functions.getAmountsOut(opt_input, swap_path).call()
-                expected_out = amounts[-1]
-                log.info("  Pre-flight getAmountsOut OK: in=%.4f out=%.4f",
-                         opt_input / 1e18, expected_out / 1e18)
-                if expected_out < min_out:
-                    log.warning("  Pre-flight: output %.4f < min_out %.4f — aborting",
-                                expected_out / 1e18, min_out / 1e18)
-                    return EngineResult(
-                        success=False, profit_wei=0, gas_wei=gas_spent,
-                        tx_hashes=tx_hashes,
-                        notes=f"Pre-flight: output {expected_out/1e18:.2f} < min {min_out/1e18:.2f}",
-                    )
+                router_read.functions.swapExactTokensForTokens(
+                    opt_input, min_out, swap_path, JOEY_WALLET, deadline
+                ).call({"from": JOEY_WALLET})
+                log.info("  Pre-flight swap sim OK")
             except Exception as sim_exc:
-                log.warning("  Pre-flight getAmountsOut FAILED: %s — aborting", sim_exc)
+                msg = str(sim_exc)
+                log.warning("  Pre-flight swap sim FAILED: %s — aborting", msg)
+                # Blacklist tokens in this cycle to avoid repeated failures
+                for token in cycle.path[1:-1]:  # intermediate tokens
+                    self._blacklisted_tokens.add(token.lower())
+                    log.info("  Blacklisted %s for this session", token[:10])
                 return EngineResult(
                     success=False, profit_wei=0, gas_wei=gas_spent,
-                    tx_hashes=tx_hashes, notes=f"Pre-flight failed: {sim_exc}",
+                    tx_hashes=tx_hashes, notes=f"Pre-flight failed: {msg}",
                 )
 
             # Approve router to spend WPLS
