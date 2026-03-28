@@ -426,10 +426,14 @@ class Strategist:
             score -= 5.0
 
         # 8. Pool impact penalty (Phase C — from SimResult data)
+        # Seasoned arb thresholds: <0.5% ideal, 0.5-1% good, 1-3% acceptable, >3% risky
         if pool_impact > 5.0:
+            risks.append("TRAP_POOL")
+            score -= 5.0
+        elif pool_impact > 3.0:
             risks.append("THIN_POOL")
             score -= 2.0
-        elif pool_impact > 2.0:
+        elif pool_impact > 1.0:
             risks.append("POOL_IMPACT_MODERATE")
             score -= 0.5
 
@@ -465,7 +469,7 @@ class Strategist:
             risks.append("NEW_ENGINE")
 
         # Confidence mapping
-        critical_risks = {"THIN_POOL", "RECENT_FAILURE", "BELOW_GAS_BUFFER"}
+        critical_risks = {"TRAP_POOL", "RECENT_FAILURE", "BELOW_GAS_BUFFER"}
         has_critical = len([r for r in risks if r in critical_risks]) > 0
         if score >= 5.0 and not has_critical:
             confidence = "HIGH"
@@ -477,9 +481,9 @@ class Strategist:
             confidence = "SKIP"
 
         # Pool impact degrades confidence
-        if pool_impact > 2.0 and confidence == "HIGH":
+        if pool_impact > 1.0 and confidence == "HIGH":
             confidence = "MEDIUM"
-        if pool_impact > 5.0 and confidence == "MEDIUM":
+        if pool_impact > 3.0 and confidence == "MEDIUM":
             confidence = "LOW"
 
         # Phase E: GAS_FALLING downgrades non-HIGH, non-strategic to SKIP

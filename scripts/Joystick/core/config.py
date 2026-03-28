@@ -152,6 +152,11 @@ HUB_TOKENS = [
 PULSEX_MIN_SPREAD_BPS = float(os.getenv("PULSEX_MIN_SPREAD_BPS", "0"))
 PULSEX_MIN_TVL_PLS    = float(os.getenv("PULSEX_MIN_TVL_PLS", "1000"))
 
+# ── Cross-DEX arb parameters ────────────────────────────────────────────────
+CROSS_DEX_MIN_PROFIT_PLS = int(os.getenv("CROSS_DEX_MIN_PROFIT_PLS", "7000"))
+CROSS_DEX_MIN_TVL_PLS    = int(os.getenv("CROSS_DEX_MIN_TVL_PLS", "50000"))
+TGS_WPLS_BUFFER_PLS      = int(os.getenv("TGS_WPLS_BUFFER_PLS", "10000"))
+
 # ── Graph arb parameters ────────────────────────────────────────────────────
 GRAPH_ARB_MIN_PROFIT_PLS = int(os.getenv("GRAPH_ARB_MIN_PROFIT_PLS", "1000"))
 GRAPH_ARB_MAX_IMPACT_PCT = float(os.getenv("GRAPH_ARB_MAX_IMPACT_PCT", "10.0"))
