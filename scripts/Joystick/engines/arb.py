@@ -899,6 +899,31 @@ class ArbEngine(EngineBase):
                     tx_hashes.append(tx_hash.hex())
                     gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
+            # Pre-flight: verify swap path doesn't overflow via getAmountsOut
+            router_read = w3_read.eth.contract(
+                address=Web3.to_checksum_address(router_addr),
+                abi=router.abi,
+            )
+            try:
+                amounts = router_read.functions.getAmountsOut(opt_input, swap_path).call()
+                expected_out = amounts[-1]
+                log.info("  Pre-flight getAmountsOut OK: in=%.4f out=%.4f",
+                         opt_input / 1e18, expected_out / 1e18)
+                if expected_out < min_out:
+                    log.warning("  Pre-flight: output %.4f < min_out %.4f — aborting",
+                                expected_out / 1e18, min_out / 1e18)
+                    return EngineResult(
+                        success=False, profit_wei=0, gas_wei=gas_spent,
+                        tx_hashes=tx_hashes,
+                        notes=f"Pre-flight: output {expected_out/1e18:.2f} < min {min_out/1e18:.2f}",
+                    )
+            except Exception as sim_exc:
+                log.warning("  Pre-flight getAmountsOut FAILED: %s — aborting", sim_exc)
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=gas_spent,
+                    tx_hashes=tx_hashes, notes=f"Pre-flight failed: {sim_exc}",
+                )
+
             # Approve router to spend WPLS
             r = approve_if_needed(wpls_c_submit, router_addr, opt_input, "WPLS", dry_run=dry_run)
             if r:
