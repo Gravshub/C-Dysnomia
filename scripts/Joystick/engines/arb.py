@@ -70,6 +70,7 @@ class ArbEngine(EngineBase):
         self._pair_graph = None
         self._graph_last_refresh: float = 0
         self._needs_graph_rebuild: bool = False
+        self._blacklisted_tokens: set[str] = set()  # tokens that caused reverts (OVERFLOW etc)
 
     def is_ready(self) -> bool:
         """
@@ -212,6 +213,10 @@ class ArbEngine(EngineBase):
 
         for idx, (token_addr, label, _v1p, _v2p) in enumerate(candidates):
             try:
+                # Skip tokens that caused on-chain reverts (OVERFLOW etc)
+                if token_addr.lower() in self._blacklisted_tokens:
+                    continue
+
                 raw = reserves_map.get(idx, (0, 0, 0, 0))
                 v1r0, v1r1, v2r0, v2r1 = raw
 
@@ -682,10 +687,38 @@ class ArbEngine(EngineBase):
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
+            # Pre-flight: simulate atomicArb via eth_call before committing gas
+            min_profit = max(0, int(expected_profit * 0.8))  # 80% of expected as safety
+            try:
+                tgs_read.functions.atomicArb(
+                    WPLS, token_addr, trade_amount,
+                    buy_dex, sell_dex, min_profit,
+                ).call({"from": Web3.to_checksum_address(JOEY_WALLET)})
+                log.info("  Pre-flight sim OK")
+            except Exception as sim_exc:
+                msg = str(sim_exc)
+                log.warning("  Pre-flight sim FAILED: %s — aborting without gas spend", msg)
+                # Blacklist this token for the session (OVERFLOW, K, etc)
+                self._blacklisted_tokens.add(token_addr.lower())
+                log.info("  Blacklisted %s for this session", label)
+                # Withdraw any excess above buffer
+                if not dry_run:
+                    tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
+                    excess = tgs_wpls_bal - wpls_buffer
+                    if excess > 0:
+                        send_tx(
+                            tgs_write.functions.withdraw(WPLS, excess),
+                            "Pre-flight abort: withdraw excess",
+                            dry_run=dry_run,
+                        )
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=gas_spent,
+                    tx_hashes=tx_hashes, notes=f"Pre-flight failed: {msg}",
+                )
+
             # atomicArb handles internal approvals — the contract manages this
 
-            # Call atomicArb() — atomic: reverts if profit < minProfit
-            min_profit = max(0, int(expected_profit * 0.8))  # 80% of expected as safety
+            # Execute atomicArb — atomic: reverts if profit < minProfit
             r = send_tx(
                 tgs_write.functions.atomicArb(
                     WPLS,           # tokenIn
