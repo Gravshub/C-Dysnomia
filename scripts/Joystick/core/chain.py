@@ -12,11 +12,13 @@ RPC connections use health-scored provider pools (rpc_provider.py):
 import json
 import os
 import logging
+import time
 
 from .log_names import get_logger
 from typing import Any
 from eth_abi import decode as abi_decode
 from web3 import Web3
+import requests
 
 from .config import (
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, GIBS_QING,
@@ -32,11 +34,117 @@ log = get_logger(__name__)
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
+_ABI_DIR = os.path.join(_DATA_DIR, "abis")
+_last_blockscout_fetch: float = 0.0
+
+_BLOCKSCOUT_V2_URL = "https://api.scan.pulsechain.com/api/v2/smart-contracts/{address}"
+
+
+def fetch_abi_blockscout(address: str) -> list | None:
+    """
+    Download ABI from BlockScout for a verified contract.
+
+    Uses: https://api.scan.pulsechain.com/api/v2/smart-contracts/{address}
+    Returns: ABI list if contract is verified, None otherwise.
+    Caches successful fetches to data/abis/{address}.json.
+
+    Rate limited: 1 request per second max, 3 retries with backoff.
+    """
+    global _last_blockscout_fetch
+
+    addr_lc = address.lower()
+    # Check cache first
+    cache_path = os.path.join(_ABI_DIR, f"{addr_lc}.json")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+
+    url = _BLOCKSCOUT_V2_URL.format(address=Web3.to_checksum_address(address))
+
+    for attempt in range(3):
+        # Rate limit: 1 req/sec
+        elapsed = time.time() - _last_blockscout_fetch
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+        _last_blockscout_fetch = time.time()
+
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 404:
+                log.debug("BlockScout: contract %s not verified (404)", addr_lc[:10])
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            abi = data.get("abi")
+            if not abi:
+                log.debug("BlockScout: %s has no ABI (not verified?)", addr_lc[:10])
+                return None
+
+            # Cache via atomic write
+            tmp_path = cache_path + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(abi, f)
+            os.replace(tmp_path, cache_path)
+            log.info("BlockScout: cached ABI for %s (%d entries)", addr_lc[:10], len(abi))
+            return abi
+
+        except requests.RequestException as exc:
+            if attempt < 2:
+                log.debug("BlockScout: retry %d for %s: %s", attempt + 1, addr_lc[:10], exc)
+                time.sleep(2 * (attempt + 1))
+            else:
+                log.warning("BlockScout: failed to fetch ABI for %s after 3 attempts: %s",
+                            addr_lc[:10], exc)
+                return None
+
+    return None
+
+
 def load_abi(name: str) -> list:
-    """Load ABI from data/abis/{name}.json"""
-    path = os.path.join(_DATA_DIR, "abis", f"{name}.json")
-    with open(path) as f:
-        return json.load(f)
+    """Load ABI by name. Falls back to BlockScout if name looks like an address."""
+    path = os.path.join(_ABI_DIR, f"{name}.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+
+    # If name looks like an address, try BlockScout
+    if name.startswith("0x") and len(name) == 42:
+        abi = fetch_abi_blockscout(name)
+        if abi:
+            return abi
+
+    raise FileNotFoundError(f"No ABI for {name}")
+
+
+def load_contract_dynamic(address: str):
+    """
+    Load a contract with auto-ABI resolution.
+
+    Priority:
+      1. Cached ABI in data/abis/{address}.json
+      2. BlockScout verified ABI (fetched + cached)
+      3. Fallback to ERC20_ABI (basic interface)
+    """
+    addr = Web3.to_checksum_address(address)
+    try:
+        abi = load_abi(address.lower())
+    except FileNotFoundError:
+        abi = None
+
+    if not abi:
+        # ERC20_ABI is loaded below — use deferred reference
+        abi = _get_erc20_abi()
+        log.debug("Using ERC20 fallback ABI for %s", addr[:10])
+
+    return w3_read.eth.contract(address=addr, abi=abi)
+
+
+def _get_erc20_abi():
+    """Deferred ERC20 ABI reference (avoids circular load order)."""
+    return ERC20_ABI
 
 
 # ── RPC pools ──────────────────────────────────────────────────────────────

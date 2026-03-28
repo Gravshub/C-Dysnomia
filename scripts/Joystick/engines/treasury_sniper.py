@@ -36,11 +36,16 @@ from typing import Optional
 from web3 import Web3
 
 from .base import EngineBase, EngineResult
-from ..core.config import JOEY_WALLET, TGSV8, WPLS, GAS_PRICE_CEIL, GAS_MULT
-from ..core.chain import w3_read, w3_submit, tgsv8_contract, safe
+from ..core.config import (
+    JOEY_WALLET, TGSV8, WPLS, GAS_PRICE_CEIL, GAS_MULT,
+    CROSS_TREASURY_MIN_IMPROVEMENT,
+    PULSEX_V1_ROUTER, PULSEX_V2_ROUTER,
+)
+from ..core.chain import w3_read, w3_submit, tgsv8_contract, safe, multicall, erc20
 from ..core.executor import send_tx
 from ..core.simulator import SimulationFailed
 from ..core import wallet
+from ..oracle.price import get_amounts_out, get_amounts_out_v2
 
 log = get_logger(__name__)
 
@@ -260,6 +265,76 @@ class TreasurySniperEngine(EngineBase):
         available = min(tgsv8_child_bal, t.self_balance)
         return available
 
+    def _find_best_sell_route(self, parent_addr: str, amount: int) -> dict:
+        """
+        Find best route to convert parent tokens to PLS.
+
+        Checks:
+          1. parent -> WPLS (direct, V1 and V2)
+          2. parent -> other_treasury_token -> WPLS (cross-treasury hop)
+
+        Returns: {"route": [addr, ...], "router": "V1"|"V2",
+                  "expected_pls": int, "mode": "direct"|"cross_treasury"}
+        """
+        parent_cs = Web3.to_checksum_address(parent_addr)
+        wpls_cs = Web3.to_checksum_address(WPLS)
+        best = {"route": [parent_cs, wpls_cs], "router": "V1",
+                "expected_pls": 0, "mode": "direct"}
+
+        # Direct V1
+        v1_out = get_amounts_out(amount, [parent_cs, wpls_cs])
+        if v1_out:
+            best["expected_pls"] = v1_out[-1]
+
+        # Direct V2
+        v2_out = get_amounts_out_v2(amount, [parent_cs, wpls_cs])
+        if v2_out and v2_out[-1] > best["expected_pls"]:
+            best = {"route": [parent_cs, wpls_cs], "router": "V2",
+                    "expected_pls": v2_out[-1], "mode": "direct"}
+
+        direct_pls = best["expected_pls"]
+        if direct_pls == 0:
+            return best
+
+        # Cross-treasury: parent -> other_treasury -> WPLS
+        # Only check targets we already loaded (cheap, no extra RPC)
+        cross_candidates = []
+        for t in self._targets:
+            other = Web3.to_checksum_address(t.address)
+            if other.lower() == parent_cs.lower():
+                continue
+            cross_candidates.append(other)
+
+        # Limit to top 10 candidates by estimated PLS value to bound RPC calls
+        cross_candidates = cross_candidates[:10]
+
+        for intermediate in cross_candidates:
+            for getter, label in [(get_amounts_out, "V1"), (get_amounts_out_v2, "V2")]:
+                try:
+                    hop1 = getter(amount, [parent_cs, intermediate])
+                    if not hop1 or hop1[-1] == 0:
+                        continue
+                    hop2 = getter(hop1[-1], [intermediate, wpls_cs])
+                    if not hop2 or hop2[-1] == 0:
+                        continue
+                    total_pls = hop2[-1]
+                    improvement = (total_pls - direct_pls) / direct_pls if direct_pls > 0 else 0
+                    if improvement >= CROSS_TREASURY_MIN_IMPROVEMENT and total_pls > best["expected_pls"]:
+                        best = {
+                            "route": [parent_cs, intermediate, wpls_cs],
+                            "router": label,
+                            "expected_pls": total_pls,
+                            "mode": "cross_treasury",
+                        }
+                        log.info(
+                            "E6: cross-treasury route via %s yields +%.1f%% vs direct",
+                            intermediate[:10], improvement * 100,
+                        )
+                except Exception:
+                    continue
+
+        return best
+
     def _execute_batch(self, tgsv8, batch: list[TreasuryTarget],
                        gas_price: int, dry_run: bool) -> EngineResult:
         """Simulate then submit batchClaimTreasury TX."""
@@ -279,7 +354,20 @@ class TreasurySniperEngine(EngineBase):
 
         fn_call = tgsv8.functions.batchClaimTreasury(treasuries, backing_assets, amounts)
 
-        total_est_pls = sum(int(t.estimated_pls * 10**18) for t in batch)
+        # Estimate real PLS output using best sell routes
+        total_est_pls = 0
+        sell_routes = {}
+        for t in batch:
+            claim_amount = self._size_claim(t)
+            if claim_amount > 0:
+                route = self._find_best_sell_route(t.backing_asset, claim_amount)
+                sell_routes[t.address.lower()] = route
+                total_est_pls += route["expected_pls"]
+            else:
+                total_est_pls += int(t.estimated_pls * 10**18)
+
+        if total_est_pls == 0:
+            total_est_pls = sum(int(t.estimated_pls * 10**18) for t in batch)
 
         result = send_tx(
             fn_call,
@@ -287,20 +375,23 @@ class TreasurySniperEngine(EngineBase):
             dry_run=dry_run,
         )
 
+        cross_count = sum(1 for r in sell_routes.values() if r["mode"] == "cross_treasury")
+        route_note = f" ({cross_count} cross-treasury routes)" if cross_count else ""
+
         if result is None and dry_run:
             return EngineResult(
                 success=True, profit_wei=total_est_pls, gas_wei=0,
-                notes=f"[dry-run] would claim from {len(treasuries)} treasuries",
+                notes=f"[dry-run] would claim from {len(treasuries)} treasuries{route_note}",
             )
 
         if result and result.get("status") == 1:
             gas_used = result["gasUsed"] * result.get("effectiveGasPrice", gas_price)
             tx_hash = result["transactionHash"].hex()
-            log.info("E6 SUCCESS — claimed from %d treasuries", len(treasuries))
+            log.info("E6 SUCCESS — claimed from %d treasuries%s", len(treasuries), route_note)
             return EngineResult(
                 success=True, profit_wei=total_est_pls, gas_wei=gas_used,
                 tx_hashes=[tx_hash],
-                notes=f"Claimed {len(treasuries)} treasuries",
+                notes=f"Claimed {len(treasuries)} treasuries{route_note}",
             )
         else:
             return EngineResult(success=False, profit_wei=0, gas_wei=0,

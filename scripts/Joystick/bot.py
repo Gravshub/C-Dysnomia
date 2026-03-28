@@ -76,6 +76,7 @@ from .engines.spine_runner import SpineRunnerEngine
 from .engines.phreak import PhreakEngine
 from .loops.terraform import TerraformLoop
 from .oracle.route_auditor import route_summary
+from .oracle.supply_oracle import SupplyOracle
 
 from .core.log_names import get_logger, fmt_pls as fmt_pls_comma, fmt_int, fmt_pls_short
 log = get_logger("joystick")
@@ -98,8 +99,9 @@ class DysnomiaBot:
         self.dry_run    = dry_run
         self.cycle      = 0
         self.gas_guard  = GasGuard()
-        self.gas_oracle = GasOracle()
-        self.delay      = AdaptiveDelay()
+        self.gas_oracle    = GasOracle()
+        self.supply_oracle = SupplyOracle()
+        self.delay         = AdaptiveDelay()
 
         # Multi-wallet manager (gracefully degrades to single-wallet)
         self.wallet_mgr = WalletManager()
@@ -264,6 +266,12 @@ class DysnomiaBot:
             fmt_int(gas_status["current_beats"]), fmt_int(gas_status["average_beats"]),
             gas_status["trend"], fmt_int(gas_status["ceiling_beats"]),
         )
+
+        # 0c. Supply oracle update (inflation detection)
+        self.supply_oracle.update()
+        supply_status = self.supply_oracle.status()
+        if supply_status["inflated"] > 0:
+            log.info("📈 Supply inflation detected: %d tokens", supply_status["inflated"])
 
         if self.gas_oracle.is_above_ceiling():
             raise GasTooHigh(

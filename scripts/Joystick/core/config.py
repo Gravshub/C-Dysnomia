@@ -206,6 +206,22 @@ CACHE_TTL      = int(os.getenv("CACHE_TTL",       "3600"))
 MIN_PROFIT_WEI = int(Decimal(os.getenv("MIN_PROFIT_PLS", "5")) * Decimal(10**18))
 
 
+# ── Supply Oracle ────────────────────────────────────────────────────────────
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+SUPPLY_INFLATION_THRESHOLD = float(os.getenv("SUPPLY_INFLATION_THRESHOLD", "0.01"))
+SUPPLY_COOLDOWN_SECONDS    = int(os.getenv("SUPPLY_COOLDOWN_SECONDS", "300"))
+
+# ── Mempool Gas ──────────────────────────────────────────────────────────────
+MEMPOOL_CACHE_SECONDS = int(os.getenv("MEMPOOL_CACHE_SECONDS", "10"))
+
+# ── Cross-Treasury Routing ───────────────────────────────────────────────────
+CROSS_TREASURY_MIN_IMPROVEMENT = float(os.getenv("CROSS_TREASURY_MIN_IMPROVE", "0.10"))
+
+# ── Spine Discovery ──────────────────────────────────────────────────────────
+SPINE_ALLOW_SELF_BURN  = os.getenv("SPINE_ALLOW_SELF_BURN", "false").lower() == "true"
+SPINE_DISCOVERY_TTL    = int(os.getenv("SPINE_DISCOVERY_TTL", "1800"))
+
+
 class AdaptiveDelay:
     """Exponential backoff when idle, tighten when profitable."""
 
