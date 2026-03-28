@@ -426,14 +426,16 @@ class Strategist:
             score -= 5.0
 
         # 8. Pool impact penalty (Phase C — from SimResult data)
-        # Seasoned arb thresholds: <0.5% ideal, 0.5-1% good, 1-3% acceptable, >3% risky
-        if pool_impact > 5.0:
+        # Atropa ecosystem pools are inherently thin. atomicArb() reverts if
+        # unprofitable, so worst case is gas loss (~240 PLS). Thresholds tuned
+        # for PulseChain reality: accept higher impact when profit justifies it.
+        if pool_impact > 10.0:
             risks.append("TRAP_POOL")
             score -= 5.0
-        elif pool_impact > 3.0:
+        elif pool_impact > 5.0:
             risks.append("THIN_POOL")
             score -= 2.0
-        elif pool_impact > 1.0:
+        elif pool_impact > 2.0:
             risks.append("POOL_IMPACT_MODERATE")
             score -= 0.5
 
@@ -481,9 +483,9 @@ class Strategist:
             confidence = "SKIP"
 
         # Pool impact degrades confidence
-        if pool_impact > 1.0 and confidence == "HIGH":
+        if pool_impact > 2.0 and confidence == "HIGH":
             confidence = "MEDIUM"
-        if pool_impact > 3.0 and confidence == "MEDIUM":
+        if pool_impact > 10.0 and confidence == "MEDIUM":
             confidence = "LOW"
 
         # Phase E: GAS_FALLING downgrades non-HIGH, non-strategic to SKIP

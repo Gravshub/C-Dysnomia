@@ -469,6 +469,7 @@ class ArbEngine(EngineBase):
             "profit_wei": top.net_profit_pls,
             "gas_wei": CROSS_PAIR_GAS_ESTIMATE * gas_price,
             "cycle": top,
+            "pool_impact_pct": max(top.pool_impacts) if top.pool_impacts else 0.0,
         }
 
     # ── execute() — dispatch by mode ────────────────────────────────────────
@@ -649,6 +650,7 @@ class ArbEngine(EngineBase):
                         "to": WPLS,
                         "from": JOEY_WALLET,
                         "value": wrap_amount,
+                        "data": b'\xd0\xe3\r\xb0',  # deposit() selector
                         "gas": 50_000,
                         "gasPrice": w3_submit.eth.gas_price,
                         "nonce": nonce,
@@ -844,13 +846,14 @@ class ArbEngine(EngineBase):
                 if not dry_run:
                     # WPLS deposit() is just sending ETH to WPLS contract
                     from ..core.chain import ROUTER_ABI
-                    # Use low-level send for WPLS deposit
+                    # Use low-level send for WPLS deposit()
                     from ..core import wallet
                     nonce = wallet.next_nonce()
                     tx = {
                         "to": WPLS,
                         "from": JOEY_WALLET,
                         "value": wrap_amount,
+                        "data": b'\xd0\xe3\r\xb0',  # deposit() selector
                         "gas": 50_000,
                         "gasPrice": w3_submit.eth.gas_price,
                         "nonce": nonce,
@@ -937,6 +940,7 @@ class ArbEngine(EngineBase):
                 nonce = wallet.next_nonce()
                 tx = {
                     "to": WPLS, "from": JOEY_WALLET, "value": wrap_amount,
+                    "data": b'\xd0\xe3\r\xb0',  # deposit() selector
                     "gas": 50_000, "gasPrice": w3_submit.eth.gas_price,
                     "nonce": nonce, "chainId": 369,
                 }
