@@ -40,6 +40,15 @@ CROSS_DEX_TEST_AMOUNT = 10 * 10**18  # 10 tokens for spread detection
 # Event log file for RAZOR
 _JOYSTICK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RAZOR_LOG = os.path.join(_JOYSTICK_DIR, "data", "events", "razor.json")
+_BLACKLIST_PATH = os.path.join(_JOYSTICK_DIR, "data", "arb_blacklist.json")
+
+# Minimal ERC-20 ABI for tax detection
+_TAX_CHECK_ABI = [
+    {"constant": True, "inputs": [{"name": "", "type": "address"}], "name": "balanceOf",
+     "outputs": [{"name": "", "type": "uint256"}], "type": "function"},
+    {"constant": False, "inputs": [{"name": "to", "type": "address"}, {"name": "value", "type": "uint256"}],
+     "name": "transfer", "outputs": [{"name": "", "type": "bool"}], "type": "function"},
+]
 
 
 def _log_razor_event(event: dict) -> None:
@@ -70,7 +79,143 @@ class ArbEngine(EngineBase):
         self._pair_graph = None
         self._graph_last_refresh: float = 0
         self._needs_graph_rebuild: bool = False
-        self._blacklisted_tokens: set[str] = set()  # tokens that caused reverts (OVERFLOW etc)
+        # Persistent blacklist (overflow/revert tokens) — survives restarts
+        self._blacklisted_tokens: set[str] = set()
+        # Tax token caches — _tax_tokens persisted, _clean_tokens session-only
+        self._tax_tokens: set[str] = set()
+        self._clean_tokens: set[str] = set()
+        self._load_blacklist()
+
+    # ── Persistent blacklist ──────────────────────────────────────────────
+
+    def _load_blacklist(self):
+        """Load blacklist + tax tokens from disk."""
+        try:
+            with open(_BLACKLIST_PATH) as f:
+                data = json.load(f)
+            self._blacklisted_tokens = set(data.get("overflow", {}).keys())
+            self._tax_tokens = set(data.get("tax", {}).keys())
+            total = len(self._blacklisted_tokens) + len(self._tax_tokens)
+            if total:
+                log.info("Loaded %d blacklisted tokens (%d overflow, %d tax)",
+                         total, len(self._blacklisted_tokens), len(self._tax_tokens))
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    def _save_blacklist(self):
+        """Save blacklist + tax tokens to disk (atomic)."""
+        try:
+            existing = {}
+            try:
+                with open(_BLACKLIST_PATH) as f:
+                    existing = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+
+            overflow = existing.get("overflow", {})
+            tax = existing.get("tax", {})
+            for t in self._blacklisted_tokens:
+                if t not in overflow:
+                    overflow[t] = {"added": time.time(), "reason": "revert"}
+            for t in self._tax_tokens:
+                if t not in tax:
+                    tax[t] = {"added": time.time()}
+
+            data = {"overflow": overflow, "tax": tax, "updated": time.time()}
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(
+                mode='w', dir=os.path.dirname(_BLACKLIST_PATH),
+                delete=False, suffix='.tmp')
+            json.dump(data, tmp, indent=2)
+            tmp.close()
+            os.replace(tmp.name, _BLACKLIST_PATH)
+        except Exception as exc:
+            log.warning("Failed to save blacklist: %s", exc)
+
+    def _blacklist_token(self, token_addr: str, reason: str = "revert", label: str = "?"):
+        """Add token to persistent blacklist."""
+        lc = token_addr.lower()
+        self._blacklisted_tokens.add(lc)
+        log.info("Blacklisted %s (%s) — %s", label, lc[:10], reason)
+        self._save_blacklist()
+
+    def _mark_tax_token(self, token_addr: str, tax_pct: float, label: str = "?"):
+        """Add token to persistent tax list."""
+        lc = token_addr.lower()
+        self._tax_tokens.add(lc)
+        log.info("Tax token: %s (%s) — %.1f%% fee", label, lc[:10], tax_pct)
+        self._save_blacklist()
+
+    # ── Tax token detection ───────────────────────────────────────────────
+
+    def _is_clean_transfer(self, token_addr: str, pair_addr: str) -> bool:
+        """Check if token has transfer tax via round-trip getAmountsOut.
+
+        For a clean token: WPLS → token → WPLS loses only ~0.6% (2× AMM fee).
+        For a 10% tax token: loses ~20% + fees. Threshold: >5% round-trip loss.
+        Uses getAmountsOut only (pure view call, no state needed).
+        """
+        lc = token_addr.lower()
+        if lc in self._tax_tokens:
+            return False
+        if lc in self._blacklisted_tokens:
+            return False
+        if lc in self._clean_tokens:
+            return True
+
+        try:
+            token_ck = Web3.to_checksum_address(token_addr)
+            test_in = 10**17  # 0.1 WPLS
+
+            from ..core.chain import ROUTER_ABI
+            router = w3_read.eth.contract(
+                address=Web3.to_checksum_address(pair_addr if pair_addr.startswith("0x") else PULSEX_V2_ROUTER),
+                abi=ROUTER_ABI)
+
+            # Use V2 router for getAmountsOut (view function, always works)
+            router = w3_read.eth.contract(
+                address=Web3.to_checksum_address(PULSEX_V2_ROUTER), abi=ROUTER_ABI)
+
+            # Round trip: WPLS → token → WPLS
+            try:
+                fwd = router.functions.getAmountsOut(test_in, [WPLS, token_ck]).call()
+                mid = fwd[-1]
+                if mid == 0:
+                    self._clean_tokens.add(lc)
+                    return True
+                rev = router.functions.getAmountsOut(mid, [token_ck, WPLS]).call()
+                round_trip = rev[-1]
+            except Exception:
+                # getAmountsOut failed — token might not have V2 pair
+                # Try V1
+                try:
+                    router_v1 = w3_read.eth.contract(
+                        address=Web3.to_checksum_address(PULSEX_V1_ROUTER), abi=ROUTER_ABI)
+                    fwd = router_v1.functions.getAmountsOut(test_in, [WPLS, token_ck]).call()
+                    mid = fwd[-1]
+                    if mid == 0:
+                        self._clean_tokens.add(lc)
+                        return True
+                    rev = router_v1.functions.getAmountsOut(mid, [token_ck, WPLS]).call()
+                    round_trip = rev[-1]
+                except Exception:
+                    self._clean_tokens.add(lc)
+                    return True
+
+            # Expected round-trip loss for clean token: ~0.6% (2 × 0.3% AMM fee)
+            # Tax token with 10% fee: ~20% loss. Threshold: >5% loss = tax
+            ratio = round_trip / test_in if test_in > 0 else 1.0
+            loss_pct = (1 - ratio) * 100
+
+            if loss_pct > 5.0:
+                self._mark_tax_token(token_addr, loss_pct, label=f"roundtrip loss {loss_pct:.1f}%")
+                return False
+
+            self._clean_tokens.add(lc)
+            return True
+        except Exception:
+            self._clean_tokens.add(lc)
+            return True
 
     def is_ready(self) -> bool:
         """
@@ -213,8 +358,10 @@ class ArbEngine(EngineBase):
 
         for idx, (token_addr, label, _v1p, _v2p) in enumerate(candidates):
             try:
-                # Skip tokens that caused on-chain reverts (OVERFLOW etc)
+                # Skip blacklisted (overflow) and tax tokens
                 if token_addr.lower() in self._blacklisted_tokens:
+                    continue
+                if token_addr.lower() in self._tax_tokens:
                     continue
 
                 raw = reserves_map.get(idx, (0, 0, 0, 0))
@@ -240,6 +387,10 @@ class ArbEngine(EngineBase):
                 # TVL filter: skip dust/trap pools
                 total_tvl_wpls = v1rB + v2rB
                 if total_tvl_wpls < CROSS_DEX_MIN_TVL_PLS * 10**18:
+                    continue
+
+                # Tax tokens: skip if previously identified (persisted)
+                if token_addr.lower() in self._tax_tokens:
                     continue
 
                 # Compute spot prices (WPLS per token) on each DEX
@@ -698,9 +849,7 @@ class ArbEngine(EngineBase):
             except Exception as sim_exc:
                 msg = str(sim_exc)
                 log.warning("  Pre-flight sim FAILED: %s — aborting without gas spend", msg)
-                # Blacklist this token for the session (OVERFLOW, K, etc)
-                self._blacklisted_tokens.add(token_addr.lower())
-                log.info("  Blacklisted %s for this session", label)
+                self._blacklist_token(token_addr, reason=msg[:80], label=label)
                 # Withdraw any excess above buffer
                 if not dry_run:
                     tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
@@ -913,9 +1062,8 @@ class ArbEngine(EngineBase):
             except Exception as sim_exc:
                 msg = str(sim_exc)
                 log.warning("  Pre-flight swap sim FAILED: %s — aborting", msg)
-                # Blacklist tokens in this cycle to avoid repeated failures
                 for token in cycle.path[1:-1]:  # intermediate tokens
-                    self._blacklisted_tokens.add(token.lower())
+                    self._blacklist_token(token, reason=msg[:80], label=token[:10])
                     log.info("  Blacklisted %s for this session", token[:10])
                 return EngineResult(
                     success=False, profit_wei=0, gas_wei=gas_spent,
