@@ -16,6 +16,8 @@ from ..core.config import (
     GRAPH_ARB_MIN_PROFIT_PLS, TGSV8,
     HUB_TOKENS, SEED_LAUS,
     PULSEX_MIN_SPREAD_BPS, PULSEX_MIN_TVL_PLS,
+    CROSS_DEX_MIN_PROFIT_PLS, CROSS_DEX_MIN_TVL_PLS,
+    TGS_WPLS_BUFFER_PLS,
 )
 from ..core.chain import erc20, purchasable, router_contract, safe, w3_submit, w3_read
 from ..core.executor import send_tx, approve_if_needed
@@ -131,6 +133,9 @@ class ArbEngine(EngineBase):
         self._top_opportunity = best_opp
         mode = best_opp.get("mode", "?")
 
+        # Propagate pool impact to SimResult (read by strategist)
+        self._last_pool_impact_pct = best_opp.get("pool_impact_pct", 0.0)
+
         log.info(
             "🎯 Top [%s]: profit %.4f PLS",
             mode, best_opp["profit_wei"] / 1e18,
@@ -227,6 +232,11 @@ class ArbEngine(EngineBase):
                     v1rA, v1rB = v1r1, v1r0  # A=token, B=WPLS
                     v2rA, v2rB = v2r1, v2r0
 
+                # TVL filter: skip dust/trap pools
+                total_tvl_wpls = v1rB + v2rB
+                if total_tvl_wpls < CROSS_DEX_MIN_TVL_PLS * 10**18:
+                    continue
+
                 # Compute spot prices (WPLS per token) on each DEX
                 v1_price = v1rB / v1rA
                 v2_price = v2rB / v2rA
@@ -250,13 +260,18 @@ class ArbEngine(EngineBase):
                     buy_reserves = (v2rA, v2rB)
                     sell_reserves = (v1rA, v1rB)
 
-                # Optimal input: cap at 5% of the smaller pool's WPLS reserve
+                # Optimal input: cap at 2% of the smaller pool's WPLS reserve
+                # At 2% of reserves, effective price impact is ~3.9% (constant product)
+                # Professional arb bots stay under 1-3% impact
                 smaller_wpls_reserve = min(v1rB, v2rB)
-                max_input = smaller_wpls_reserve * 5 // 100
+                max_input = smaller_wpls_reserve * 2 // 100
 
                 trade_amount = min(max_input, available)
                 if trade_amount < 10**16:
                     continue
+
+                # Pool impact: trade_amount as % of smaller pool
+                pool_impact_pct = (trade_amount / smaller_wpls_reserve) * 100.0 if smaller_wpls_reserve > 0 else 100.0
 
                 # Simulate profit: buy tokenOut with WPLS, sell tokenOut back to WPLS
                 buy_r_in = buy_reserves[1]
@@ -271,12 +286,13 @@ class ArbEngine(EngineBase):
                 wpls_received = (sell_r_out * tokens_bought * 997) // (sell_r_in * 1000 + tokens_bought * 997)
 
                 profit_wei = wpls_received - trade_amount - gas_cost_wei
-                if profit_wei <= 0:
+                if profit_wei < CROSS_DEX_MIN_PROFIT_PLS * 10**18:
                     continue
 
                 log.debug(
-                    "CrossDex: %s spread=%.0fbps input=%.4f profit=%.4f PLS (buy=%s sell=%s)",
+                    "CrossDex: %s spread=%.0fbps input=%.4f profit=%.4f PLS impact=%.1f%% (buy=%s sell=%s)",
                     label, spread_bps, trade_amount / 1e18, profit_wei / 1e18,
+                    pool_impact_pct,
                     "V1" if buy_dex == 0 else "V2",
                     "V1" if sell_dex == 0 else "V2",
                 )
@@ -294,6 +310,7 @@ class ArbEngine(EngineBase):
                         "spread_bps": spread_bps,
                         "tokens_bought": tokens_bought,
                         "wpls_received": wpls_received,
+                        "pool_impact_pct": pool_impact_pct,
                     }
 
             except Exception as exc:
@@ -577,13 +594,9 @@ class ArbEngine(EngineBase):
         """
         Mode 2: Cross-DEX arbitrage via TGSv8.atomicArb().
 
-        Flow:
-          1. Wrap PLS → WPLS if needed
-          2. Approve TGSv8 to pull WPLS
-          3. Deposit WPLS into TGSv8 working balance
-          4. Call TGSv8.atomicArb(WPLS, token, amount, buyDex, sellDex, minProfit)
-          5. Withdraw profit (WPLS) from TGSv8
-          6. Optionally unwrap WPLS → PLS
+        Fast path (TGSv8 has WPLS): single TX — atomicArb only.
+        Slow path (no WPLS in TGSv8): wrap → approve → deposit → atomicArb.
+        Profits stay in TGSv8 up to TGS_WPLS_BUFFER_PLS; excess withdrawn.
         """
         from ..core.chain import tgsv8_contract
         from ..core import wallet
@@ -601,6 +614,7 @@ class ArbEngine(EngineBase):
 
         tx_hashes = []
         gas_spent = 0
+        wpls_buffer = TGS_WPLS_BUFFER_PLS * 10**18
 
         try:
             log.info(
@@ -611,51 +625,64 @@ class ArbEngine(EngineBase):
                 opp.get("spread_bps", 0),
             )
 
-            # Step 1: Ensure WPLS balance (wrap PLS if needed)
-            wpls_c = erc20(WPLS)
-            wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c.abi)
-            wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
+            # Check TGSv8 working balance for fast path
+            tgs_wpls = safe(tgs_read, "bal", WPLS) or 0
+            fast_path = tgs_wpls >= trade_amount
 
-            if wpls_bal < trade_amount and not dry_run:
-                wrap_amount = trade_amount - wpls_bal + 10**15
-                log.info("  Wrapping %.4f PLS → WPLS", wrap_amount / 1e18)
-                nonce = wallet.next_nonce()
-                tx = {
-                    "to": WPLS,
-                    "from": JOEY_WALLET,
-                    "value": wrap_amount,
-                    "gas": 50_000,
-                    "gasPrice": w3_submit.eth.gas_price,
-                    "nonce": nonce,
-                    "chainId": 369,
-                }
-                signed = wallet.account.sign_transaction(tx)
-                tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
-                receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-                assert receipt["status"] == 1, "WPLS wrap failed"
-                tx_hashes.append(tx_hash.hex())
-                gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            if fast_path:
+                log.info("  Fast path: TGSv8 has %.4f WPLS (need %.4f)",
+                         tgs_wpls / 1e18, trade_amount / 1e18)
+            else:
+                # Slow path: deposit WPLS into TGSv8
+                shortfall = trade_amount - tgs_wpls
 
-            # Step 2: Approve TGSv8 to pull WPLS
-            r = approve_if_needed(wpls_submit, tgs_addr, trade_amount, "WPLS→TGSv8", dry_run=dry_run)
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                # Step 1: Ensure WPLS balance (wrap PLS if needed)
+                wpls_c = erc20(WPLS)
+                wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c.abi)
+                wpls_bal = safe(wpls_c, "balanceOf", JOEY_WALLET) or 0
 
-            # Step 3: Deposit WPLS into TGSv8 working balance
-            r = send_tx(
-                tgs_write.functions.deposit(WPLS, trade_amount),
-                f"Deposit {trade_amount / 1e18:.4f} WPLS into TGSv8",
-                dry_run=dry_run,
-            )
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                if wpls_bal < shortfall and not dry_run:
+                    wrap_amount = shortfall - wpls_bal + 10**15
+                    log.info("  Wrapping %.4f PLS → WPLS", wrap_amount / 1e18)
+                    nonce = wallet.next_nonce()
+                    tx = {
+                        "to": WPLS,
+                        "from": JOEY_WALLET,
+                        "value": wrap_amount,
+                        "gas": 50_000,
+                        "gasPrice": w3_submit.eth.gas_price,
+                        "nonce": nonce,
+                        "chainId": 369,
+                    }
+                    signed = wallet.account.sign_transaction(tx)
+                    tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+                    receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                    assert receipt["status"] == 1, "WPLS wrap failed"
+                    tx_hashes.append(tx_hash.hex())
+                    gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Step 4: TGSv8 needs to approve routers for the tokens it will swap
+                # Step 2: Approve TGSv8 to pull WPLS
+                if not dry_run:
+                    wpls_c_sub = erc20(WPLS)
+                    wpls_submit = w3_submit.eth.contract(address=WPLS, abi=wpls_c_sub.abi)
+                r = approve_if_needed(wpls_submit, tgs_addr, shortfall, "WPLS→TGSv8", dry_run=dry_run)
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                # Step 3: Deposit shortfall into TGSv8 working balance
+                r = send_tx(
+                    tgs_write.functions.deposit(WPLS, shortfall),
+                    f"Deposit {shortfall / 1e18:.4f} WPLS into TGSv8",
+                    dry_run=dry_run,
+                )
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
             # atomicArb handles internal approvals — the contract manages this
 
-            # Step 5: Call atomicArb() — atomic: reverts if profit < minProfit
+            # Call atomicArb() — atomic: reverts if profit < minProfit
             min_profit = max(0, int(expected_profit * 0.8))  # 80% of expected as safety
             r = send_tx(
                 tgs_write.functions.atomicArb(
@@ -673,38 +700,43 @@ class ArbEngine(EngineBase):
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Step 6: Withdraw all WPLS from TGSv8 (principal + profit)
+            # Withdraw only excess above buffer (keep WPLS in TGSv8 for next arb)
             if not dry_run:
                 tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
-                if tgs_wpls_bal > 0:
+                excess = tgs_wpls_bal - wpls_buffer
+                if excess > 0:
                     r = send_tx(
-                        tgs_write.functions.withdraw(WPLS, tgs_wpls_bal),
-                        f"Withdraw {tgs_wpls_bal / 1e18:.4f} WPLS from TGSv8",
+                        tgs_write.functions.withdraw(WPLS, excess),
+                        f"Withdraw excess {excess / 1e18:.4f} WPLS (buffer={wpls_buffer / 1e18:.0f})",
                         dry_run=dry_run,
                     )
                     if r:
                         tx_hashes.append(r["transactionHash"].hex())
                         gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                else:
+                    log.info("  Keeping %.4f WPLS in TGSv8 (buffer=%.0f)",
+                             tgs_wpls_bal / 1e18, wpls_buffer / 1e18)
 
-            log.info("CrossDex arb complete: %s. TXs: %d", label, len(tx_hashes))
+            log.info("CrossDex arb complete: %s. TXs: %d (fast=%s)", label, len(tx_hashes), fast_path)
             return EngineResult(
                 success=True,
                 profit_wei=expected_profit,
                 gas_wei=gas_spent,
                 tx_hashes=tx_hashes,
-                notes=f"CrossDexArb: {label} buy={'V1' if buy_dex == 0 else 'V2'} sell={'V1' if sell_dex == 0 else 'V2'}",
+                notes=f"CrossDexArb: {label} buy={'V1' if buy_dex == 0 else 'V2'} sell={'V1' if sell_dex == 0 else 'V2'} fast={fast_path}",
             )
 
         except (SimulationFailed, AssertionError, Exception) as exc:
             log.error("CrossDex arb execute failed: %s", exc)
-            # Attempt to recover any WPLS left in TGSv8
+            # Attempt to recover any WPLS left in TGSv8 above buffer
             try:
                 if not dry_run:
                     tgs_wpls_bal = safe(tgs_read, "bal", WPLS) or 0
-                    if tgs_wpls_bal > 0:
-                        log.info("  Recovering %.4f WPLS from TGSv8", tgs_wpls_bal / 1e18)
+                    excess = tgs_wpls_bal - wpls_buffer
+                    if excess > 0:
+                        log.info("  Recovering %.4f excess WPLS from TGSv8", excess / 1e18)
                         send_tx(
-                            tgs_write.functions.withdraw(WPLS, tgs_wpls_bal),
+                            tgs_write.functions.withdraw(WPLS, excess),
                             "Recovery withdraw",
                             dry_run=False,
                         )
