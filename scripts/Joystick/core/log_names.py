@@ -43,6 +43,7 @@ _NAME_MAP = {
     "scripts.Joystick.oracle.data_store":      "oracle.data",
     "scripts.Joystick.oracle.profitability":   "oracle.profit",
     "scripts.Joystick.oracle.route_auditor":   "oracle.route",
+    "scripts.Joystick.oracle.supply_oracle":  "oracle.supply",
     "scripts.Joystick.loops.terraform":        "loop.terra",
     "scripts.Joystick.loops.base":             "loop.base",
     "joystick.strategist":                     "strategist",

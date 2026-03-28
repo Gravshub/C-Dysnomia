@@ -38,8 +38,11 @@ from typing import Optional
 from web3 import Web3
 
 from .base import EngineBase, EngineResult
-from ..core.config import JOEY_WALLET, TGSV8, WPLS, GAS_PRICE_CEIL, GAS_MULT
-from ..core.chain import w3_read, w3_submit, tgsv8_contract, safe
+from ..core.config import (
+    JOEY_WALLET, TGSV8, WPLS, GAS_PRICE_CEIL, GAS_MULT,
+    SPINE_ALLOW_SELF_BURN, SPINE_DISCOVERY_TTL, DATA_DIR,
+)
+from ..core.chain import w3_read, w3_submit, tgsv8_contract, safe, multicall, load_abi
 from ..core.executor import send_tx
 
 log = get_logger(__name__)
@@ -56,6 +59,26 @@ BATCH_ITERATIONS   = 20      # iterations per batchMintAndClaim TX (TGSv8 maxBat
 MIN_SELL_THRESHOLD = 500     # accumulate at least 500 child tokens before selling
 RECON_CACHE_TTL    = 1800    # 30-minute cache on recon data
 SPINE_GAS_EST      = 450_000 # gas estimate for batch mint+claim + sell
+
+_SPINE_PAIRS_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "data", "spine_pairs.json"
+)
+_TREASURY_TOKEN_ABI = None
+
+
+def _get_treasury_abi():
+    """Lazy-load treasury_token.json ABI."""
+    global _TREASURY_TOKEN_ABI
+    if _TREASURY_TOKEN_ABI is None:
+        _TREASURY_TOKEN_ABI = load_abi("treasury_token")
+    return _TREASURY_TOKEN_ABI
+
+
+def _treasury_contract(address: str):
+    """Create a contract instance with the treasury token ABI."""
+    return w3_read.eth.contract(
+        address=Web3.to_checksum_address(address), abi=_get_treasury_abi()
+    )
 
 
 @dataclass
@@ -94,7 +117,9 @@ class SpineRunnerEngine(EngineBase):
         super().__init__()
         self._spines: list[Spine] = []
         self._last_load = 0.0
+        self._last_discovery = 0.0
         self._total_pls_earned = 0
+        self._force_rediscovery = False
 
         self._recon_path = os.path.join(
             os.path.dirname(__file__), "..", "data", "recon_results.json"
@@ -181,7 +206,8 @@ class SpineRunnerEngine(EngineBase):
 
         if not self._live_debenture_check(spine):
             spine.active = False
-            log.warning("E7: %s Debenture flipped False — deactivating spine", spine.label)
+            self._force_rediscovery = True
+            log.warning("E7: %s Debenture flipped False — deactivating spine, forcing re-discovery", spine.label)
             return EngineResult(success=False, profit_wei=0, gas_wei=0,
                                 notes=f"{spine.label} debenture is now False")
 
@@ -195,21 +221,192 @@ class SpineRunnerEngine(EngineBase):
     # ── Internal mechanics ────────────────────────────────────────────────
 
     def _refresh_spines(self):
-        """Load/discover spines from recon data. Respects TTL."""
+        """Load/discover spines. Uses cached spine_pairs.json with TTL, falls back to on-chain discovery."""
         now = time.time()
-        if now - self._last_load < RECON_CACHE_TTL and self._spines:
+        if now - self._last_load < RECON_CACHE_TTL and self._spines and not self._force_rediscovery:
             return
 
-        spines = []
+        # Try loading from cached spine_pairs.json first
+        spines = self._load_cached_spine_pairs()
 
+        # If cache is stale or empty, run on-chain discovery
+        if not spines or self._force_rediscovery or now - self._last_discovery > SPINE_DISCOVERY_TTL:
+            discovered = self._discover_spine_pairs()
+            if discovered:
+                spines = discovered
+                self._save_spine_pairs(discovered)
+                self._last_discovery = now
+                self._force_rediscovery = False
+
+        # Fall back to static recon data
+        if not spines:
+            spines = self._load_spines_from_recon()
+
+        # Ultimate fallback: hardcoded OZZY
+        if not spines:
+            log.info("E7: using hardcoded OZZY fallback spine (recon pending)")
+            spines.append(Spine(
+                label         = "OZZY",
+                child         = OZZY_ADDR,
+                parent        = BAR_ADDR,
+                spend_token   = OZZY_ADDR,
+                pls_per_child = 0,
+                active        = False,
+            ))
+
+        self._spines    = spines
+        self._last_load = now
+        log.info("E7: loaded %d spines (%d active)",
+                 len(spines), sum(1 for s in spines if s.active))
+
+    def _discover_spine_pairs(self) -> list[Spine]:
+        """
+        Dynamically discover valid spine pairs from v2_federal_tokens.json.
+
+        For each V2 Federal token:
+          1. Check Debenture() on-chain — must be True
+          2. Read Parent() on-chain
+          3. For each OTHER Debenture=True token, check if it can serve as Claim() ammo
+          4. Check if child has DEX liquidity (WPLS pair with reserves > 0)
+
+        Mirrors TreasuryGameShark._mintEco() auto-matching logic.
+        """
+        from ..oracle.data_store import DataStore
+        v2fed = DataStore.get().v2_federal_tokens()
+        if not v2fed:
+            return []
+
+        addresses = [tok["address"] for tok in v2fed]
+        symbols = {tok["address"].lower(): tok.get("symbol", tok["address"][:8]) for tok in v2fed}
+
+        # Batch Debenture() + Parent() calls via Multicall3
+        calls = []
+        for addr in addresses:
+            c = _treasury_contract(addr)
+            calls.append((c, "Debenture", []))
+            calls.append((c, "Parent", []))
+
+        results = multicall(calls)
+
+        # Parse results: build lists of debenture-true tokens with parents
+        deb_true = []  # [{"address": str, "symbol": str, "parent": str}, ...]
+        for i, addr in enumerate(addresses):
+            deb_result = results[i * 2]
+            parent_result = results[i * 2 + 1]
+
+            if deb_result is not True:
+                continue
+            if not parent_result or parent_result == "0x" + "0" * 40:
+                continue
+
+            deb_true.append({
+                "address": Web3.to_checksum_address(addr),
+                "symbol": symbols.get(addr.lower(), addr[:8]),
+                "parent": Web3.to_checksum_address(parent_result),
+            })
+
+        if not deb_true:
+            log.info("E7: no Debenture=True tokens found on-chain")
+            return []
+
+        log.info("E7: found %d Debenture=True tokens: %s",
+                 len(deb_true), ", ".join(d["symbol"] for d in deb_true))
+
+        # Build spine pairs: for each deb_true token as minting_target,
+        # find other deb_true tokens as spending_ammo
+        spines = []
+        for target in deb_true:
+            for ammo in deb_true:
+                if not SPINE_ALLOW_SELF_BURN and ammo["address"].lower() == target["address"].lower():
+                    continue
+
+                # Check DEX price for target child token
+                from ..oracle.price import get_amounts_out, get_amounts_out_v2
+                pls_per_child = 0.0
+                try:
+                    one_token = 10**18
+                    v2_out = get_amounts_out_v2(one_token, [target["address"], WPLS])
+                    if v2_out and v2_out[-1] > 0:
+                        pls_per_child = v2_out[-1] / 1e18
+                    else:
+                        v1_out = get_amounts_out(one_token, [target["address"], WPLS])
+                        if v1_out and v1_out[-1] > 0:
+                            pls_per_child = v1_out[-1] / 1e18
+                except Exception:
+                    pass
+
+                spines.append(Spine(
+                    label=target["symbol"],
+                    child=target["address"],
+                    parent=target["parent"],
+                    spend_token=ammo["address"],
+                    pls_per_child=pls_per_child,
+                    active=True,
+                ))
+
+        log.info("E7: discovered %d spine pairs", len(spines))
+        return spines
+
+    def _load_cached_spine_pairs(self) -> list[Spine]:
+        """Load spine pairs from cached JSON file."""
+        if not os.path.exists(_SPINE_PAIRS_PATH):
+            return []
+        try:
+            with open(_SPINE_PAIRS_PATH) as f:
+                data = json.load(f)
+            # Check TTL
+            saved_ts = data.get("timestamp", 0)
+            if time.time() - saved_ts > SPINE_DISCOVERY_TTL:
+                return []  # stale
+            spines = []
+            for entry in data.get("pairs", []):
+                spines.append(Spine(
+                    label=entry.get("label", "?"),
+                    child=Web3.to_checksum_address(entry["child"]),
+                    parent=Web3.to_checksum_address(entry["parent"]),
+                    spend_token=Web3.to_checksum_address(entry["spend_token"]),
+                    pls_per_child=entry.get("pls_per_child", 0),
+                    active=entry.get("active", True),
+                ))
+            return spines
+        except Exception as exc:
+            log.debug("E7: failed to load spine_pairs.json: %s", exc)
+            return []
+
+    def _save_spine_pairs(self, spines: list[Spine]):
+        """Persist discovered spine pairs via atomic write."""
+        data = {
+            "timestamp": time.time(),
+            "pairs": [
+                {
+                    "label": s.label,
+                    "child": s.child,
+                    "parent": s.parent,
+                    "spend_token": s.spend_token,
+                    "pls_per_child": s.pls_per_child,
+                    "active": s.active,
+                }
+                for s in spines
+            ],
+        }
+        tmp = _SPINE_PAIRS_PATH + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, _SPINE_PAIRS_PATH)
+        except Exception as exc:
+            log.warning("E7: failed to save spine_pairs.json: %s", exc)
+
+    def _load_spines_from_recon(self) -> list[Spine]:
+        """Fall back to static recon data for spine loading (original logic)."""
+        spines = []
         from ..oracle.data_store import DataStore
         store = DataStore.get()
         v2fed_tokens = store.v2_federal_tokens()
 
         if v2fed_tokens:
             try:
-                v2data = {"tokens": v2fed_tokens}
-                for tok in v2data.get("tokens", []):
+                for tok in v2fed_tokens:
                     if tok.get("debenture") is not True:
                         continue
                     addr     = tok["address"]
@@ -237,22 +434,7 @@ class SpineRunnerEngine(EngineBase):
                     ))
             except Exception as e:
                 log.warning("E7: error loading v2_federal_tokens.json: %s", e)
-
-        if not spines:
-            log.info("E7: using hardcoded OZZY fallback spine (recon pending)")
-            spines.append(Spine(
-                label         = "OZZY",
-                child         = OZZY_ADDR,
-                parent        = BAR_ADDR,
-                spend_token   = OZZY_ADDR,
-                pls_per_child = 0,
-                active        = False,
-            ))
-
-        self._spines    = spines
-        self._last_load = now
-        log.info("E7: loaded %d spines (%d active)",
-                 len(spines), sum(1 for s in spines if s.active))
+        return spines
 
     def _get_parent_from_recon(self, child_addr: str) -> Optional[str]:
         """Look up parent address from recon_results.json."""

@@ -31,7 +31,7 @@ from collections import deque
 from decimal import Decimal
 
 from .chain import w3_read
-from .config import GAS_PRICE_CEIL
+from .config import GAS_PRICE_CEIL, MEMPOOL_CACHE_SECONDS
 
 log = get_logger(__name__)
 
@@ -53,6 +53,8 @@ class GasOracle:
         self._window: deque[int] = deque(maxlen=window_size)
         self._timestamps: deque[float] = deque(maxlen=window_size)
         self._last_price: int = 0
+        self._mempool_data: dict | None = None
+        self._mempool_ts: float = 0.0
 
     def update(self) -> int:
         """
@@ -68,6 +70,14 @@ class GasOracle:
         self._window.append(price)
         self._timestamps.append(time.time())
         self._last_price = price
+
+        # Sample pending block (best-effort)
+        now = time.time()
+        if now - self._mempool_ts >= MEMPOOL_CACHE_SECONDS:
+            mempool = self._sample_pending_block()
+            if mempool:
+                self._mempool_data = mempool
+                self._mempool_ts = now
 
         log.debug(
             "⛽ GasOracle: %.0f Beats (avg=%.0f, trend=%s, window=%d)",
@@ -142,9 +152,68 @@ class GasOracle:
         """Same but using rolling average — useful for ROI projections."""
         return Decimal(gas_units * self.average()) / Decimal(10**18)
 
+    # ── Mempool gas sampling ────────────────────────────────────────────────
+
+    def _sample_pending_block(self) -> dict | None:
+        """
+        Read the pending block's transactions and compute gas price percentiles.
+
+        Returns percentile dict or None if pending block unavailable.
+        """
+        try:
+            block = w3_read.eth.get_block('pending', full_transactions=True)
+        except Exception:
+            log.debug("GasOracle: pending block not available from RPC")
+            return None
+
+        txs = block.get("transactions", [])
+        if not txs:
+            return None
+
+        prices = []
+        for tx in txs:
+            if isinstance(tx, dict):
+                # Prefer maxFeePerGas (EIP-1559), fall back to gasPrice
+                gp = tx.get("maxFeePerGas") or tx.get("gasPrice", 0)
+                if gp and gp > 0:
+                    prices.append(gp)
+
+        if not prices:
+            return None
+
+        prices.sort()
+        n = len(prices)
+
+        def percentile(p):
+            idx = min(int(n * p / 100), n - 1)
+            return prices[idx]
+
+        return {
+            "p10": percentile(10),
+            "p25": percentile(25),
+            "p50": percentile(50),
+            "p70": percentile(70),
+            "p80": percentile(80),
+            "p90": percentile(90),
+            "tx_count": n,
+            "timestamp": time.time(),
+        }
+
+    def mempool_price(self, speed: str = "standard") -> int | None:
+        """Get mempool-derived gas price. speed: 'slow'|'standard'|'fast'|'rapid'."""
+        if not self._mempool_data:
+            return None
+        mapping = {"slow": "p25", "standard": "p50", "fast": "p70", "rapid": "p80"}
+        return self._mempool_data.get(mapping.get(speed, "p50"))
+
+    def recommended_gas_price(self) -> int:
+        """Best available gas price: mempool p50 if available, else eth_gasPrice."""
+        mp = self.mempool_price("standard")
+        return mp if mp else self._last_price
+
     def status(self) -> dict:
         """Full status dict for logging / --status display."""
-        return {
+        s = {
             "current_beats":    self.current_beats(),
             "average_beats":    self.average_beats(),
             "trend":           self.trend(),
@@ -155,6 +224,10 @@ class GasOracle:
             "window_max_beats": max(self._window) / 1e9 if self._window else 0,
             "window_min_beats": min(self._window) / 1e9 if self._window else 0,
         }
+        if self._mempool_data:
+            s["mempool_p50"] = self._mempool_data.get("p50", 0) / 1e9
+            s["mempool_tx_count"] = self._mempool_data.get("tx_count", 0)
+        return s
 
     def __repr__(self) -> str:
         s = self.status()
