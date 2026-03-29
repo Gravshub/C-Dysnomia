@@ -455,30 +455,27 @@ class PhreakEngine(EngineBase):
     # ── ARM mode ──────────────────────────────────────────────────────────────
 
     def _evaluate_arm(self, cfg: PhreakConfig, gas_price: int) -> Optional[dict]:
-        """Check if any DEB_TRUE_V2 token needs arming."""
+        """Check if any DEB_TRUE_V2 token or its parent needs arming in TGSv8."""
         if not cfg.deb_true_v2:
             return None
 
         tgs = tgsv8_contract()
 
+        # Phase 1: Check deb tokens themselves (spend ammo for Claim)
         for deb in cfg.deb_true_v2:
             bal = safe(tgs, "bal", deb.address) or 0
             if bal > 0:
                 continue
 
-            # Found unfunded deb token — plan acquisition
             amount_pls = cfg.arm_default_pls * 10**18
             gas_wei = int(ARM_GAS_EST * gas_price * GAS_MULT)
 
-            # Check DEX availability
             route = self._find_cheapest_route(deb.address)
             if not route:
                 log.debug("E8 ARM: no route found for %s", deb.symbol)
                 continue
 
-            # Estimate how many tokens we get
             expected_tokens = route.get("expected_tokens", 0)
-
             log.info("E8 ARM: %s needs ammo (TGSv8 bal=0). Route: %s, cost: %d PLS",
                      deb.symbol, route["method"], cfg.arm_default_pls)
 
@@ -488,7 +485,44 @@ class PhreakEngine(EngineBase):
                 "route": route,
                 "expected_tokens": expected_tokens,
                 "gas_wei": gas_wei,
-                "value_wei": amount_pls,  # Strategic value = cost of ammo
+                "value_wei": amount_pls,
+            }
+
+        # Phase 2: Check parent tokens (needed by E7 to mint deb tokens)
+        # E7 BACKBONE requires parent token balance > 0 in TGSv8 to run.
+        for deb in cfg.deb_true_v2:
+            if not deb.parent or deb.parent == ZERO_ADDR:
+                continue
+            parent_bal = safe(tgs, "bal", deb.parent) or 0
+            if parent_bal > 0:
+                continue
+
+            amount_pls = cfg.arm_default_pls * 10**18
+            gas_wei = int(ARM_GAS_EST * gas_price * GAS_MULT)
+
+            route = self._find_cheapest_route(deb.parent)
+            if not route:
+                log.debug("E8 ARM: no route found for parent of %s", deb.symbol)
+                continue
+
+            expected_tokens = route.get("expected_tokens", 0)
+            log.info("E8 ARM: parent of %s needs funding (TGSv8 bal=0). Route: %s, cost: %d PLS",
+                     deb.symbol, route["method"], cfg.arm_default_pls)
+
+            # Create a synthetic DebToken for the parent
+            parent_deb = DebToken(
+                address=deb.parent,
+                symbol=f"{deb.symbol}_PARENT",
+                parent=ZERO_ADDR,
+                note=f"Parent of {deb.symbol} — needed by E7 BACKBONE",
+            )
+            return {
+                "deb_token": parent_deb,
+                "amount_pls": amount_pls,
+                "route": route,
+                "expected_tokens": expected_tokens,
+                "gas_wei": gas_wei,
+                "value_wei": amount_pls,
             }
 
         return None
