@@ -29,7 +29,7 @@ SIM_TIMEOUT = 5.0
 # Per-engine timeout overrides (Arb/TokenFactory do graph + reserve refresh)
 SIM_TIMEOUT_MAP: dict[str, float] = {
     "Arb": 15.0,
-    "TokenFactory": 10.0,
+    "TokenFactory": 15.0,  # 5 routes × 2 DEXes + WM = ~12 RPC calls
 }
 
 

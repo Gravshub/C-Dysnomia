@@ -60,13 +60,16 @@ VALIDATOR_GOAL_PLS = 32_000_000
 # Strategic engines — always valid to run regardless of profit or rotation
 STRATEGIC_ENGINES = {"Beat", "LAU"}
 
+# Revenue engines — get a score floor of 2.0 when profitable (ensures MEDIUM confidence)
+# These are proven income generators that shouldn't be blocked by RPC jitter
+REVENUE_ENGINES = {"DSS"}
+
 # ── Cross-Engine Dependency Map (Phase F) ─────────────────────────────────────
 # When an engine+mode unlocks another engine, score the unlock bonus.
 UNLOCK_MAP: dict[tuple[str, str], list[str]] = {
-    ("PHR3AK", "arm"):    ["SpineRunner"],   # ARM acquires OZZY → E7 unlocked
+    ("PHR3AK", "arm"):    ["SpineRunner"],   # ARM acquires OZZY/BAR → E7 unlocked
     ("PHR3AK", "deploy"): ["Arb"],           # new V4 pair → new arb edge
-    ("PHR3AK", "stitch"): ["Arb"],           # new LP pair → new arb edge
-    ("DSS", "harvest"):   ["Arb"],           # harvestCycle burns LP → permanent arb edges for RAZOR
+    ("PHR3AK", "stitch"): ["Arb", "TreasurySniper"],  # new LP pair → arb + treasury exit routes
 }
 
 # Default unlock bonus for engines with no historical data
@@ -421,9 +424,17 @@ class Strategist:
             score -= 1.0
 
         # 7. Profit/loss check
-        if profit_pls <= gas_pls and engine.name not in STRATEGIC_ENGINES:
+        # Engines with unlock potential (ARM, DEPLOY, STITCH) are infrastructure
+        # investments — don't penalize them for having profit=0.
+        unlock_key = (engine.name, mode) if mode else None
+        has_unlock = unlock_key and unlock_key in UNLOCK_MAP
+        if profit_pls <= gas_pls and engine.name not in STRATEGIC_ENGINES and not has_unlock:
             risks.append("Unprofitable (profit <= gas)")
             score -= 5.0
+
+        # 7b. Revenue engine floor — proven generators shouldn't be blocked by RPC jitter
+        if engine.name in REVENUE_ENGINES and profit_pls > gas_pls and score < 2.0:
+            score = 2.0
 
         # 8. Pool impact penalty (Phase C — from SimResult data)
         # Atropa ecosystem pools are inherently thin. atomicArb() reverts if
