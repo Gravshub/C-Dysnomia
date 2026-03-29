@@ -63,6 +63,7 @@ DEBENTURE_CHECK_GAS = 50_000
 # Paths
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _CONFIG_PATH = os.path.join(_DATA_DIR, "phreak_config.json")
+_CANDIDATES_PATH = os.path.join(_DATA_DIR, "deploy_candidates.json")
 _RECON_PATH = os.path.join(_DATA_DIR, "recon_results.json")
 _V2FED_PATH = os.path.join(_DATA_DIR, "v2_federal_tokens.json")
 _EVENTS_DIR = os.path.join(_DATA_DIR, "events")
@@ -343,8 +344,10 @@ class PhreakEngine(EngineBase):
             except Exception:
                 pass
 
-        # DEPLOY mode is ready if queue has items
+        # DEPLOY mode is ready if queue has items or candidates are available
         if cfg.deploy_queue:
+            return True
+        if os.path.exists(_CANDIDATES_PATH):
             return True
 
         # STITCH mode — check if we have tokens to pair
@@ -390,6 +393,21 @@ class PhreakEngine(EngineBase):
             return stitch_data["value_wei"], stitch_data["gas_wei"]
 
         raise SimulationFailed("E8: no actionable mode available")
+
+    def sim_result(self) -> "SimResult":
+        """Override to propagate mode (arm/deploy/stitch) into SimResult."""
+        from .base import SimResult
+        try:
+            profit, gas = self.simulate()
+            return SimResult(
+                profit_wei=profit,
+                gas_wei=gas,
+                wallet_role=self.wallet_role,
+                mode=self._pending_mode or "",
+                pool_impact_pct=getattr(self, '_last_pool_impact_pct', 0.0),
+            )
+        except Exception as e:
+            return SimResult.failed(str(e))
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """Execute the pending mode from simulate()."""
@@ -633,8 +651,71 @@ class PhreakEngine(EngineBase):
 
     # ── DEPLOY mode ───────────────────────────────────────────────────────────
 
+    def _auto_populate_deploy_queue(self, cfg: PhreakConfig) -> bool:
+        """
+        If deploy_queue is empty, pick the next unused candidate from
+        deploy_candidates.json and add it to the queue.
+
+        Returns True if a candidate was added.
+        """
+        if cfg.deploy_queue:
+            return False
+
+        if not os.path.exists(_CANDIDATES_PATH):
+            return False
+
+        try:
+            with open(_CANDIDATES_PATH) as f:
+                data = json.load(f)
+            candidates = data.get("candidates", [])
+        except Exception as exc:
+            log.debug("E8: failed to load deploy_candidates.json: %s", exc)
+            return False
+
+        if not candidates:
+            return False
+
+        # Track which candidates have already been deployed (by symbol)
+        deployed_symbols = set()
+        from ..oracle.data_store import DataStore
+        tokens = DataStore.get().all_tokens()
+        for sym in tokens.values():
+            deployed_symbols.add(sym.upper())
+
+        # Pick the first candidate whose symbol isn't already deployed
+        for candidate in candidates:
+            sym = candidate.get("symbol", "").upper()
+            if sym and sym not in deployed_symbols:
+                # Resolve parent address from strategy
+                parent_strategy = candidate.get("parent_strategy", "AFFECTION")
+                if parent_strategy == "FED":
+                    parent = "0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff"
+                else:
+                    parent = "0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D"
+
+                entry = {
+                    "name": candidate["name"],
+                    "symbol": candidate["symbol"],
+                    "initial_mint": candidate.get("initial_mint", 100),
+                    "parent": parent,
+                    "token_b": WPLS,
+                    "token_a_amount": 0,
+                    "token_b_amount": 0,
+                    "keep_pct": cfg.default_keep_pct,
+                }
+                cfg.deploy_queue.append(entry)
+                save_phreak_config(cfg)
+                log.info("E8: auto-queued deploy candidate: %s (%s)",
+                         candidate["name"], candidate["symbol"])
+                return True
+
+        log.debug("E8: all deploy candidates already deployed or exhausted")
+        return False
+
     def _evaluate_deploy(self, cfg: PhreakConfig, gas_price: int) -> Optional[dict]:
-        """Check if deploy queue has pending items."""
+        """Check if deploy queue has pending items. Auto-populates from candidates if empty."""
+        if not cfg.deploy_queue:
+            self._auto_populate_deploy_queue(cfg)
         if not cfg.deploy_queue:
             return None
 
