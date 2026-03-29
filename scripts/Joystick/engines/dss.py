@@ -475,47 +475,44 @@ class DSSEngine(EngineBase):
             lp_bps = 10000 - HARVEST_SELL_BPS  # e.g., 10000-4500 = 5500
             hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
             gibs_cs = Web3.to_checksum_address(GIBS_LAU)
-
-            # ── TX1: DSS.mintToSelf(N) — 1 TX, N GIBS land in Joey's wallet ──
-            from ..core.config import DSS
-            dss_addr = Web3.to_checksum_address(DSS)
-            DSS_ABI = [{"inputs": [{"name": "_amount", "type": "uint64"}],
-                        "name": "mintToSelf", "outputs": [], "type": "function"}]
-            dss_c = w3_submit.eth.contract(address=dss_addr, abi=DSS_ABI)
-
-            log.info("E2: DSS.mintToSelf(%d) — single TX mint", mint_count)
-
-            r = send_tx(
-                dss_c.functions.mintToSelf(mint_count),
-                f"DSS.mintToSelf({mint_count})",
-                dry_run=dry_run,
-            )
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                log.info("E2: Minted %d GIBS in 1 TX — gas %d", mint_count, r["gasUsed"])
-
-            # ── TX2: Deposit GIBS into Hub ──
+            aff_cs = Web3.to_checksum_address(AFFECTION)
             gibs_amount = mint_count * 10**18
-            gibs_c_submit = w3_submit.eth.contract(
-                address=gibs_cs, abi=erc20(GIBS_LAU).abi,
-            )
-            r = approve_if_needed(gibs_c_submit, hub_addr, gibs_amount,
-                                  "GIBS→Hub", dry_run=dry_run)
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            r = send_tx(
-                hub.functions.deposit(gibs_cs, gibs_amount),
-                f"Deposit {mint_count} GIBS → Hub",
-                dry_run=dry_run,
-            )
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            # ── Step 1: Ensure Hub has enough AFF for Purchase (1 AFF per GIBS) ──
+            aff_needed = mint_count * 10**18
+            aff_in_hub = self._aff_in_hub()
+            if aff_in_hub < aff_needed:
+                shortfall = aff_needed - aff_in_hub
+                log.info("E2: Hub needs %d more AFF (has %d, needs %d)",
+                         shortfall // 10**18, aff_in_hub // 10**18, mint_count)
 
-            # ── TX3: harvestPreloaded — LP first, sell second ──
+                # Check Joey's AFF balance
+                aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+                if aff_joey >= shortfall:
+                    # Deposit Joey's AFF into Hub
+                    aff_c_submit = w3_submit.eth.contract(
+                        address=aff_cs, abi=erc20(AFFECTION).abi,
+                    )
+                    r = approve_if_needed(aff_c_submit, hub_addr, shortfall,
+                                          "AFF→Hub", dry_run=dry_run)
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                    r = send_tx(
+                        hub.functions.deposit(aff_cs, shortfall),
+                        f"Deposit {shortfall//10**18} AFF → Hub",
+                        dry_run=dry_run,
+                    )
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                else:
+                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                        tx_hashes=tx_hashes,
+                                        notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {shortfall//10**18}")
+
+            # ── Step 2: mintLPAndSell — single TX: Purchase(AFF→GIBS) + LP + sell ──
             gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
             wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
 
@@ -524,16 +521,17 @@ class DSSEngine(EngineBase):
             min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
 
             log.info(
-                "E2: harvestPreloaded(lp=%d%%, burn=%d%%, lpDex=%d, "
+                "E2: mintLPAndSell(%d, lp=%d%%, burn=%d%%, lpDex=%d, "
                 "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS)",
-                lp_bps / 100, HARVEST_BURN_BPS / 100,
+                mint_count, lp_bps / 100, HARVEST_BURN_BPS / 100,
                 HARVEST_LP_DEX, min_sell_out / 1e18,
                 [a[-6:] for a in sell_path], sell_dex,
                 wpls_needed / 1e18,
             )
 
             r = send_tx(
-                hub.functions.harvestPreloaded(
+                hub.functions.mintLPAndSell(
+                    mint_count,
                     lp_bps,
                     HARVEST_BURN_BPS,
                     HARVEST_LP_DEX,
@@ -541,7 +539,7 @@ class DSSEngine(EngineBase):
                     sell_path,
                     sell_dex,
                 ),
-                f"harvestPreloaded(LP={lp_bps/100:.0f}%, "
+                f"mintLPAndSell({mint_count}, LP={lp_bps/100:.0f}%, "
                 f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
                 dry_run=dry_run,
                 value=wpls_needed,
@@ -550,7 +548,7 @@ class DSSEngine(EngineBase):
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            log.info("E2 complete: %d GIBS — %d%% LP, %d%% sold (3 TXs)",
+            log.info("E2 complete: %d GIBS — %d%% LP, %d%% sold",
                      mint_count, lp_bps / 100, HARVEST_SELL_BPS / 100)
 
             return EngineResult(
