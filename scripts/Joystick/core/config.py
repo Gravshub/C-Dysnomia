@@ -108,7 +108,10 @@ TGSV8 = os.getenv("TGSV8_ADDRESS", "")
 TGSV8PLUS = os.getenv("TGSV8PLUS_ADDRESS", "")
 
 # JoystickHub (modular proxy for harvest + AFF acquisition + Purchase arb)
-JOYSTICK_HUB = os.getenv("JOYSTICK_HUB_ADDRESS", "")
+# Deployed at block 26,092,219 — owner=Joey, modules: Harvest, Affection, Purchase
+JOYSTICK_HUB = os.getenv(
+    "JOYSTICK_HUB_ADDRESS", "0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14"
+)
 if JOYSTICK_HUB:
     JOYSTICK_HUB = Web3.to_checksum_address(JOYSTICK_HUB)
 
@@ -205,6 +208,9 @@ CACHE_TTL      = int(os.getenv("CACHE_TTL",       "3600"))
 # Minimum PLS profit to bother executing (in wei)
 MIN_PROFIT_WEI = int(Decimal(os.getenv("MIN_PROFIT_PLS", "5")) * Decimal(10**18))
 
+
+# ── Cycle Timeout ────────────────────────────────────────────────────────────
+CYCLE_TIMEOUT = int(os.getenv("CYCLE_TIMEOUT", "90"))  # seconds
 
 # ── Supply Oracle ────────────────────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
