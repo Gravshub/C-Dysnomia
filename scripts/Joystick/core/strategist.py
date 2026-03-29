@@ -421,7 +421,11 @@ class Strategist:
             score -= 1.0
 
         # 7. Profit/loss check
-        if profit_pls <= gas_pls and engine.name not in STRATEGIC_ENGINES:
+        # Engines with unlock potential (ARM, DEPLOY, STITCH) are infrastructure
+        # investments — don't penalize them for having profit=0.
+        unlock_key = (engine.name, mode) if mode else None
+        has_unlock = unlock_key and unlock_key in UNLOCK_MAP
+        if profit_pls <= gas_pls and engine.name not in STRATEGIC_ENGINES and not has_unlock:
             risks.append("Unprofitable (profit <= gas)")
             score -= 5.0
 
