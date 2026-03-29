@@ -525,8 +525,17 @@ class TokenFactoryEngine(EngineBase):
             timestamp=now,
         )
 
+    # Cache TTL for dual sim — economics don't change in <60s
+    _DUAL_SIM_TTL = 60
+
     def _build_dual_sim(self) -> DualSimResult:
-        """Build full dual-mode simulation."""
+        """Build full dual-mode simulation. Cached for _DUAL_SIM_TTL seconds."""
+        # Return cached result if fresh enough (avoids RPC storms in parallel sim)
+        if (self._last_dual_sim is not None
+                and hasattr(self._last_dual_sim, '_timestamp')
+                and time.time() - self._last_dual_sim._timestamp < self._DUAL_SIM_TTL):
+            return self._last_dual_sim
+
         gas_price = w3_read.eth.gas_price
         if gas_price > GAS_PRICE_CEIL:
             return DualSimResult(gas_price=gas_price)
@@ -565,6 +574,7 @@ class TokenFactoryEngine(EngineBase):
             gas_price=gas_price,
             block=block,
         )
+        result._timestamp = time.time()
         self._last_dual_sim = result
         return result
 

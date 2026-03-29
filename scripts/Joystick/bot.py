@@ -54,7 +54,7 @@ load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
     JOEY_WALLET, AFFECTION, WPLS, GIBS_LAU, PULSEX_V1_ROUTER, TGSV8PLUS, JOYSTICK_HUB,
-    CYCLE_DELAY, PROFIT_SPLIT, PLS_GAS_FLOOR, MAX_SLIPPAGE, AdaptiveDelay,
+    CYCLE_DELAY, CYCLE_TIMEOUT, PROFIT_SPLIT, PLS_GAS_FLOOR, MAX_SLIPPAGE, AdaptiveDelay,
 )
 from .core.chain import snapshot_balances, router_contract, w3_submit, rpc_health, get_read_pool
 from .core.wallet import reset_nonce, fmt_pls, pls_balance
@@ -110,7 +110,11 @@ class DysnomiaBot:
             log.info("--single-wallet: forcing single-wallet mode")
 
         # Engine priority is determined by Strategist scoring each cycle.
-        self.engines = [
+        # ENGINE_EXCLUDE: comma-separated engine names to skip (e.g. "Beat,LAU")
+        exclude = set(
+            n.strip() for n in os.getenv("ENGINE_EXCLUDE", "").split(",") if n.strip()
+        )
+        all_engines = [
             ArbEngine(),
             DSSEngine(),
             BeatEngine(with_cheon=True),
@@ -120,6 +124,9 @@ class DysnomiaBot:
             SpineRunnerEngine(),
             PhreakEngine(),
         ]
+        self.engines = [e for e in all_engines if e.name not in exclude]
+        if exclude:
+            log.info("ENGINE_EXCLUDE: disabled %s", ", ".join(sorted(exclude)))
 
         # Active intelligence layer V2
         self.strategist = Strategist(
@@ -150,6 +157,32 @@ class DysnomiaBot:
 
     # ── Public entry points ────────────────────────────────────────────────────
 
+    def _warmup_approvals(self) -> None:
+        """Pre-approve common token→router pairs on TGSv8 to prevent transferFrom reverts."""
+        from .core.config import TGSV8, PULSEX_V1_ROUTER, PULSEX_V2_ROUTER
+        if not TGSV8 or self.dry_run:
+            return
+        try:
+            from .core.chain import tgsv8_contract, safe, erc20
+            tgsv8 = tgsv8_contract(w3=w3_submit)
+            routers = [PULSEX_V1_ROUTER, PULSEX_V2_ROUTER]
+            # Check WPLS allowance to each router — if zero, approve
+            for router in routers:
+                wpls_allowance = safe(
+                    erc20(WPLS),
+                    "allowance",
+                    TGSV8,
+                    router,
+                ) or 0
+                if wpls_allowance == 0:
+                    log.info("Warming up: TGSv8 approveMax(WPLS, %s)", router[:10])
+                    send_tx(
+                        tgsv8.functions.approveMax(WPLS, router),
+                        f"Warmup: WPLS → {router[:10]}",
+                    )
+        except Exception as exc:
+            log.warning("Approval warmup failed (non-fatal): %s", exc)
+
     def run_forever(self) -> None:
         """Main loop. Ctrl-C to stop gracefully."""
         mode = "interactive" if self.strategist.interactive else "auto"
@@ -165,6 +198,9 @@ class DysnomiaBot:
             "loops": [l.name for l in self.loops],
         })
 
+        # Startup: pre-approve common token→router pairs on TGSv8
+        self._warmup_approvals()
+
         # Use asyncio event loop for the main cycle
         try:
             asyncio.run(self._async_run_forever())
@@ -178,7 +214,15 @@ class DysnomiaBot:
         """Async main loop."""
         while True:
             try:
-                outcome = await self._async_run_cycle()
+                outcome = await asyncio.wait_for(
+                    self._async_run_cycle(),
+                    timeout=CYCLE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                log.error("Cycle %d TIMED OUT after %ds — skipping", self.cycle, CYCLE_TIMEOUT)
+                _events.log("bot.cycle_timeout", success=False,
+                            data={"cycle": self.cycle, "timeout_s": CYCLE_TIMEOUT})
+                outcome = "failure"
             except KeyboardInterrupt:
                 raise
             except GasTooHigh as exc:
