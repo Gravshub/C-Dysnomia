@@ -100,7 +100,8 @@ MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA1
 
 # TGSv8 — Active execution layer (Token Factory + WM Minting + Dual DEX)
 # Supersedes TGSv5 (WM-only) and TGSv7 (no mintWM). See data/events/tgs_deprecation_log.json.
-TGSV8 = os.getenv("TGSV8_ADDRESS", "")
+# TGSv8 deployed at block 25,943,194 — owner=Joey, active execution substrate
+TGSV8 = os.getenv("TGSV8_ADDRESS", "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32")
 
 # ── TGSv8+ — Companion contract for daily harvest pipeline ──────────────
 # Handles: silent minting, atomic harvestCycle, LP burns, removeLiquidity,
