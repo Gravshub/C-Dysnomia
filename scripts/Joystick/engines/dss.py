@@ -503,6 +503,7 @@ class DSSEngine(EngineBase):
                         hub.functions.deposit(aff_cs, shortfall),
                         f"Deposit {shortfall//10**18} AFF → Hub",
                         dry_run=dry_run,
+                        skip_simulate=True,  # approve just landed — read RPC may lag
                     )
                     if r:
                         tx_hashes.append(r["transactionHash"].hex())
@@ -512,7 +513,18 @@ class DSSEngine(EngineBase):
                                         tx_hashes=tx_hashes,
                                         notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {shortfall//10**18}")
 
-            # ── Step 2: mintLPAndSell — single TX: Purchase(AFF→GIBS) + LP + sell ──
+            # ── Step 2: primeGibs — Generate() × N to build GIBS_LAU self-balance ──
+            log.info("E2: primeGibs(%d)", mint_count)
+            r = send_tx(
+                hub.functions.primeGibs(mint_count),
+                f"primeGibs({mint_count})",
+                dry_run=dry_run,
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # ── Step 3: mintLPAndSell — Purchase(AFF→GIBS) + LP + sell ──
             gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
             wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
 
