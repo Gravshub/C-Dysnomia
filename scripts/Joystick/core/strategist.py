@@ -67,10 +67,9 @@ REVENUE_ENGINES = {"DSS"}
 # ── Cross-Engine Dependency Map (Phase F) ─────────────────────────────────────
 # When an engine+mode unlocks another engine, score the unlock bonus.
 UNLOCK_MAP: dict[tuple[str, str], list[str]] = {
-    ("PHR3AK", "arm"):    ["SpineRunner"],   # ARM acquires OZZY → E7 unlocked
+    ("PHR3AK", "arm"):    ["SpineRunner"],   # ARM acquires OZZY/BAR → E7 unlocked
     ("PHR3AK", "deploy"): ["Arb"],           # new V4 pair → new arb edge
-    ("PHR3AK", "stitch"): ["Arb"],           # new LP pair → new arb edge
-    ("DSS", "harvest"):   ["Arb"],           # harvestCycle burns LP → permanent arb edges for RAZOR
+    ("PHR3AK", "stitch"): ["Arb", "TreasurySniper"],  # new LP pair → arb + treasury exit routes
 }
 
 # Default unlock bonus for engines with no historical data
