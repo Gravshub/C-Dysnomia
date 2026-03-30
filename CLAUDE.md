@@ -418,7 +418,8 @@ C-Dysnomia is our fork of `atropa_pulsechain`. It adds:
 | JV8A | `0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30` | 25,943,266 | V4 treasury token (unminted) |
 | DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | 25,887,000 | DysnomiaSelfSnipev4 for GIBS |
 | **JoystickHub** | **`0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14`** | 26,092,219 | **ACTIVE** modular proxy (replaces TGSv8+ for E2) |
-| Hub:Harvest | `0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2` | 26,092,219 | HarvestModule (primeGibs, mintLPAndSell, batchReseed) |
+| Hub:Harvest V1 | `0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2` | 26,092,219 | DEAD — primeGibs called Generate() (AFFECTION-only, not on LAU) |
+| **Hub:Harvest V2** | **`0x400D052FAf0f46D3d5140a8F7246B69954539424`** | 26,149,418 | **ACTIVE** HarvestModule — primeGibs calls mintToCap() |
 | Hub:Affection | `0xfb7C1A1Ef0Ce8AB527998a1c2Ca12C6CA400da4B` | 26,092,219 | AffectionModule (buyAffection, quoteBuyAffection) |
 | Hub:Purchase | `0xc59cb7229872E72B7349Ef7DFa170A2444a8264E` | 26,092,219 | PurchaseModule (purchaseAndSell, batchPurchaseAndSell) |
 

@@ -73,10 +73,11 @@ interface IUniswapV2Pair {
     function totalSupply() external view returns (uint256);
 }
 
-/// @dev Dysnomia token interface — Purchase, Generate, and Claim
+/// @dev Dysnomia token interface — Purchase, Generate, mintToCap, and Claim
 interface IDysnomiaToken is IERC20 {
     function Purchase(address _t, uint256 _a) external;
     function Generate() external returns (uint64);
+    function mintToCap() external;
     function Claim(address Contract, uint256 Amount) external;
     function Parent() external view returns (address);
     function Debenture() external view returns (bool);
@@ -364,13 +365,15 @@ contract HarvestModule is HubStorage {
         require(ok && (data.length == 0 || abi.decode(data, (bool))), "harv:transfer");
     }
 
-    /// @notice Prime GIBS_LAU self-balance by calling Generate() N times.
+    /// @notice Prime active LAU self-balance by calling mintToCap() N times.
+    ///         Config key "harvest.gibsLau" = address of the active LAU token.
+    ///         Requires Hub to be in the LAU's MultiOwnable owner mapping.
     function primeGibs(uint256 count) external onlyAuth whenNotPaused {
         address gibsLau = address(uint160(_config[keccak256("harvest.gibsLau")]));
         require(gibsLau != address(0), "harv:gibsLau not set");
 
         for (uint256 i; i < count; ++i) {
-            IDysnomiaToken(gibsLau).Generate();
+            IDysnomiaToken(gibsLau).mintToCap();
         }
         emit GibsPrimed(count);
     }
