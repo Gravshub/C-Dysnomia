@@ -116,6 +116,10 @@ JOYSTICK_HUB = os.getenv(
 if JOYSTICK_HUB:
     JOYSTICK_HUB = Web3.to_checksum_address(JOYSTICK_HUB)
 
+# HarvestModuleV2 — primeGibs calls mintToCap() instead of Generate()
+# Deployed block 26,149,418. Replaces V1 at 0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2.
+HARVEST_MODULE_V2 = Web3.to_checksum_address("0x400D052FAf0f46D3d5140a8F7246B69954539424")
+
 # ── E2 Harvest Cycle Configuration ──────────────────────────────────────
 # All values in basis points (0-10000). Override via env vars.
 # Default strategy: 45% sell for PLS, 55% re-LP, burn 90% of new LP tokens.

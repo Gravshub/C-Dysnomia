@@ -11,7 +11,7 @@ Hub at 0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14 (block 26,092,219).
 HarvestModule via delegatecall.
 
 Two-TX pipeline:
-  TX1: hub.primeGibs(N) — calls GIBS_LAU.Generate() × N to prime self-balance
+  TX1: hub.primeGibs(N) — calls GIBS_LAU.mintToCap() × N to prime self-balance
   TX2: hub.mintLPAndSell{value: wplsNeeded}(N, lpBps, burnBps, lpDex, minSellOut, sellPath, sellDex)
        - Purchase(AFF, N) extracts GIBS from primed self-balance
        - LP first: 50% GIBS + proportional WPLS → addLiquidity (undisturbed price)
@@ -58,7 +58,7 @@ from ..oracle.price import get_amounts_out, get_amounts_out_v2
 log = get_logger(__name__)
 
 # Gas estimates
-PRIME_GAS_ESTIMATE = 200_000      # primeGibs(17) via Generate() × 17
+PRIME_GAS_ESTIMATE = 200_000      # primeGibs(17) via mintToCap() × 17
 HARVEST_GAS_ESTIMATE = 550_000    # mintLPAndSell with LP + sell (~550K est)
 TOTAL_GAS_ESTIMATE = PRIME_GAS_ESTIMATE + HARVEST_GAS_ESTIMATE
 
@@ -555,6 +555,7 @@ class DSSEngine(EngineBase):
                 f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
                 dry_run=dry_run,
                 value=wpls_needed,
+                skip_simulate=True,  # payable — simulate() doesn't pass msg.value
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
