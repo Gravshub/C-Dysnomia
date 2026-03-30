@@ -27,8 +27,52 @@ from . import wallet
 
 log = get_logger(__name__)
 
+# ── EIP-1559 Gas Strategy ────────────────────────────────────────────────────
+# PulseChain supports EIP-1559 (Type 2) transactions. Legacy gasPrice TXs
+# overpay when base fee drops and underpay when it spikes. EIP-1559 sets a
+# ceiling (maxFeePerGas) and a tip (maxPriorityFeePerGas). You only pay
+# base_fee + tip; the ceiling protects against block-to-block variance.
+#
+# Tiers (priority tip as % of base fee):
+#   slow:     0% tip  — lands in 3-5 blocks
+#   standard: 5% tip  — lands in 1-3 blocks
+#   fast:     25% tip — next block (P75 priority)
+#
+# maxFeePerGas set to 2x base fee — absorbs spikes, excess refunded.
+
+_GAS_TIERS = {"slow": 0, "standard": 5, "fast": 25}
+
+
+def build_gas_params(tier: str = "fast", w3=None) -> dict:
+    """Return EIP-1559 Type 2 gas parameters for the given speed tier."""
+    _w3 = w3 or get_submit_pool().call(lambda w: w)
+    base_fee = _w3.eth.get_block("latest")["baseFeePerGas"]
+
+    tip_pct = _GAS_TIERS.get(tier, 25)
+    priority_fee = base_fee * tip_pct // 100
+    max_fee = base_fee * 2  # 2x ceiling absorbs 2-3 block base fee swings
+
+    # Floor: minimum 1 wei priority to avoid stuck TXs
+    priority_fee = max(priority_fee, 1)
+
+    return {
+        "maxFeePerGas": max_fee,
+        "maxPriorityFeePerGas": priority_fee,
+        "type": 2,
+    }
+
 # ERC20 Transfer event signature (keccak256)
 TRANSFER_SIG = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def _reset_nonce_for(wallet_ctx) -> None:
+    """Force nonce re-fetch from chain for the wallet that just failed."""
+    if wallet_ctx is not None and hasattr(wallet_ctx, 'nonce_tracker') and wallet_ctx.nonce_tracker:
+        wallet_ctx.nonce_tracker.reset()
+        log.info("  Nonce reset for %s (will re-fetch from chain)", wallet_ctx.address[:10])
+    else:
+        wallet.reset_nonce()
+        log.info("  Nonce reset for Joey (will re-fetch from chain)")
 
 
 def send_tx(
@@ -88,7 +132,7 @@ def send_tx(
     if tx_account is None:
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
 
-    # Step 2: Gas price ceiling
+    # Step 2: Gas price ceiling check (use base fee as the reference)
     gas_price = get_submit_pool().call(lambda w3: w3.eth.gas_price)
     if gas_price > GAS_PRICE_CEIL:
         raise GasTooHigh(
@@ -99,11 +143,14 @@ def send_tx(
     # Step 3: estimate_gas (abort if fails)
     gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
     gas_limit = int(gas_est * gas_mult)
-    cost_pls = gas_est * gas_price / 1e18
-    log.info("  ⛽ Gas: %d  Beats: %.2f  Cost: %.4f PLS", gas_est, gas_price / 1e9, cost_pls)
 
-    # Step 4: Build TX with local nonce
-    # Use wallet_ctx's nonce tracker if available, else fall back to Joey's global nonce
+    # Step 3b: Build EIP-1559 gas params
+    eip1559 = build_gas_params("fast")
+    cost_pls = gas_est * eip1559["maxFeePerGas"] / 1e18
+    log.info("  ⛽ Gas: est=%d  limit=%d (%.1fx)  maxFee=%.0f Beats  Cost≤%.4f PLS",
+             gas_est, gas_limit, gas_mult, eip1559["maxFeePerGas"] / 1e9, cost_pls)
+
+    # Step 4: Build TX with local nonce + EIP-1559 Type 2
     if wallet_ctx is not None and hasattr(wallet_ctx, 'nonce_tracker') and wallet_ctx.nonce_tracker:
         nonce = wallet_ctx.nonce_tracker.next()
     else:
@@ -113,8 +160,8 @@ def send_tx(
         "from":     tx_from,
         "nonce":    nonce,
         "gas":      gas_limit,
-        "gasPrice": gas_price,
         "chainId":  CHAIN_ID,
+        **eip1559,  # maxFeePerGas + maxPriorityFeePerGas + type=2
     }
     if value > 0:
         tx_params["value"] = value
@@ -139,6 +186,8 @@ def send_tx(
         )
     except TimeExhausted:
         log.error("  Receipt timeout — TX 0x%s may still be pending", tx_hash_hex)
+        # Nonce recovery: force re-fetch from chain next cycle
+        _reset_nonce_for(wallet_ctx)
         raise
 
     status = receipt["status"]
@@ -149,7 +198,10 @@ def send_tx(
         receipt["gasUsed"],
     )
 
-    assert status == 1, f"{label} REVERTED — tx: 0x{tx_hash_hex}"
+    if status != 1:
+        # On-chain revert: nonce was consumed, but reset to re-sync
+        _reset_nonce_for(wallet_ctx)
+        raise AssertionError(f"{label} REVERTED — tx: 0x{tx_hash_hex}")
 
     # Step 6: Log Transfer events for exact amounts
     _log_transfers(receipt)
