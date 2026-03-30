@@ -100,23 +100,24 @@ class TreasurySniperEngine(EngineBase):
     # ── EngineBase interface ───────────────────────────────────────────────
 
     def is_ready(self) -> bool:
-        """Ready when TGSv8 is set, recon data exists, and we have WPLS."""
+        """Ready when TGSv8 is set and recon data exists with profitable targets."""
         if not TGSV8:
             log.debug("E6: TGSV8_ADDRESS not set")
             return False
+
+        # Auto-refresh stale recon data (>24h old)
+        self._maybe_refresh_recon()
+
         if not os.path.exists(self._recon_path):
             log.debug("E6: recon_results.json not found — run treasury_recon.py first")
             return False
-        try:
-            tgsv8 = tgsv8_contract()
-            wpls_bal = safe(tgsv8, "bal", Web3.to_checksum_address(WPLS)) or 0
-            native_bal = safe(tgsv8, "nativeBal") or 0
-            if wpls_bal + native_bal < 100 * 10**18:
-                log.debug("E6: TGSv8 working balance too low (WPLS=%.1f)", wpls_bal / 1e18)
-                return False
-        except Exception as e:
-            log.debug("E6: TGSv8 check failed: %s", e)
+
+        # Load targets to check if any are profitable
+        self._refresh_targets()
+        if not self._targets:
+            log.debug("E6: no profitable treasury targets in recon data")
             return False
+
         return True
 
     def simulate(self) -> tuple[int, int]:
@@ -170,6 +171,33 @@ class TreasurySniperEngine(EngineBase):
                                 notes=str(e))
 
     # ── Internal mechanics ────────────────────────────────────────────────
+
+    def _maybe_refresh_recon(self):
+        """Re-run treasury recon if data is >24h stale."""
+        if not os.path.exists(self._recon_path):
+            self._run_recon()
+            return
+        mtime = os.path.getmtime(self._recon_path)
+        if time.time() - mtime > 86400:  # 24 hours
+            log.info("E6: recon data >24h stale — refreshing")
+            self._run_recon()
+
+    def _run_recon(self):
+        """Shell out to treasury_recon.py."""
+        import subprocess
+        import sys
+        recon_script = os.path.join(
+            os.path.dirname(__file__), "..", "data", "treasury_recon.py"
+        )
+        if os.path.exists(recon_script):
+            log.info("E6: running treasury_recon.py (timeout 300s)")
+            subprocess.run(
+                [sys.executable, recon_script],
+                timeout=300,
+                check=False,
+            )
+        else:
+            log.debug("E6: treasury_recon.py not found at %s", recon_script)
 
     def _refresh_targets(self):
         """Load/refresh recon data. Respects TTL cache."""
