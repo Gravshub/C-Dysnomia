@@ -44,7 +44,7 @@ ENGINE_WALLET_ROLES: dict[str, str] = {
     "Beat":           "joey",
     "TokenFactory":   "minter",
     "LAU":            "joey",
-    "TreasurySniper": "minter",
+    "TreasurySniper": "joey",
     "SpineRunner":    "minter",
     "PHR3AK":         "minter",
 }
