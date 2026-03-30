@@ -101,7 +101,9 @@ MULTICALL3 = Web3.to_checksum_address("0xcA11bde05977b3631167028862bE2a173976CA1
 # TGSv8 — Active execution layer (Token Factory + WM Minting + Dual DEX)
 # Supersedes TGSv5 (WM-only) and TGSv7 (no mintWM). See data/events/tgs_deprecation_log.json.
 # TGSv8 deployed at block 25,943,194 — owner=Joey, active execution substrate
-TGSV8 = os.getenv("TGSV8_ADDRESS", "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32")
+TGSV8 = Web3.to_checksum_address(
+    os.getenv("TGSV8_ADDRESS", "0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32")
+)
 
 # ── TGSv8+ — Companion contract for daily harvest pipeline ──────────────
 # Handles: silent minting, atomic harvestCycle, LP burns, removeLiquidity,
@@ -119,6 +121,11 @@ if JOYSTICK_HUB:
 # HarvestModuleV2 — primeGibs calls mintToCap() instead of Generate()
 # Deployed block 26,149,418. Replaces V1 at 0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2.
 HARVEST_MODULE_V2 = Web3.to_checksum_address("0x400D052FAf0f46D3d5140a8F7246B69954539424")
+AFFECTION_MODULE  = Web3.to_checksum_address("0xfb7C1A1Ef0Ce8AB527998a1c2Ca12C6CA400da4B")
+PURCHASE_MODULE   = Web3.to_checksum_address("0xc59cb7229872E72B7349Ef7DFa170A2444a8264E")
+
+# ── GIBS LP Pairs ────────────────────────────────────────────────────────────
+GIBS_WPLS_V2_PAIR = Web3.to_checksum_address("0x7BCa1c997c475eac9c61417e88bed158ACA757f0")
 
 # ── E2 Harvest Cycle Configuration ──────────────────────────────────────
 # All values in basis points (0-10000). Override via env vars.
@@ -201,7 +208,7 @@ GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "2000000")) * 10**9
 # DEX slippage tolerance
 MAX_SLIPPAGE   = float(os.getenv("MAX_SLIPPAGE",  "0.02"))
 # Gas estimate multiplier (safety buffer)
-GAS_MULT       = float(os.getenv("GAS_MULT",      "1.3"))
+GAS_MULT       = float(os.getenv("GAS_MULT",      "2.5"))
 # Seconds between bot cycles (base for adaptive delay)
 CYCLE_DELAY      = int(os.getenv("CYCLE_DELAY",       "30"))
 # Adaptive delay bounds and backoff factor
