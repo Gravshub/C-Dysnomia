@@ -624,6 +624,10 @@ def main() -> None:
                         help="Run only the Beat engine (diagnostics)")
     parser.add_argument("--lau-only", action="store_true",
                         help="Run only the LAU engine (ABUPRU sequence)")
+    parser.add_argument("--e2-only", action="store_true",
+                        help="Run single E2 Hub harvest cycle and exit")
+    parser.add_argument("--e6-only", action="store_true",
+                        help="Run single E6 treasury snipe and exit")
     parser.add_argument("--log-status", action="store_true",
                         help="Print event log statistics and recent events")
     parser.add_argument("--rpc-status", action="store_true",
@@ -706,6 +710,42 @@ def main() -> None:
         result = engine.execute(dry_run=args.dry_run)
         _events.log_engine_result("LAU", result)
         print(f"LAU result: success={result.success} gas={result.gas_pls:.4f} PLS "
+              f"txs={len(result.tx_hashes)} notes={result.notes}")
+        return
+
+    if args.e2_only:
+        engine = next((e for e in bot.engines if e.name == "DSS"), None)
+        if not engine:
+            print("E2 DSS engine not found (excluded?)")
+            return
+        print(f"Running E2 CEREAL ({'dry-run' if args.dry_run else 'LIVE'})...")
+        print(f"  Ready: {engine.is_ready()}")
+        try:
+            sim_profit, sim_gas = engine.simulate()
+            print(f"  Simulate: profit={sim_profit/1e18:.4f} PLS, gas={sim_gas/1e18:.4f} PLS")
+        except Exception as e:
+            print(f"  Simulate: {e}")
+        result = engine.execute(dry_run=args.dry_run)
+        _events.log_engine_result("DSS", result)
+        print(f"  Result: success={result.success} net={result.net_pls:.4f} PLS "
+              f"txs={len(result.tx_hashes)} notes={result.notes}")
+        return
+
+    if args.e6_only:
+        engine = next((e for e in bot.engines if e.name == "TreasurySniper"), None)
+        if not engine:
+            print("E6 TreasurySniper engine not found (excluded?)")
+            return
+        print(f"Running E6 DaVINCI ({'dry-run' if args.dry_run else 'LIVE'})...")
+        print(f"  Ready: {engine.is_ready()}")
+        try:
+            sim_profit, sim_gas = engine.simulate()
+            print(f"  Simulate: profit={sim_profit/1e18:.4f} PLS, gas={sim_gas/1e18:.4f} PLS")
+        except Exception as e:
+            print(f"  Simulate: {e}")
+        result = engine.execute(dry_run=args.dry_run)
+        _events.log_engine_result("TreasurySniper", result)
+        print(f"  Result: success={result.success} net={result.net_pls:.4f} PLS "
               f"txs={len(result.tx_hashes)} notes={result.notes}")
         return
 
