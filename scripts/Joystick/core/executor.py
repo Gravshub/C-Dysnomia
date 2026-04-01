@@ -176,18 +176,41 @@ def send_tx(
         tx_hash_hex = signed.hash.hex()
     log.info("  TX: 0x%s", tx_hash_hex)
 
-    # Wait for receipt — use read pool (reliable indexing) not submit pool
-    from .chain import get_read_pool
+    # Wait for receipt — try read pool first, then fallback to nonce-based confirmation.
+    # RPCPool nodes may drop TX hashes, so wait_for_transaction_receipt can hang on a node
+    # that never saw the TX. On timeout, check if nonce advanced (TX mined elsewhere).
+    from .chain import get_read_pool, w3_read
     tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
+    receipt = None
     try:
         receipt = get_read_pool().call(
-            lambda w3: w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=300)
+            lambda w3: w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=60)
         )
-    except TimeExhausted:
-        log.error("  Receipt timeout — TX 0x%s may still be pending", tx_hash_hex)
-        # Nonce recovery: force re-fetch from chain next cycle
-        _reset_nonce_for(wallet_ctx)
-        raise
+    except (TimeExhausted, Exception) as exc:
+        # Check if nonce advanced — TX may have mined but this node lost the hash
+        try:
+            on_chain_nonce = w3_read.eth.get_transaction_count(tx_from)
+            if on_chain_nonce > nonce:
+                log.warning("  Receipt timeout but nonce advanced (%d→%d) — TX likely mined", nonce, on_chain_nonce)
+                # Try fetching receipt from w3_read directly
+                try:
+                    receipt = w3_read.eth.get_transaction_receipt(tx_hash_bytes)
+                except Exception:
+                    log.warning("  Could not fetch receipt for 0x%s — treating as success (nonce consumed)", tx_hash_hex)
+                    _reset_nonce_for(wallet_ctx)
+                    return None  # Nonce consumed, TX likely succeeded
+            else:
+                log.error("  Receipt timeout and nonce unchanged — TX 0x%s may be stuck", tx_hash_hex)
+                _reset_nonce_for(wallet_ctx)
+                raise exc
+        except Exception as inner_exc:
+            if receipt is None:
+                log.error("  Receipt timeout — TX 0x%s may still be pending: %s", tx_hash_hex, inner_exc)
+                _reset_nonce_for(wallet_ctx)
+                raise exc
+
+    if receipt is None:
+        return None
 
     status = receipt["status"]
     log.info(
