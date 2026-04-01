@@ -176,12 +176,10 @@ class RPCPool:
 
     def send_raw(self, signed_tx) -> str:
         """
-        Submit a signed transaction by broadcasting to ALL Tier 1 providers.
-        This maximizes propagation — a TX accepted by one node but not others
-        can get stuck in limbo. Broadcasting to all ensures at least one
-        propagates to miners/validators.
+        Submit a signed transaction via the best healthy Tier 1 provider.
+        Fails over to next provider on error. Stops on first acceptance.
 
-        Returns: tx_hash hex string
+        Returns: tx_hash hex string, or None if TX already in mempool.
         """
         ranked = [p for p in self._ranked_providers() if p.tier <= 1]
         if not ranked:
@@ -192,11 +190,7 @@ class RPCPool:
         if not ranked:
             raise RPCAllProvidersDown("No healthy submit providers")
 
-        hash_hex = None
         last_error = None
-        accepted_by = []
-
-        # Broadcast to ALL providers — don't stop on first success
         for provider in ranked:
             try:
                 t0 = time.time()
@@ -204,31 +198,21 @@ class RPCPool:
                 latency = time.time() - t0
                 provider.record_success(latency)
                 h = tx_hash.hex() if hasattr(tx_hash, 'hex') else tx_hash
-                if hash_hex is None:
-                    hash_hex = h
-                accepted_by.append(provider.name)
+                log.info("TX submitted to %s: %s", provider.name, h)
+                return h
             except Exception as e:
                 err_str = str(e).lower()
                 if "nonce too low" in err_str:
-                    if hash_hex:
-                        break  # already accepted elsewhere
-                    raise
-                if "replacement transaction underpriced" in err_str:
-                    if hash_hex:
-                        break
-                    raise
+                    raise  # nonce consumed on-chain, no retry
                 if "already known" in err_str:
-                    accepted_by.append(f"{provider.name}(dup)")
-                    continue
+                    log.info("TX already in %s mempool", provider.name)
+                    return None  # executor handles None → uses signed.hash
                 provider.record_failure()
                 last_error = e
+                log.warning("TX submit to %s failed: %s — trying next",
+                            provider.name, str(e)[:80])
 
-        if hash_hex:
-            log.info("TX broadcast to %s: %s", ", ".join(accepted_by), hash_hex)
-            return hash_hex
-
-        if last_error:
-            raise RPCAllProvidersDown(f"TX submission failed on all providers. Last: {last_error}")
+        raise RPCAllProvidersDown(f"TX submission failed on all providers. Last: {last_error}")
         return None
 
     def get_w3(self) -> Web3:
