@@ -213,7 +213,7 @@ GAS_MULT       = float(os.getenv("GAS_MULT",      "2.5"))
 CYCLE_DELAY      = int(os.getenv("CYCLE_DELAY",       "30"))
 # Adaptive delay bounds and backoff factor
 CYCLE_DELAY_MIN  = int(os.getenv("CYCLE_DELAY_MIN",   "15"))
-CYCLE_DELAY_MAX  = int(os.getenv("CYCLE_DELAY_MAX",   "300"))
+CYCLE_DELAY_MAX  = int(os.getenv("CYCLE_DELAY_MAX",   "90"))
 CYCLE_BACKOFF    = float(os.getenv("CYCLE_BACKOFF",    "1.5"))
 # QING cache TTL in seconds (1 hour)
 CACHE_TTL      = int(os.getenv("CACHE_TTL",       "3600"))
