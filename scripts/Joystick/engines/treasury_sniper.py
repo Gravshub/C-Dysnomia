@@ -192,11 +192,14 @@ class TreasurySniperEngine(EngineBase):
         if os.path.exists(recon_script):
             data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
             log.info("E6: running treasury_recon.py (timeout 300s)")
-            subprocess.run(
-                [sys.executable, recon_script, "--data-dir", data_dir],
-                timeout=300,
-                check=False,
-            )
+            try:
+                subprocess.run(
+                    [sys.executable, recon_script, "--data-dir", data_dir],
+                    timeout=300,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                log.warning("E6: treasury_recon.py timed out — using cached data")
         else:
             log.debug("E6: treasury_recon.py not found at %s", recon_script)
 
