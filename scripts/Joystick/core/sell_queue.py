@@ -71,6 +71,12 @@ class SellQueue:
             log.warning("SellQueue multicall failed: %s", exc)
             return self._targets
 
+        # Guard against partial multicall results
+        if len(balances) != len(known_tokens):
+            log.warning("SellQueue multicall partial: got %d/%d results",
+                        len(balances), len(known_tokens))
+            return self._targets
+
         targets = []
         for i, (addr, symbol) in enumerate(known_tokens):
             bal = balances[i] if balances[i] is not None else 0
