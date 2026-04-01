@@ -1,0 +1,14 @@
+{
+  "block": 26157470,
+  "scanned_at": "2026-03-30T19:51:53Z",
+  "tokens_scanned": 0,
+  "errors": 0,
+  "summary": {
+    "debenture_true": 0,
+    "with_dex_pairs": 0,
+    "with_backing": 0,
+    "total_opportunities": 0,
+    "estimated_total_pls": 0
+  },
+  "results": {}
+}

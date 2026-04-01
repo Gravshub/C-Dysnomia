@@ -87,30 +87,31 @@ class TestTreasurySniperUnit(unittest.TestCase):
         self.assertEqual(len(batch), 0)
 
     def test_refresh_targets_from_file(self):
-        """Verify targets are loaded from a recon file."""
+        """Verify targets are loaded from recon data."""
         addr = "0x" + "aa" * 20
         parent = "0x" + "bb" * 20
         recon = {
-            addr: {
-                "label": "TESTTOKEN",
-                "chain_data": {
-                    "selfBalance": int(10000e18),
-                    "parentBalance": int(5000e18),
-                    "pls_per_token": int(1e18),
-                    "parent": parent,
-                    "decimals": 18,
+            "results": {
+                addr: {
+                    "label": "TESTTOKEN",
+                    "chain_data": {
+                        "selfBalance": int(10000e18),
+                        "parentBalance": int(5000e18),
+                        "pls_per_token": int(1e18),
+                        "parent": parent,
+                        "decimals": 18,
+                    }
                 }
             }
         }
-        path = _make_recon_file(recon)
-        try:
-            self.e5._recon_path = path
-            self.e5._last_load = 0
+        self.e5._last_load = 0
+        with patch("scripts.Joystick.oracle.data_store.DataStore") as mock_ds_cls:
+            mock_ds = MagicMock()
+            mock_ds_cls.get.return_value = mock_ds
+            mock_ds.recon_data.return_value = recon
             self.e5._refresh_targets()
-            self.assertEqual(len(self.e5._targets), 1)
-            self.assertEqual(self.e5._targets[0].label, "TESTTOKEN")
-        finally:
-            os.unlink(path)
+        self.assertEqual(len(self.e5._targets), 1)
+        self.assertEqual(self.e5._targets[0].label, "TESTTOKEN")
 
     def test_status_line_returns_string(self):
         self.e5._last_load = float('inf')
@@ -169,10 +170,14 @@ class TestSpineRunnerUnit(unittest.TestCase):
         self.assertIn("SpineRunner", line)
 
     def test_refresh_loads_ozzy_fallback(self):
-        """With no v2_federal_tokens.json, should load OZZY fallback."""
+        """With no v2_federal_tokens.json and no cache, should load OZZY fallback."""
         self.e6._v2fed_path = "/tmp/nonexistent_v2_12345.json"
         self.e6._last_load = 0
-        self.e6._refresh_spines()
+        # Mock discovery and cache paths to return empty so we reach the OZZY fallback
+        with patch.object(self.e6, "_load_cached_spine_pairs", return_value=[]):
+            with patch.object(self.e6, "_discover_spine_pairs", return_value=[]):
+                with patch.object(self.e6, "_load_spines_from_recon", return_value=[]):
+                    self.e6._refresh_spines()
         self.assertEqual(len(self.e6._spines), 1)
         self.assertEqual(self.e6._spines[0].label, "OZZY")
         self.assertFalse(self.e6._spines[0].active)

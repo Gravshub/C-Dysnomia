@@ -1,0 +1,11 @@
+[      90ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5050/login:0
+[   15742ms] [LOG] SW registered:  ServiceWorkerRegistration @ http://localhost:5050/:133
+[   16288ms] [LOG] Setting up drag and drop handlers... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:70
+[   16290ms] [LOG] Setting up paste handler... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:128
+[   16319ms] [LOG] Input store initialized @ http://localhost:5050/components/chat/input/input-store.js:62
+[   27530ms] [LOG] User interaction detected - audio playback enabled @ http://localhost:5050/components/chat/speech/speech-store.js:144
+[   45202ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   49205ms] [LOG] Collapse step: process-step-2 @ http://localhost:5050/js/messages.js:1921
+[   50090ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   54092ms] [LOG] Collapse step: process-step-3 @ http://localhost:5050/js/messages.js:1921
+[   64596ms] [LOG] Collapse step: process-step-3dac9fcb-934e-4c79-a67c-3511a1007063 @ http://localhost:5050/js/messages.js:1921

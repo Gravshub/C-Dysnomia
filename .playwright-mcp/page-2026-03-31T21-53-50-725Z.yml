@@ -1,0 +1,114 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e5]:
+      - generic [ref=e51]:
+        - link "Agent Zero on GitHub" [ref=e53] [cursor=pointer]:
+          - /url: https://github.com/agent0ai/agent-zero
+          - generic [ref=e54]:
+            - img "Agent Zero" [ref=e55]
+            - img "Agent Zero" [ref=e56]
+        - generic [ref=e57]:
+          - button "Toggle Sidebar" [ref=e58] [cursor=pointer]:
+            - generic [ref=e59]: menu
+          - button "Dashboard" [ref=e60] [cursor=pointer]:
+            - generic [ref=e61]: home
+          - button "Plugins" [ref=e62] [cursor=pointer]:
+            - generic [ref=e63]: extension
+          - button "Settings" [ref=e64] [cursor=pointer]:
+            - generic [ref=e65]: settings
+          - button "More options" [ref=e66] [cursor=pointer]:
+            - generic [ref=e67]: expand_more
+      - generic [ref=e8]:
+        - generic [ref=e9]:
+          - generic [ref=e69]:
+            - generic [ref=e70]:
+              - heading "Chats" [level=3] [ref=e71]
+              - button "New Chat" [ref=e72] [cursor=pointer]:
+                - generic [ref=e73]: chat_add_on
+            - list [ref=e74]:
+              - listitem [ref=e721]:
+                - generic [ref=e725] [cursor=pointer]: "Chat #5"
+              - listitem [ref=e75]:
+                - generic [ref=e79] [cursor=pointer]: "Chat #4"
+              - listitem [ref=e80]:
+                - generic [ref=e84] [cursor=pointer]: "Chat #1"
+              - listitem [ref=e85]:
+                - generic [ref=e89] [cursor=pointer]: "Chat #3"
+              - listitem [ref=e90]:
+                - generic [ref=e94] [cursor=pointer]: "Chat #2"
+          - heading "Tasks" [level=3] [ref=e97] [cursor=pointer]:
+            - text: Tasks
+            - img [ref=e98]
+        - generic [ref=e101]:
+          - heading "Preferences" [level=3] [ref=e106] [cursor=pointer]:
+            - text: Preferences
+            - img [ref=e107]
+          - generic [ref=e109]: Version M v1.3 2026-03-27 14:19:50
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e110]:
+          - text: 9:53:50 pm
+          - generic [ref=e726]: Mar 31, 2026
+        - generic [ref=e114]:
+          - img "sync status"
+        - generic [ref=e119] [cursor=pointer]: notifications
+        - button "No project arrow_drop_down" [ref=e123] [cursor=pointer]:
+          - text: No project
+          - generic [ref=e124]: arrow_drop_down
+      - generic [ref=e729]:
+        - paragraph [ref=e732]:
+          - strong [ref=e733]: Hello! 👋
+          - text: ", I'm"
+          - strong [ref=e734]: Agent Zero
+          - text: ", your AI assistant. How can I help you today?"
+        - generic:
+          - button "Speak":
+            - generic: volume_up
+          - button "Copy":
+            - generic: content_copy
+          - button "Branch chat":
+            - generic: fork_right
+      - generic [ref=e24]:
+        - generic [ref=e26]:
+          - heading "|> Waiting for input" [level=4] [ref=e674]:
+            - generic [ref=e28]: "|>"
+            - generic [ref=e675]: Waiting for input
+          - generic [ref=e29]:
+            - generic "Chat navigation" [ref=e30]:
+              - button "vertical_align_top" [ref=e31] [cursor=pointer]:
+                - generic [ref=e32]: vertical_align_top
+              - button "keyboard_arrow_up" [ref=e33] [cursor=pointer]:
+                - generic [ref=e34]: keyboard_arrow_up
+              - button "keyboard_arrow_down" [ref=e35] [cursor=pointer]:
+                - generic [ref=e36]: keyboard_arrow_down
+              - button "vertical_align_bottom" [ref=e37] [cursor=pointer]:
+                - generic [ref=e38]: vertical_align_bottom
+            - button "neurology Default LLM expand_more" [ref=e737] [cursor=pointer]:
+              - generic [ref=e738]: neurology
+              - generic [ref=e739]: Default LLM
+              - generic [ref=e740]: expand_more
+        - generic [ref=e41]:
+          - generic [ref=e687]:
+            - button "More actions" [ref=e689] [cursor=pointer]:
+              - generic [ref=e690]: add
+            - generic [ref=e691]:
+              - textbox "Type your message here..." [active] [ref=e692]
+              - button "Expand input" [ref=e693] [cursor=pointer]:
+                - generic [ref=e694]: open_in_full
+            - generic [ref=e695]:
+              - button "Send message" [ref=e696] [cursor=pointer]:
+                - generic [ref=e697]: send
+              - button "Start/Stop recording" [ref=e698] [cursor=pointer]:
+                - img [ref=e699]
+          - generic [ref=e701]:
+            - button "Compact" [ref=e705] [cursor=pointer]:
+              - img [ref=e706]
+              - paragraph [ref=e711]: Compact
+            - button "Pause Agent" [ref=e712] [cursor=pointer]:
+              - img [ref=e713]
+              - generic [ref=e715]: Pause Agent
+            - button "Nudge" [ref=e716] [cursor=pointer]:
+              - img [ref=e717]
+              - paragraph [ref=e720]: Nudge
+  - tooltip "New Chat":
+    - generic: New Chat

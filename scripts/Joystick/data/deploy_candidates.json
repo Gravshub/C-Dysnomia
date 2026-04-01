@@ -1,0 +1,306 @@
+{
+  "_comment": "V4 treasury token candidates for E8 PHR3AK DEPLOY mode. Joey (Hackers 1995) + Dysnomia aesthetic.",
+  "_naming_rules": "Blend hacker culture, institutional parody, Dysnomia lore. Unicode welcome. Keep symbols 3-7 chars uppercase.",
+  "candidates": [
+    {
+      "name": "Teh Gibson Mainframe Authority",
+      "symbol": "GBSN",
+      "parent_strategy": "AFFECTION",
+      "note": "Joey's namesake — the Gibson supercomputer"
+    },
+    {
+      "name": "Federal Bureau of Phreaking",
+      "symbol": "FBOP",
+      "parent_strategy": "FED",
+      "note": "Phantom Phreak tribute — institutional phreaking"
+    },
+    {
+      "name": "Cereal Killer's Breakfast Fund",
+      "symbol": "CRKLR",
+      "parent_strategy": "AFFECTION",
+      "note": "Emmanuel Goldstein tribute"
+    },
+    {
+      "name": "Acoustic Coupler Administration",
+      "symbol": "ACA",
+      "parent_strategy": "FED",
+      "note": "300 baud modem nostalgia"
+    },
+    {
+      "name": "Cyberdelia Treasury Note",
+      "symbol": "CYBER",
+      "parent_strategy": "AFFECTION",
+      "note": "The club from Hackers"
+    },
+    {
+      "name": "Lord Nikon Memorial Archive",
+      "symbol": "NIKN",
+      "parent_strategy": "AFFECTION",
+      "note": "Photographic memory — Lord Nikon"
+    },
+    {
+      "name": "Zer0 Cool Federal Reserve",
+      "symbol": "ZCF",
+      "parent_strategy": "FED",
+      "note": "Dade Murphy's handle"
+    },
+    {
+      "name": "Teh Plague Containment Bureau",
+      "symbol": "PLGUE",
+      "parent_strategy": "FED",
+      "note": "The villain — Eugene Belford"
+    },
+    {
+      "name": "Razor & Blade Securities",
+      "symbol": "RZBLD",
+      "parent_strategy": "AFFECTION",
+      "note": "The rollerblading duo"
+    },
+    {
+      "name": "Hack Teh Planet Authority",
+      "symbol": "HTP",
+      "parent_strategy": "FED",
+      "note": "The rallying cry"
+    },
+    {
+      "name": "Pool on teh Roof Fund",
+      "symbol": "POOL",
+      "parent_strategy": "AFFECTION",
+      "note": "They knew there'd be a pool on the roof"
+    },
+    {
+      "name": "Type Cookie U Idiot",
+      "symbol": "COOKIE",
+      "parent_strategy": "AFFECTION",
+      "note": "Joey's most iconic line"
+    },
+    {
+      "name": "Motzkin Meridian Institute",
+      "symbol": "MOTZ",
+      "parent_strategy": "AFFECTION",
+      "note": "MotzkinPrime — the universal constant"
+    },
+    {
+      "name": "Hecke Coordinate Service",
+      "symbol": "HCKE",
+      "parent_strategy": "AFFECTION",
+      "note": "Number-theoretic coordinate system"
+    },
+    {
+      "name": "Phantom Phreaker's Tollbooth",
+      "symbol": "PHRK",
+      "parent_strategy": "FED",
+      "note": "Phone system exploitation"
+    },
+    {
+      "name": "Secret Service Laptop Seizure",
+      "symbol": "SSLS",
+      "parent_strategy": "FED",
+      "note": "The raid scene"
+    },
+    {
+      "name": "Ellingson Mineral Company",
+      "symbol": "ELMCO",
+      "parent_strategy": "FED",
+      "note": "The corporation they infiltrate"
+    },
+    {
+      "name": "Da Vinci Virus Containment",
+      "symbol": "DAVNC",
+      "parent_strategy": "AFFECTION",
+      "note": "The virus in the movie"
+    },
+    {
+      "name": "W㉾rm Traversal Authority",
+      "symbol": "WORM",
+      "parent_strategy": "FED",
+      "note": "Unicode worm — Dysnomia aesthetic"
+    },
+    {
+      "name": "Garbage File Recovery Scoiety",
+      "symbol": "GARB",
+      "parent_strategy": "AFFECTION",
+      "note": "Dumpster diving + Dysnomia misspelling"
+    },
+    {
+      "name": "BBS Sysop Treasury",
+      "symbol": "BBS",
+      "parent_strategy": "FED",
+      "note": "Bulletin board systems"
+    },
+    {
+      "name": "Teh Floppy Disk Archive",
+      "symbol": "FLOPY",
+      "parent_strategy": "AFFECTION",
+      "note": "3.5 inch floppy — Teh misspelling"
+    },
+    {
+      "name": "Risc Architecture Monat",
+      "symbol": "RISC",
+      "parent_strategy": "FED",
+      "note": "RISC is good — the t-shirt"
+    },
+    {
+      "name": "28.8 Kilobaud Federal Trust",
+      "symbol": "BAUD",
+      "parent_strategy": "FED",
+      "note": "The modem speed flex"
+    },
+    {
+      "name": "Teh Manifesto Republishing Bureau",
+      "symbol": "MNFST",
+      "parent_strategy": "FED",
+      "note": "The Hacker Manifesto"
+    },
+    {
+      "name": "OTV Broadcast Interception Fund",
+      "symbol": "OTV",
+      "parent_strategy": "AFFECTION",
+      "note": "TV hijacking from the movie"
+    },
+    {
+      "name": "Grand Central Station Payphone",
+      "symbol": "GCS",
+      "parent_strategy": "AFFECTION",
+      "note": "Meeting spot"
+    },
+    {
+      "name": "PLS Validator Acquisition Fund",
+      "symbol": "VALID",
+      "parent_strategy": "AFFECTION",
+      "note": "The north star — 32M PLS"
+    },
+    {
+      "name": "Joystick Operating Treasury",
+      "symbol": "JSTK",
+      "parent_strategy": "AFFECTION",
+      "note": "Self-referential — the bot itself"
+    },
+    {
+      "name": "Dysnomia Underground Railroad",
+      "symbol": "DUR",
+      "parent_strategy": "FED",
+      "note": "Moving tokens through the web"
+    },
+    {
+      "name": "SHIO Reactor Maintenance Fund",
+      "symbol": "SHIO",
+      "parent_strategy": "AFFECTION",
+      "note": "Rod/Cone reactor system"
+    },
+    {
+      "name": "Aura Identity Preservation Scoiety",
+      "symbol": "AURA",
+      "parent_strategy": "FED",
+      "note": "SIU token generation identity"
+    },
+    {
+      "name": "Teh Salami Slicing Authority",
+      "symbol": "SALMI",
+      "parent_strategy": "FED",
+      "note": "Classic hack — fraction of a penny"
+    },
+    {
+      "name": "R㉾㉾t Access Control",
+      "symbol": "ROOT",
+      "parent_strategy": "FED",
+      "note": "Double unicode — root access"
+    },
+    {
+      "name": "Social Engineering Preparatory Academy",
+      "symbol": "SEPA",
+      "parent_strategy": "AFFECTION",
+      "note": "Kevin Mitnick school of thought"
+    },
+    {
+      "name": "Teh Kernel Panic Recovery Institute",
+      "symbol": "KRNL",
+      "parent_strategy": "FED",
+      "note": "Kernel panic — system failure"
+    },
+    {
+      "name": "Zero Day Exploit Reserve",
+      "symbol": "ZDAY",
+      "parent_strategy": "AFFECTION",
+      "note": "0day — vulnerability stockpile"
+    },
+    {
+      "name": "Back Orifice Memorial Fund",
+      "symbol": "BO",
+      "parent_strategy": "AFFECTION",
+      "note": "cDc classic — 1998"
+    },
+    {
+      "name": "Sneakers Federal Credit Union",
+      "symbol": "SNKRS",
+      "parent_strategy": "FED",
+      "note": "Robert Redford hacker movie crossover"
+    },
+    {
+      "name": "War Dialer Telephone Monat",
+      "symbol": "WDIAL",
+      "parent_strategy": "FED",
+      "note": "WarGames + Dysnomia Federal naming"
+    },
+    {
+      "name": "Teh Buffer Overflow Containment Zone",
+      "symbol": "BOFCZ",
+      "parent_strategy": "FED",
+      "note": "Classic vulnerability"
+    },
+    {
+      "name": "Packet Sniffing Observatory",
+      "symbol": "PCKT",
+      "parent_strategy": "AFFECTION",
+      "note": "Network analysis"
+    },
+    {
+      "name": "VOID Chat Preservation Archive",
+      "symbol": "VOIDC",
+      "parent_strategy": "AFFECTION",
+      "note": "VOID.Chat() — the Dysnomia front door"
+    },
+    {
+      "name": "Teh Traceroute Mapping Bureau",
+      "symbol": "TRACE",
+      "parent_strategy": "FED",
+      "note": "Network topology"
+    },
+    {
+      "name": "Entropy Harvesting Collective",
+      "symbol": "ENTRP",
+      "parent_strategy": "AFFECTION",
+      "note": "ReactionsCore — entropy-based reactions"
+    },
+    {
+      "name": "Soul Identity Preservation Trust",
+      "symbol": "SOUL",
+      "parent_strategy": "AFFECTION",
+      "note": "Saat[3] triple — the soul ID"
+    },
+    {
+      "name": "CROWS Bouncer Retirement Fund",
+      "symbol": "CRWSB",
+      "parent_strategy": "AFFECTION",
+      "note": "25 CROWS for bouncer access"
+    },
+    {
+      "name": "Teh Pentesting Scoiety",
+      "symbol": "PNTS",
+      "parent_strategy": "FED",
+      "note": "Penetration testing + Dysnomia misspelling"
+    },
+    {
+      "name": "Gibson Player 578 Memorial",
+      "symbol": "P578",
+      "parent_strategy": "AFFECTION",
+      "note": "Joey's player number"
+    },
+    {
+      "name": "Handle Acquisition Bureau",
+      "symbol": "HNDL",
+      "parent_strategy": "FED",
+      "note": "I need a handle, man"
+    }
+  ]
+}

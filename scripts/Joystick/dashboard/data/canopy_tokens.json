@@ -1,0 +1,86 @@
+[
+  {
+    "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
+    "symbol": "FDIC",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
+    "symbol": "DFM",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+    "symbol": "PARADE",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
+    "symbol": "TLRz",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x9DF8E94C35FfAf366e0e9e38c3eFEa93a3b4d83e",
+    "symbol": "JOB",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0xC3CCe61c8917B72C8a0C52A13C8e7C46De0AEB53",
+    "symbol": "SSA",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x84F8d4dB8c787FaBdcB26D1b583FD67e3B67C094",
+    "symbol": "SCOIETY",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x5b479dca6C0E451F174E4C2eD47949E9C12E96f0",
+    "symbol": "CAMPAIGN",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x5Fe2D28aD82A294Df1679Cf2e4836D41A3b4a9A0",
+    "symbol": "OPIUM",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0xb4F3D94B3B22e2BB5FFd8Ef7a9c3DA6eB3148795",
+    "symbol": "BGDHTZ",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x4c94De377e7Ea73E92FCb37E03CEF40dD7e8883B",
+    "symbol": "TEHATER",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x8bCeb8De4f25A5ABa8cD0A5A2C2ab9CA80C8bFC9",
+    "symbol": "ARMS",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0x7c7BEA1B37F4378B32e2191993a4Ef8c00BfE34d",
+    "symbol": "BAR",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  },
+  {
+    "address": "0xA8DD2783D4499B3D6f48e44b3c0f4028fB1b0719",
+    "symbol": "OZZY",
+    "parent_address": "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff",
+    "parent_symbol": "FED"
+  }
+]

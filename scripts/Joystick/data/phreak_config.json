@@ -11,7 +11,18 @@
   "default_keep_pct": 20,
   "max_impact_pct": 10.0,
   "split_threshold_pct": 3.33,
-  "deploy_queue": [],
+  "deploy_queue": [
+    {
+      "name": "Teh Gibson Mainframe Authority",
+      "symbol": "GBSN",
+      "initial_mint": 100,
+      "parent": "0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D",
+      "token_b": "0xA1077a294dDE1B09bB078844df40758a5D0f9a27",
+      "token_a_amount": 0,
+      "token_b_amount": 0,
+      "keep_pct": 20
+    }
+  ],
   "stitch_candidates": [],
   "factories": {
     "pulsex_v1": "0x1715a3E4A142d8b698131108995174F37aEBA10D",
