@@ -290,6 +290,8 @@ class WalletManager:
             "chainId": CHAIN_ID,
         }
 
+        # Sweep is a plain ETH transfer (21K gas, zero revert risk).
+        # Skip simulation for performance — nonce already tracked by WalletNonce.
         signed = self.seller.account.sign_transaction(tx)
         tx_hash = self._submit_pool.send_raw(signed.raw_transaction)
         log.info("Sweep TX: 0x%s (%.4f PLS Seller → Joey)",
