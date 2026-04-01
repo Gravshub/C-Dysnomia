@@ -49,7 +49,15 @@ import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
-load_dotenv("/opt/joystick/.env.pulse")
+# Load .env.pulse: try repo-relative path first, then hardcoded VPS path, then cwd
+_env_candidates = [
+    os.path.join(os.path.dirname(__file__), "..", "..", ".env.pulse"),
+    "/opt/joystick/.env.pulse",
+]
+for _env_path in _env_candidates:
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+        break
 load_dotenv()  # also check cwd for overrides
 
 from .core.config import (
