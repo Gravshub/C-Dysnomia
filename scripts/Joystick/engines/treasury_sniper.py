@@ -190,9 +190,10 @@ class TreasurySniperEngine(EngineBase):
             os.path.dirname(__file__), "..", "data", "treasury_recon.py"
         )
         if os.path.exists(recon_script):
+            data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
             log.info("E6: running treasury_recon.py (timeout 300s)")
             subprocess.run(
-                [sys.executable, recon_script],
+                [sys.executable, recon_script, "--data-dir", data_dir],
                 timeout=300,
                 check=False,
             )
