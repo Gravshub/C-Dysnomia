@@ -84,12 +84,26 @@ class GasGuard:
         gibs_bal = safe(gibs, "balanceOf", JOEY_WALLET) or 0
 
         if gibs_bal > 0:
+            # Try V2 first, then V1 (matches AFF fallback pattern)
+            gibs_router = router_v2
+            gibs_router_addr = PULSEX_V2_ROUTER
+            try:
+                amounts = safe(gibs_router, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
+                if not amounts or amounts[-1] == 0:
+                    # No V2 liquidity — fall back to V1
+                    gibs_router = router_v1
+                    gibs_router_addr = PULSEX_V1_ROUTER
+                    amounts = safe(gibs_router, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
+            except Exception:
+                gibs_router = router_v1
+                gibs_router_addr = PULSEX_V1_ROUTER
+                amounts = safe(gibs_router, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
+
             # Calculate how much GIBS to sell to receive need_wei PLS
             try:
-                amounts = safe(router_v2, "getAmountsOut", gibs_bal, [GIBS_LAU, WPLS])
                 if amounts and amounts[-1] >= need_wei:
                     partial_amounts = safe(
-                        router_v2, "getAmountsIn", need_wei, [GIBS_LAU, WPLS]
+                        gibs_router, "getAmountsIn", need_wei, [GIBS_LAU, WPLS]
                     )
                     sell_gibs = min(
                         partial_amounts[0] if partial_amounts else gibs_bal,
@@ -101,15 +115,16 @@ class GasGuard:
                 sell_gibs = gibs_bal
 
             min_pls = int(need_wei * (1 - MAX_SLIPPAGE))
-            log.info("Selling %.4f GIBS for PLS (V2)", sell_gibs / 1e18)
+            dex_label = "V2" if gibs_router_addr == PULSEX_V2_ROUTER else "V1"
+            log.info("Selling %.4f GIBS for PLS (%s)", sell_gibs / 1e18, dex_label)
 
             try:
-                approve_if_needed(gibs, PULSEX_V2_ROUTER, sell_gibs, "GIBS", dry_run=dry_run)
+                approve_if_needed(gibs, gibs_router_addr, sell_gibs, "GIBS", dry_run=dry_run)
                 send_tx(
-                    router_v2.functions.swapExactTokensForETH(
+                    gibs_router.functions.swapExactTokensForETH(
                         sell_gibs, min_pls, [GIBS_LAU, WPLS], JOEY_WALLET, deadline
                     ),
-                    "Emergency: GIBS → PLS (V2)",
+                    f"Emergency: GIBS → PLS ({dex_label})",
                     dry_run=dry_run,
                     skip_simulate=True,  # ETH-out functions need skip due to msg.value
                 )

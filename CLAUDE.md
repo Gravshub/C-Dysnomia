@@ -5,7 +5,7 @@
 **Canonical branch**: `claude/joystick-V2-FanxJ`
 **Branch convention**: `claude/dysnomia-MMDDYY-<sessionID>` (`claude/` prefix + session-ID suffix required)
 
-> **Sub-context files**: Bot internals → `scripts/Joystick/CLAUDE.md` | Script inventory → `scripts/CLAUDE.md`
+> **Sub-context files**: Bot internals → `scripts/Joystick/CLAUDE.md` | Script inventory → `scripts/CLAUDE.md` | Dashboard API → `scripts/Joystick/dashboard/CLAUDE.md`
 
 ---
 
@@ -415,8 +415,9 @@ C-Dysnomia is our fork of `atropa_pulsechain`. It adds:
 | TGSv5 | `0xeeB330...a6127` | 25,911,970 | LEGACY — superseded — do-not use |
 | TGSv7 | `0x82E8B7e24bD9f0b389e94ddB8714B001a58e387d` | 25,938,174 | LEGACY — superseded |
 | **TGSv8** | **`0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32`** | 25,943,194 | **ACTIVE** execution substrate |
+| **TGSv8Plus** | See `contracts/TGSv8Plus.sol` | — | Extended TGSv8: silent LAU mint, atomic harvestCycle, batch LP burns |
 | JV8A | `0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30` | 25,943,266 | V4 treasury token (unminted) |
-| DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | 25,887,000 | DysnomiaSelfSnipev4 for GIBS |
+| DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | 25,887,000 | DysnomiaSelfSnipev4 — DEPRECATED (replaced by Hub) |
 | **JoystickHub** | **`0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14`** | 26,092,219 | **ACTIVE** modular proxy (replaces TGSv8+ for E2) |
 | Hub:Harvest V1 | `0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2` | 26,092,219 | DEAD — primeGibs called Generate() (AFFECTION-only, not on LAU) |
 | **Hub:Harvest V2** | **`0x400D052FAf0f46D3d5140a8F7246B69954539424`** | 26,149,418 | **ACTIVE** HarvestModule — primeGibs calls mintToCap() |
@@ -478,33 +479,35 @@ Full source in project file `TGSv8`. Key functions:
 
 87% of GIBS supply in LP. AMM bots actively arb between pairs — Joey earns fees on both sides.
 
-## Joystick Bot Architecture (`bot/` package)
+## Joystick Bot Architecture
 
 ### Package Structure
-- `bot/core/` — config, chain (Multicall3), wallet, executor, gas_guard, simulator, strategist, event_logger
-- `bot/oracle/` — price (getAmountsOut, getReservesBoth), scanner (272+ QINGs), profitability (Uniswap v2 formula)
-- `bot/engines/` — EngineBase ABC + engine files
-- `bot/loops/` — GameLoopBase ABC + terraform.py
-- `bot/bot.py` — Priority scheduler with ROI-ranked engine selection and profit compounder
+- `core/` — config, chain (Multicall3), wallet, wallet_manager, executor, gas_guard, gas_oracle, simulator, strategist, concurrency, sell_queue, event_logger, rpc_provider, split_swap
+- `oracle/` — price, scanner (272+ QINGs), profitability, route_auditor, pair_discovery, graph, data_store, supply_oracle
+- `engines/` — EngineBase ABC + 8 engine files
+- `loops/` — GameLoopBase ABC + terraform.py
+- `dashboard/` — FastAPI read-only API server (see `scripts/Joystick/dashboard/CLAUDE.md`)
+- `deploy/` — Production VPS deployment (systemd units, setup scripts, health checks)
+- `bot.py` — V2 orchestrator: 3-wallet async pipeline with ROI-ranked engine selection
 
 ### Engine Status Summary
 
-| # | Name | File | Description | Status |
-|---|------|------|-------------|--------|
-| E1 | RAZOR (Arb) | `arb.py` | Cross-DEX QING arbitrage via `atomicArb()` | Ready — net-negative per recon |
-| E2 | CEREAL (Hub) | `dss.py` | JoystickHub `primeGibs` + `mintLPAndSell` — LP first, sell second | **UNLOCKED** — Hub deployed, ~846 PLS/cycle net |
-| E3 | MERIDIAN (Beat) | `beat.py` | Territory positioning (`CHEON.Su` + `META.Beat`) | Running (Dione=41) |
-| E4 | Token Factory | `token_factory.py` | TGSv8 `mintWM()` + mint-and-sell | + AFFECTION — BuyWith routes |
-| E5 | LAU (ABUPRU) | `lau.py` | Mathematical state loop + EmitSniper | Gated (150K PLS floor) |
-| E6 | DaVINCI (Treasury Sniper) | `treasury_sniper.py` | `batchClaimTreasury()` via recon data | Needs recon targets |
-| E7 | BACKBONE (Spine Runner) | `spine_runner.py` | `batchMintAndClaim()` on Debenture=True V2 tokens | Blocked — needs OZZY spine via E8 |
-| E8 | PHR3AK (Web Weaver) | `phreak.py` | Token Web Manipulation Engine | Three modes -  Mode 1: DEPLOY Mode 2: ARM Mode 3: STITCH Mode | V4 deploy → mint → pair → burn % → arb cycle |
+| # | Name | File | Wallet | Description | Status |
+|---|------|------|--------|-------------|--------|
+| E1 | RAZOR (Arb) | `arb.py` | Seller | Cross-DEX QING arbitrage via `atomicArb()` | Ready — net-negative per recon |
+| E2 | CEREAL (Hub) | `dss.py` | Joey | JoystickHub `primeGibs` + `mintLPAndSell` — LP first, sell second | Wired — Hub V2 deployed |
+| E3 | MERIDIAN (Beat) | `beat.py` | Joey | Territory positioning (`CHEON.Su` + `META.Beat`) | Running (Dione=41) |
+| E4 | FACTORY | `token_factory.py` | Minter | AFF `multiBuyWith` all 5 routes + TGSv8 `mintWM()` | AFF routes unprofitable |
+| E5 | ABUPRU (LAU) | `lau.py` | Joey | Mathematical state loop + EmitSniper | Gated (150K PLS floor) |
+| E6 | DaVINCI (Treasury Sniper) | `treasury_sniper.py` | Joey | `batchClaimTreasury()` via recon data — routes through Joey | Wired — recon refresh added |
+| E7 | BACKBONE (Spine Runner) | `spine_runner.py` | Minter | `batchMintAndClaim()` on Debenture=True V2 tokens | Blocked — needs E8 ARM |
+| E8 | PHR3AK (Web Weaver) | `phreak.py` | Minter | Token Web Manipulation: ARM / DEPLOY / STITCH modes | Ready — ARM is critical path |
 
 ### Game Loops → Engine Mapping
 
 | Loop | Engine | Mechanic |
 |------|--------|----------|
-| DSS | E2 | `chatAndClaim()` in QING → mint LAU → claim backing → swap to PLS |
+| Hub Harvest | E2 | `primeGibs(N)` → `mintLPAndSell()` via JoystickHub — LP first, sell second |
 | Beat | E3 | `CHEON.Su()` → `META.Beat()` → territory state (strategic, no direct PLS) |
 | ABUPRU | E5 | Alpha→Beta→Upsilon(false)→Pi→Rho→Upsilon(true) state sequence |
 | Treasury Claim | E6 | Scan for backing (`selfBalance > 0`), claim via `batchClaimTreasury()` |
@@ -513,9 +516,10 @@ Full source in project file `TGSv8`. Key functions:
 
 ### Implementation Rules
 - Always simulate via `eth_call` before sending any TX
-- Always `estimate_gas()` with 1.3x multiplier — abort if it fails, never send blind
+- Always `estimate_gas()` with `GAS_MULT` (2.5x) multiplier — abort if it fails, never send blind
+- **EIP-1559 Type 2 transactions** — all TXs use `maxFeePerGas` + `maxPriorityFeePerGas`, gas ceiling checks against actual `maxFeePerGas`
 - Gas denomination: **Beats** (not Gwei). 1 PLS = 1,000,000,000 Beats. `eth_gasPrice` returns Impulses (wei-equiv) — divide by 10^9 for Beats
-- Gas price ceiling: skip cycle if gas_price > configured ceiling
+- Gas price ceiling: skip cycle if `maxFeePerGas > GAS_PRICE_CEIL`
 - No OpenZeppelin imports in Solidity — inline guards
 - Atomic file writes via `os.rename()` / `os.replace()`
 - Never rewrite existing scripts — import as modules
@@ -523,8 +527,8 @@ Full source in project file `TGSv8`. Key functions:
 
 ## PLS Generation Strategies
 
-### Strategy A: DSS (E2) — HIGHEST CONFIDENCE
-`chatAndClaim` / `chatAndClaimWithMultiplier(17)` → 18 GIBS per call → swap to PLS via GIBS/WPLS pair. Break-even ~21.5 PLS/GIBS. Currently 10x+ above break-even.
+### Strategy A: Hub Harvest (E2) — HIGHEST CONFIDENCE
+JoystickHub `primeGibs(N)` → `mintLPAndSell()` — LP-first, sell-second. Per cycle: mint 17 GIBS, LP 50% + sell 50% → ~1,190 PLS net + LP position value. Zero VOID spam (silent minting via `mintToCap`).
 
 ### Strategy B: Treasury Sniping (E6)
 Scan treasury tokens for claimable backing. If child tokens cheaper to acquire than parent tokens received, execute. Recon yields ~1-10K PLS after price impact.
@@ -609,6 +613,11 @@ SHIO balances confirmed (block 25,903,711): Fornax 0.15 @ LAU/QING, Fomalhaute 0
 | 9 | 2026-03-09 | PLS stimulus (~1.95M), 10 LP pairs deployed (86 txs), E2 unlocked at 10x above break-even |
 | 10 | 2026-03-12 | Treasury recon deep dive, V3 family isolation discovered, E7 blocked, E8 identified as unlock |
 | 11 | 2026-03-12 | AFF mainnet test (`multiGenerate(100)` → mints to contract not caller), Grav pipeline reverse-engineered, AFF routes disabled |
+| 12 | 2026-03-16 | V2 3-wallet architecture, strategist, concurrency, sell queue, E8 PHR3AK wired |
+| 13 | 2026-03-22 | Bugfix audit, dashboard FastAPI server, Helios PingPong intelligence upgrades |
+| 14 | 2026-03-28 | JoystickHub deployed (block 26,092,219), Hub:Harvest V2 (block 26,149,418), E2 rewritten V1→V2→V3 |
+| 15 | 2026-03-29 | 6 autoresearch experiments merged: E2/E8 unblock, E4 sim timeout fix, E6 recon refresh |
+| 16 | 2026-03-30 | EIP-1559 Type 2 TXs, GAS_MULT 2.5x, --e2-only/--e6-only CLI flags, E6 routes through Joey |
 
 See `lore/joey_diary_*.md` for detailed session narratives.
 
@@ -627,6 +636,8 @@ See `lore/joey_diary_*.md` for detailed session narratives.
 | **JV8A created** | → `0x364793Ea...` | 25,943,266 |
 | **10 GIBS LP pairs** | (86 txs, nonce 25→111) | ~25,984,143 |
 | **multiGenerate(100)** | `0x9867...` | 26,007,782 |
+| **JoystickHub deployed** | → `0x7bd76A0f...` | 26,092,219 |
+| **Hub:Harvest V2 deployed** | → `0x400D052F...` | 26,149,418 |
 
 ---
 
@@ -642,19 +653,28 @@ See `lore/joey_diary_*.md` for detailed session narratives.
 - **`_mintToCap()` mints to self**: ALL DYSNOMIA tokens mint to `address(this)`. Must use `Purchase()` or `BuyWith*()` to extract. `Generate()` / `multiGenerate()` alone do NOT deliver tokens to caller
 - **RPCPool "replacement TX underpriced"**: Multi-provider `send_raw()` causes race when first provider accepts and second rejects. For critical single TXs, use single `Web3.HTTPProvider()` directly
 - **multiGenerate() is a public good**: Spends your gas to increase AFFECTION's self-balance supply — anyone can then buy it via `BuyWith*`. Donation, not profit
+- **Legacy gas price ceiling**: Gas ceiling was checking `eth.gas_price` before building EIP-1559 params. Fixed: now checks actual `maxFeePerGas` after `build_gas_params()`
+- **DSS chatAndClaim VOID spam**: V1 DSS spammed VOID chat. Replaced by JoystickHub silent minting via `mintToCap()` — zero chat noise
+- **Gas multiplier too low**: 1.3x caused TX failures on PulseChain. Bumped to 2.5x (commit d14aecf)
 
 ---
 
-# Part 5 — Current State (Block 26,040,668 — 2026-03-16)
+# Part 5 — Current State (as of 2026-04-01)
 
 ```
-PLS:        1,979,625          GIBS price:   195.73 PLS
-GIBS:       0 (all in LP)      PLS/USD:      ~$0.0150
-AFF:        127.18             GIBS supply:  3,396
-WM:         263.15             DSS GIBS:     0 (empty)
-ATROPA:     166.78             TGSv8 WM:    9
-VOID:       51.22              Nonce:        128
+PLS:        ~1,979,625         GIBS price:   ~195 PLS
+GIBS:       0 (all in LP)      PLS/USD:      ~$7.14e-6
+AFF:        ~127               GIBS supply:  3,396
+WM:         ~263               TGSv8 WM:    9
+ATROPA:     ~167               Nonce:        128+
+VOID:       ~51                Gas:          EIP-1559 Type 2
 ```
+
+Key changes since last snapshot:
+- JoystickHub deployed + Hub:Harvest V2 active (E2 rewritten)
+- EIP-1559 Type 2 TXs with 2.5x gas limit
+- E6 routes through Joey wallet (TGSv8 balance gate removed)
+- 6 autoresearch experiments merged (E2/E8 unblock, E4 timeout fix)
 
 ---
 
@@ -675,26 +695,32 @@ VOID:       51.22              Nonce:        128
 - `solidity/dysnomia/11_lau.sol` — LAU player token
 - `solidity/dysnomia/domain/tang/03_meta.sol` — META.Beat()
 - `solidity/dysnomia/domain/tang/02_cheon.sol` — CHEON.Su()
-- `solidity/dysnomia/etc/DysnomiaSelfSnipev4.sol` — DSS (pragma ^0.8.21, no OZ)
-- TGSv8 — Full source in project files
+- `solidity/dysnomia/etc/DysnomiaSelfSnipev4.sol` — DSS (pragma ^0.8.21, no OZ) — DEPRECATED
+- `contracts/TGSv8.sol` — Execution substrate (active)
+- `contracts/TGSv8Plus.sol` — Extended TGSv8: silent LAU mint, atomic harvestCycle
+- `contracts/JoystickHub.sol` — Modular proxy with delegatecall modules
 
 **Python (Joystick bot)**:
-- `scripts/Joystick/bot.py` — Priority scheduler
-- `scripts/Joystick/core/` — config, chain, wallet, executor, gas_guard, simulator
-- `scripts/Joystick/oracle/` — price, scanner, profitability
-- `scripts/Joystick/engines/` — arb, dss, beat, token_factory, lau, treasury_sniper, spine_runner
-- `scripts/Joystick/tools/claim_verifier.py` — eth_call Claim() simulation
+- `scripts/Joystick/bot.py` — V2 orchestrator (3-wallet async pipeline)
+- `scripts/Joystick/core/` — config, chain, wallet, wallet_manager, executor, gas_guard, gas_oracle, simulator, strategist, concurrency, sell_queue, event_logger, rpc_provider, split_swap
+- `scripts/Joystick/oracle/` — price, scanner, profitability, route_auditor, pair_discovery, graph, data_store, supply_oracle
+- `scripts/Joystick/engines/` — arb, dss, beat, token_factory, lau, treasury_sniper, spine_runner, phreak
+- `scripts/Joystick/dashboard/` — FastAPI read-only API (overview, engines, wallet, gas, terminal, canopy, etc.)
 
-**Python (standalone)**:
-- `scripts/tx_full_beat_flow.py` — Full Beat orchestration
+**Python (standalone)** — see `scripts/CLAUDE.md` for full inventory:
+- `scripts/tx_beat_flow.py` — Full Beat orchestration
 - `scripts/tx_cheon_su.py` — CHEON.Su() YUE bar primer
 - `scripts/scan_lau_arb.py` — Scan 272 QINGs for Purchase→DEX arb
-- `scripts/test_aff_mint.py` — AFFECTION multiGenerate test harness
-- `scripts/analyze_aff_bots.py` / `_v2.py` — Grav pipeline analysis
+- `scripts/intel_aff_bots.py` — AFFECTION bot pipeline analysis
+- `scripts/deploy_joystick_hub.py` — JoystickHub deployment
+- `scripts/deploy_tgsv8plus.py` — TGSv8Plus deployment
 
 **Data**:
 - `scripts/Joystick/data/recon_results.json` — Full treasury recon (39K lines)
-- `scripts/Joystick/data/claim_verification.json` — Claim() simulation results
+- `scripts/Joystick/data/pair_registry.json` — Known DEX pairs (543K)
+- `scripts/Joystick/data/token_master.json` — Master token registry (574K)
+- `scripts/Joystick/data/spine_map.json` — Spine opportunity mapping (860K)
+- `scripts/Joystick/data/deploy_candidates.json` — V4 token candidates for E8 DEPLOY
 - `scripts/Joystick/data/v2_federal_tokens.json` — V2 Federal token scan
 
 ### Domain Glossary
@@ -704,7 +730,8 @@ VOID:       51.22              Nonce:        128
 | LAU | Player character token (via VOID.Enter) |
 | QING | Venue/marketplace contract |
 | SHIO | Reactor system (Rod/Cone pair) — required for Beat |
-| DSS | DysnomiaSelfSnipe — chatAndClaim loop |
+| DSS | DysnomiaSelfSnipe — DEPRECATED, replaced by JoystickHub |
+| Hub | JoystickHub — modular proxy with delegatecall (primeGibs, mintLPAndSell) |
 | MV / WM | Token to deploy new minter tokens (1 MV per supply unit) |
 | Debenture | True = unpublished = Claim stays open |
 | Spine | Chain of V2 Federal tokens for recursive mint-claim |

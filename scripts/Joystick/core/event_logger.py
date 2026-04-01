@@ -107,8 +107,8 @@ class EventLogger:
             "notes": notes,
         }
 
-        # Strip empty fields for compactness
-        record = {k: v for k, v in record.items() if v or v == 0 or v is False}
+        # Strip None fields for compactness (keep empty strings, 0, False)
+        record = {k: v for k, v in record.items() if v is not None}
 
         self._write("joystick_events", record)
 

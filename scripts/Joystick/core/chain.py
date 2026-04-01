@@ -271,7 +271,8 @@ def safe(contract, fn: str, *args) -> Any | None:
     except RPCAllProvidersDown:
         log.error("All read RPCs down for safe(%s.%s)", contract.address[:10], fn)
         return None
-    except Exception:
+    except Exception as exc:
+        log.debug("safe(%s.%s) failed: %s", contract.address[:10], fn, exc)
         return None
 
 # ── Multicall3 batch reads ────────────────────────────────────────────────
