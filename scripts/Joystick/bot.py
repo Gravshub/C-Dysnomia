@@ -7,7 +7,7 @@ bot.py — Joystick V2: Dysnomia Self-Regulating Arbitrage Bot
   Engine 3 — Beat (MERIDIAN): META.Beat() territory metrics                  [Joey]
   Engine 4 — Factory:         AFFECTION Generate() + WM batch mint           [Minter]
   Engine 5 — LAU (ABUPRU):    ABUPRU Faung advancement + EmitSniper          [Joey]
-  Engine 6 — DaVINCI:         Treasury sniping via recon data                [Minter]
+  Engine 6 — DaVINCI:         Treasury sniping via recon data                [Joey]
   Engine 7 — BACKBONE:        Spine runner (V2 Federal mint-claim loop)      [Minter]
   Engine 8 — PHR3AK:          Token web manipulation (DEPLOY/ARM/STITCH)     [Minter]
 
