@@ -1,0 +1,16 @@
+- generic [ref=e21]:
+  - generic [ref=e23]:
+    - text: 9:49:36 pm
+    - generic [ref=e24]: Mar 31, 2026
+  - generic [ref=e28]:
+    - heading "|>" [level=4] [ref=e29]:
+      - generic [ref=e30]: "|>"
+    - generic "Chat navigation" [ref=e32]:
+      - button "vertical_align_top" [ref=e33] [cursor=pointer]:
+        - generic [ref=e34]: vertical_align_top
+      - button "keyboard_arrow_up" [ref=e35] [cursor=pointer]:
+        - generic [ref=e36]: keyboard_arrow_up
+      - button "keyboard_arrow_down" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]: keyboard_arrow_down
+      - button "vertical_align_bottom" [ref=e39] [cursor=pointer]:
+        - generic [ref=e40]: vertical_align_bottom

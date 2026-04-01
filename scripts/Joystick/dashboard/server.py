@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .chain_reader import get_reader
-from .routes import wallet, engines, gas, overview, terminal, explorer, comms
+from .routes import wallet, engines, gas, overview, terminal, explorer, comms, canopy
 from .routes import tgsv8 as tgsv8_route
 from .routes import history_route
 
@@ -81,6 +81,7 @@ app.include_router(history_route.router, prefix="/api", tags=["history"])
 app.include_router(terminal.router, prefix="/api", tags=["terminal"])
 app.include_router(explorer.router, prefix="/api", tags=["explorer"])
 app.include_router(comms.router, prefix="/api", tags=["comms"])
+app.include_router(canopy.router, prefix="/api", tags=["canopy"])
 
 # ─── Static frontend ────────────────────────────────────────────────
 # Must be LAST — mount at "/" catches all unmatched routes

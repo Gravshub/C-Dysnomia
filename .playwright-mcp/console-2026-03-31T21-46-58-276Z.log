@@ -1,0 +1,30 @@
+[     111ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5050/login:0
+[   20840ms] [LOG] SW registered:  ServiceWorkerRegistration @ http://localhost:5050/:133
+[   21332ms] [LOG] Setting up drag and drop handlers... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:70
+[   21335ms] [LOG] Setting up paste handler... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:128
+[   21352ms] [LOG] Input store initialized @ http://localhost:5050/components/chat/input/input-store.js:62
+[   48048ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   48303ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   49787ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   50292ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   52470ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   53474ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   57476ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   59482ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   62483ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   66487ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   67490ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   72497ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   75496ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   77502ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   82511ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   87506ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   87523ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   92530ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[   97526ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[   97549ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  102561ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  107557ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  107572ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  112612ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  117704ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5050/login:0

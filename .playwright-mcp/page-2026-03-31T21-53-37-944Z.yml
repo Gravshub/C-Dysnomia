@@ -1,0 +1,12 @@
+- generic [ref=e26]:
+  - heading "|>" [level=4] [ref=e27]:
+    - generic [ref=e28]: "|>"
+  - generic "Chat navigation" [ref=e30]:
+    - button "vertical_align_top" [ref=e31] [cursor=pointer]:
+      - generic [ref=e32]: vertical_align_top
+    - button "keyboard_arrow_up" [ref=e33] [cursor=pointer]:
+      - generic [ref=e34]: keyboard_arrow_up
+    - button "keyboard_arrow_down" [ref=e35] [cursor=pointer]:
+      - generic [ref=e36]: keyboard_arrow_down
+    - button "vertical_align_bottom" [ref=e37] [cursor=pointer]:
+      - generic [ref=e38]: vertical_align_bottom

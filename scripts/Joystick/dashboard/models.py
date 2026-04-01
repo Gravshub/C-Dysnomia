@@ -266,6 +266,29 @@ class PortfolioSummary(BaseModel):
 
 # ─── Overview (single-call dashboard payload) ────────────────────────
 
+
+# ─── Canopy (Parity Scope) ──────────────────────────────────────────
+
+class CanopyToken(BaseModel):
+    address: str
+    symbol: str
+    parent_symbol: Optional[str] = None
+    parent_address: Optional[str] = None
+    multiplier: int = 1
+    dex_price_pls: float = 0.0
+    backing_pls: float = 0.0
+    parity_pct: float = 0.0
+    liquidity_pls: float = 0.0
+    pair_address: Optional[str] = None
+    score: float = 0.0
+
+
+class CanopyResponse(BaseModel):
+    tokens: list[CanopyToken] = []
+    total_scanned: int = 0
+    cached: bool = False
+
+
 class OverviewResponse(BaseModel):
     """Single endpoint that returns everything the dashboard needs.
     Reduces frontend polling to one call per interval."""

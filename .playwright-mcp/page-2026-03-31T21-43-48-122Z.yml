@@ -1,0 +1,10 @@
+- generic [ref=e3]:
+  - img "Agent Zero Logo" [ref=e4]
+  - heading "Agent Zero" [level=2] [ref=e5]
+  - generic [ref=e6]:
+    - generic [ref=e7]: Username
+    - textbox "Username" [ref=e8]: joey
+  - generic [ref=e9]:
+    - generic [ref=e10]: Password
+    - textbox "Password" [active] [ref=e11]
+  - button "Login" [ref=e12] [cursor=pointer]

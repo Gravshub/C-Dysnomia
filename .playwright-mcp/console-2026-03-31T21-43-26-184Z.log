@@ -1,0 +1,55 @@
+[     211ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5050/login:0
+[   34816ms] [LOG] Setting up drag and drop handlers... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:70
+[   34816ms] [LOG] Setting up paste handler... @ http://localhost:5050/components/chat/attachments/attachmentsStore.js:128
+[   34858ms] [LOG] Input store initialized @ http://localhost:5050/components/chat/input/input-store.js:62
+[   35438ms] [LOG] SW registered:  ServiceWorkerRegistration @ http://localhost:5050/:133
+[   52846ms] [LOG] User interaction detected - audio playback enabled @ http://localhost:5050/components/chat/speech/speech-store.js:144
+[   74447ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   74506ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   74506ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   75154ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   75157ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   75157ms] [LOG] collapsing warning 4000 @ http://localhost:5050/js/messages.js:424
+[   77792ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   78187ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   78188ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   78204ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   78206ms] [LOG] collapsing util 4000 @ http://localhost:5050/js/messages.js:424
+[   78206ms] [LOG] collapsing warning 4000 @ http://localhost:5050/js/messages.js:424
+[   78450ms] [LOG] Collapse step: process-step-2 @ http://localhost:5050/js/messages.js:1921
+[   78506ms] [LOG] Collapse step: process-step-3 @ http://localhost:5050/js/messages.js:1921
+[   79158ms] [LOG] Collapse step: process-step-d39981af-dcc9-4572-b60b-7c4741ac0524 @ http://localhost:5050/js/messages.js:1921
+[   81795ms] [LOG] Collapse step: process-step-7 @ http://localhost:5050/js/messages.js:1921
+[   82189ms] [LOG] Collapse step: process-step-8 @ http://localhost:5050/js/messages.js:1921
+[   82207ms] [LOG] Collapse step: process-step-9 @ http://localhost:5050/js/messages.js:1921
+[  143511ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  143767ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  146511ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  147016ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  151514ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  152519ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  156520ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  158535ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  161530ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  165535ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  166534ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  171538ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  174538ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  176552ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  181563ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  186567ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  186570ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  191602ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  196585ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/api/csrf_token:0
+[  196611ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  201632ms] [ERROR] WebSocket connection to 'ws://localhost:5050/socket.io/?EIO=4&transport=websocket' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5050/vendor/socket.io.esm.min.js:5
+[  206770ms] [ERROR] [websocket] failed to fetch CSRF token for connect TypeError: Failed to fetch
+    at http://localhost:5050/js/api.js:184:28
+    at getCsrfToken (http://localhost:5050/js/api.js:238:5)
+    at Et.auth (http://localhost:5050/js/websocket.js:597:9)
+    at Et.onopen (http://localhost:5050/vendor/socket.io.esm.min.js:6:31491)
+    at Et.connect (http://localhost:5050/vendor/socket.io.esm.min.js:6:29552)
+    at connectPromise.catch.finally.connecting (http://localhost:5050/js/websocket.js:398:21)
+    at new Promise (<anonymous>)
+    at http://localhost:5050/js/websocket.js:386:13 @ http://localhost:5050/js/websocket.js:599
+[  206865ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5050/login:0

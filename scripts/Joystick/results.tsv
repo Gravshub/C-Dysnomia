@@ -1,0 +1,2 @@
+commit	engines_ready	net_pls	tests_pass	status	description
+baseline	3/6	886	52/52	keep	baseline — E2+E8 fire, E6 recon empty (no token_master), E1 sim timeout, E4 no-profit

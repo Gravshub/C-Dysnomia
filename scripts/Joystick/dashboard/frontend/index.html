@@ -9,18 +9,21 @@
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
 
   :root {
-    --bg: #0a0d14;
-    --card-bg: #0f1117;
-    --card-border: #1a1f2e;
+    --bg: #06080d;
+    --bg-raised: #0a0e16;
+    --card-bg: #0c1019;
+    --card-border: #141c2b;
+    --card-glow: rgba(0, 255, 136, 0.03);
     --text: #c8cdd8;
-    --text-dim: #5a6178;
+    --text-dim: #4a5168;
     --green: #00ff88;
-    --red: #ff4444;
+    --red: #ff3b3b;
     --cyan: #00ccff;
     --yellow: #ffcc00;
     --orange: #ff8844;
     --purple: #aa66ff;
     --accent: #00ff88;
+    --scanline: rgba(0, 255, 136, 0.015);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -33,6 +36,21 @@
     line-height: 1.5;
     padding: 20px;
     min-height: 100vh;
+    font-variant-numeric: tabular-nums;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      var(--scanline) 2px,
+      var(--scanline) 4px
+    );
   }
 
   .header {
@@ -46,6 +64,7 @@
     font-size: 20px;
     font-weight: 700;
     letter-spacing: 2px;
+    text-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
   }
   .header .subtitle {
     color: var(--text-dim);
@@ -75,8 +94,10 @@
   .card {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
+    border-left: 2px solid var(--green);
     border-radius: 8px;
     padding: 16px;
+    box-shadow: 0 0 20px var(--card-glow);
   }
   .card-full { grid-column: 1 / -1; }
   .card-wide { grid-column: span 2; }
@@ -86,10 +107,14 @@
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--card-border);
+  }
+  .card-title::before {
+    content: '\25B8 ';
+    opacity: 0.6;
   }
 
   .stat-row {
@@ -163,9 +188,21 @@
   }
   .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--green), var(--cyan));
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--green),
+      var(--green) 10px,
+      rgba(0, 255, 136, 0.6) 10px,
+      rgba(0, 255, 136, 0.6) 20px
+    );
+    background-size: 28px 28px;
     border-radius: 4px;
     transition: width 0.5s ease;
+    animation: progress-stripe 1s linear infinite;
+  }
+  @keyframes progress-stripe {
+    from { background-position: 0 0; }
+    to { background-position: 28px 0; }
   }
   .progress-text {
     position: absolute;
@@ -188,8 +225,16 @@
     padding: 8px;
     border-radius: 4px;
     border: 1px solid var(--card-border);
+    border-left: 2px solid var(--card-border);
     text-align: center;
   }
+  .engine-cell.running { border-left-color: var(--green); }
+  .engine-cell.ready { border-left-color: var(--cyan); }
+  .engine-cell.blocked { border-left-color: var(--red); }
+  .engine-cell.gated { border-left-color: var(--yellow); }
+  .engine-cell.recon { border-left-color: var(--orange); }
+  .engine-cell.design { border-left-color: var(--purple); }
+  .engine-cell.disabled { border-left-color: var(--text-dim); }
   .engine-cell .eid { font-size: 10px; color: var(--text-dim); }
   .engine-cell .ename { font-weight: 700; font-size: 12px; }
   .engine-cell .estatus { font-size: 10px; margin-top: 2px; }
@@ -236,6 +281,7 @@
     white-space: pre-wrap;
     word-break: break-all;
     scroll-behavior: smooth;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
   }
   .terminal-output .t-system { color: var(--cyan); }
   .terminal-output .t-log { color: var(--text-dim); }
@@ -256,6 +302,11 @@
     font-weight: 700;
     white-space: nowrap;
     user-select: none;
+    animation: prompt-pulse 2s ease-in-out infinite;
+  }
+  @keyframes prompt-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
   }
   .terminal-input {
     flex: 1;
@@ -304,8 +355,8 @@
   .tf-btn.active { background: var(--green); color: var(--bg); font-weight: 700; }
 
   /* ─── Engine detail panels ─────────────────────────────────────── */
-  .engine-cell { cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
-  .engine-cell:hover { border-color: var(--text-dim); }
+  .engine-cell { cursor: pointer; transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s; }
+  .engine-cell:hover { border-color: var(--text-dim); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
   .engine-cell.selected { border-color: var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.15); }
 
   .engine-detail {
@@ -635,6 +686,7 @@
     line-height: 1.6;
     scroll-behavior: smooth;
     margin-top: 8px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
   }
   .comms-msg { padding: 1px 0; word-break: break-word; }
   .comms-msg .cm-block {
@@ -739,9 +791,131 @@
   }
   .comms-connect-btn:hover { background: var(--cyan); color: var(--bg); }
 
+  /* ─── Parity Scope ─────────────────────────────────────────────── */
+  .canopy-panel { position: relative; }
+  .canopy-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .canopy-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .canopy-count {
+    font-size: 10px;
+    color: var(--text-dim);
+    background: var(--card-border);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .canopy-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .canopy-filter-btns, .canopy-sort-btns { display: flex; gap: 4px; }
+  .canopy-filter-btn, .canopy-sort-btn {
+    background: var(--card-border);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .canopy-filter-btn:hover, .canopy-sort-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .canopy-filter-btn.active { background: var(--cyan); color: var(--bg); font-weight: 700; }
+  .canopy-sort-btn.active { background: var(--purple); color: var(--bg); font-weight: 700; }
+
+  .canopy-table-wrap {
+    overflow-x: auto;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+  .canopy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .canopy-table thead { position: sticky; top: 0; z-index: 1; }
+  .canopy-table th {
+    background: var(--card-bg);
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--card-border);
+    white-space: nowrap;
+  }
+  .canopy-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid rgba(20, 28, 43, 0.4);
+    white-space: nowrap;
+  }
+  .canopy-table tbody tr { cursor: pointer; transition: background 0.1s; }
+  .canopy-table tbody tr:hover { background: rgba(0, 204, 255, 0.04); }
+
+  .canopy-table th:nth-child(n+4), .canopy-table td:nth-child(n+4) { text-align: right; }
+  .canopy-table th:nth-child(10), .canopy-table td:nth-child(10) { text-align: center; }
+
+  .canopy-parity-over { color: var(--green); font-weight: 700; }
+  .canopy-parity-under { color: var(--red); font-weight: 700; }
+  .canopy-parity-near { color: var(--yellow); }
+
+  .canopy-score {
+    display: inline-block;
+    min-width: 40px;
+    text-align: center;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 10px;
+  }
+  .canopy-score.hot { background: rgba(0, 255, 136, 0.15); color: var(--green); }
+  .canopy-score.warm { background: rgba(255, 204, 0, 0.15); color: var(--yellow); }
+  .canopy-score.cold { background: rgba(90, 97, 120, 0.15); color: var(--text-dim); }
+
+  .canopy-play { font-size: 10px; font-weight: 500; }
+  .canopy-play.mint { color: var(--green); }
+  .canopy-play.buy { color: var(--cyan); }
+  .canopy-play.hold { color: var(--text-dim); }
+
+  .canopy-status {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 6px 0 0;
+  }
+
+  .canopy-detail-row td {
+    padding: 8px 12px;
+    background: #050709;
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .canopy-detail-row .canopy-action {
+    color: var(--cyan);
+    font-weight: 500;
+  }
+
   @media (max-width: 768px) {
     .card-wide { grid-column: span 1; }
     .grid { grid-template-columns: 1fr; }
+    .card { border-left-width: 1px; }
   }
 </style>
 </head>
@@ -975,6 +1149,55 @@
     <div class="comms-wallet-status">
       <span id="comms-wallet-addr">Wallet: not connected</span>
       <button class="comms-connect-btn" id="comms-connect-btn">Connect Wallet</button>
+    </div>
+  </div>
+
+  <!-- Parity Scope -->
+  <div class="card card-full canopy-panel">
+    <div class="canopy-header">
+      <div class="canopy-title-row">
+        <div class="card-title" style="margin-bottom:0; padding-bottom:0; border-bottom:none">
+          Parity Scope
+        </div>
+        <span class="canopy-count" id="canopy-count">--</span>
+      </div>
+      <div class="canopy-controls">
+        <div class="canopy-filter-btns" id="canopy-filter-btns">
+          <button class="canopy-filter-btn active" data-filter="all">All</button>
+          <button class="canopy-filter-btn" data-filter="over">Over Parity</button>
+          <button class="canopy-filter-btn" data-filter="under">Under Parity</button>
+        </div>
+        <div class="canopy-sort-btns" id="canopy-sort-btns">
+          <button class="canopy-sort-btn active" data-sort="score">Score</button>
+          <button class="canopy-sort-btn" data-sort="parity">Parity%</button>
+          <button class="canopy-sort-btn" data-sort="liquidity">Liquidity</button>
+        </div>
+      </div>
+    </div>
+    <div class="canopy-table-wrap">
+      <table class="canopy-table" id="canopy-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Token</th>
+            <th>Parent</th>
+            <th>Mult</th>
+            <th>DEX Price (PLS)</th>
+            <th>Backing (PLS)</th>
+            <th>Parity%</th>
+            <th>Liquidity (PLS)</th>
+            <th>Score</th>
+            <th>Play</th>
+          </tr>
+        </thead>
+        <tbody id="canopy-body">
+          <tr><td colspan="10" style="color:var(--text-dim); font-style:italic; text-align:center">Loading canopy data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="canopy-status">
+      <span id="canopy-scan-info">--</span>
+      <span id="canopy-updated">--</span>
     </div>
   </div>
 
@@ -2283,6 +2506,131 @@ if (window.ethereum) {
   });
 }
 
+// ─── Parity Scope ────────────────────────────────────────────────────
+function fmtCanopyPrice(v) {
+  if (v == null || v === 0) return '0';
+  if (v >= 1) return fmtPLS(v);
+  if (v >= 0.001) return v.toFixed(6);
+  return v.toExponential(2);
+}
+
+const CANOPY_POLL = 120000;
+let canopyData = [];
+let canopyFilter = 'all';
+let canopySort = 'score';
+
+function initCanopy() {
+  document.querySelectorAll('.canopy-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.canopy-filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      canopyFilter = btn.dataset.filter;
+      renderCanopy();
+    });
+  });
+  document.querySelectorAll('.canopy-sort-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.canopy-sort-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      canopySort = btn.dataset.sort;
+      renderCanopy();
+    });
+  });
+  fetchCanopy();
+  setInterval(fetchCanopy, CANOPY_POLL);
+}
+
+async function fetchCanopy() {
+  try {
+    const r = await fetch(`${API_BASE}/api/canopy`, { signal: AbortSignal.timeout(30000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    canopyData = d.tokens || [];
+    document.getElementById('canopy-scan-info').textContent =
+      `${d.total_scanned || 0} tokens scanned`;
+    document.getElementById('canopy-updated').textContent =
+      `Updated: ${new Date().toLocaleTimeString('en-US', { hour12: true })}`;
+    renderCanopy();
+  } catch (e) {
+    console.error('Canopy fetch error:', e);
+    document.getElementById('canopy-scan-info').textContent = 'Scan failed: ' + e.message;
+  }
+}
+
+function renderCanopy() {
+  const tbody = document.getElementById('canopy-body');
+  let filtered = [...canopyData];
+
+  if (canopyFilter === 'over') filtered = filtered.filter(t => t.parity_pct > 102);
+  if (canopyFilter === 'under') filtered = filtered.filter(t => t.parity_pct < 98);
+
+  filtered.sort((a, b) => {
+    if (canopySort === 'score') return b.score - a.score;
+    if (canopySort === 'parity') return Math.abs(b.parity_pct - 100) - Math.abs(a.parity_pct - 100);
+    if (canopySort === 'liquidity') return b.liquidity_pls - a.liquidity_pls;
+    return 0;
+  });
+
+  document.getElementById('canopy-count').textContent = `${filtered.length} tokens`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim); font-style:italic; text-align:center">No tokens match filter</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((t, i) => {
+    const parityClass = t.parity_pct > 102 ? 'canopy-parity-over'
+                      : t.parity_pct < 98  ? 'canopy-parity-under'
+                      : 'canopy-parity-near';
+    const scoreClass = t.score > 500 ? 'hot' : t.score > 100 ? 'warm' : 'cold';
+    const play = t.parity_pct > 105 ? { text: 'MINT\u2192SELL', cls: 'mint' }
+               : t.parity_pct < 90  ? { text: 'BUY DEX',  cls: 'buy' }
+               : { text: 'HOLD', cls: 'hold' };
+    const addr = t.address.slice(0,6) + '\u2026' + t.address.slice(-4);
+    return `<tr data-addr="${t.address}" title="${t.address}">
+      <td>${i+1}</td>
+      <td>${t.symbol} <span style="color:var(--text-dim);font-size:10px">${addr}</span></td>
+      <td>${t.parent_symbol || '??'}</td>
+      <td>${t.multiplier}x</td>
+      <td>${fmtCanopyPrice(t.dex_price_pls)}</td>
+      <td>${fmtCanopyPrice(t.backing_pls)}</td>
+      <td class="${parityClass}">${t.parity_pct.toFixed(1)}%</td>
+      <td>${fmtPLS(t.liquidity_pls)}</td>
+      <td><span class="canopy-score ${scoreClass}">${t.score.toFixed(0)}</span></td>
+      <td><span class="canopy-play ${play.cls}">${play.text}</span></td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.addEventListener('click', () => {
+      const addr = row.dataset.addr;
+      const token = canopyData.find(t => t.address === addr);
+      if (!token) return;
+      const existing = row.nextElementSibling;
+      if (existing && existing.classList.contains('canopy-detail-row')) {
+        existing.remove();
+        return;
+      }
+      tbody.querySelectorAll('.canopy-detail-row').forEach(r => r.remove());
+      const detail = document.createElement('tr');
+      detail.className = 'canopy-detail-row';
+      const playText = token.parity_pct > 105
+        ? `Mint ${token.symbol} via ${token.parent_symbol} at ${token.multiplier}x multiplier \u2192 sell on DEX for ${(token.parity_pct - 100).toFixed(1)}% profit above parity`
+        : token.parity_pct < 90
+        ? `Buy ${token.symbol} on DEX at ${(100 - token.parity_pct).toFixed(1)}% below parity \u2192 hold for mean-reversion`
+        : `Near parity \u2014 no actionable edge currently`;
+      detail.innerHTML = `<td colspan="10">
+        <span class="canopy-action">${playText}</span><br>
+        Address: <span style="color:var(--cyan)">${token.address}</span> |
+        Parent: <span style="color:var(--cyan)">${token.parent_address || '--'}</span> |
+        DEX Pair: <span style="color:var(--cyan)">${token.pair_address || '--'}</span> |
+        Score: |Parity% \u2212 100| \u00D7 \u221A(Liquidity) = ${token.score.toFixed(1)}
+      </td>`;
+      row.after(detail);
+    });
+  });
+}
+
 // ─── Init ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initChart();
@@ -2290,6 +2638,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTimeframeButtons();
   initExplorer();
   initComms();
+  initCanopy();
   requestAnimationFrame(tickBlockRing);
   document.getElementById('wallet-toggle').addEventListener('click', () => {
     const bd = document.getElementById('wallet-breakdown');
