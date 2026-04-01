@@ -132,20 +132,19 @@ def send_tx(
     if tx_account is None:
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
 
-    # Step 2: Gas price ceiling check (use base fee as the reference)
-    gas_price = get_submit_pool().call(lambda w3: w3.eth.gas_price)
-    if gas_price > GAS_PRICE_CEIL:
-        raise GasTooHigh(
-            f"Gas price {gas_price / 1e9:.1f} Beats > ceiling "
-            f"{GAS_PRICE_CEIL / 1e9:.0f} Beats — skipping cycle"
-        )
-
-    # Step 3: estimate_gas (abort if fails)
+    # Step 2: estimate_gas (abort if fails)
     gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
     gas_limit = int(gas_est * gas_mult)
 
-    # Step 3b: Build EIP-1559 gas params
+    # Step 2b: Build EIP-1559 gas params
     eip1559 = build_gas_params("fast")
+
+    # Step 2c: Gas price ceiling check (against actual maxFeePerGas)
+    if eip1559["maxFeePerGas"] > GAS_PRICE_CEIL:
+        raise GasTooHigh(
+            f"maxFeePerGas {eip1559['maxFeePerGas'] / 1e9:.1f} Beats > ceiling "
+            f"{GAS_PRICE_CEIL / 1e9:.0f} Beats — skipping cycle"
+        )
     cost_pls = gas_est * eip1559["maxFeePerGas"] / 1e18
     log.info("  ⛽ Gas: est=%d  limit=%d (%.1fx)  maxFee=%.0f Beats  Cost≤%.4f PLS",
              gas_est, gas_limit, gas_mult, eip1559["maxFeePerGas"] / 1e9, cost_pls)

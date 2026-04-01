@@ -37,6 +37,12 @@ Real-time dashboard for the JOYSTICK arbitrage bot on PulseChain (369).
 | GET | `/api/wallet` | Joey's balances, validator progress, gas buffer |
 | GET | `/api/engines` | All 8 engine statuses, ROI, earnings |
 | GET | `/api/gas` | Gas price (Beats), ceiling, condition |
+| GET | `/api/canopy` | Parity Scope — Maria leaf token parity rankings (DEX price vs backing value) |
+| GET | `/api/tgsv8` | TGSv8 contract state (balances, working capital) |
+| GET | `/api/history` | TX history from event logs |
+| GET | `/api/terminal` | Terminal interface rendering |
+| GET | `/api/comms` | Communications / VOID chat |
+| GET | `/api/explorer` | Block explorer integration |
 
 ## Quick Start
 
@@ -81,10 +87,10 @@ Without the bot running, it falls back to known static states from the diary ent
 
 ## Roadmap
 
-- [ ] **Layer 2: Frontend** — React or plain HTML dashboard
+- [x] **Layer 2: Frontend** — HTML dashboard (`frontend/index.html`)
+- [x] **TX history** — Event log integration via `history_route.py`
+- [x] **Parity Scope** — Canopy route for leaf token parity rankings
 - [ ] **PLS/USD price feed** — CoinGecko or DEX oracle for USD values
-- [ ] **GIBS price oracle** — read GIBS/WPLS pair reserves for PLS value
-- [ ] **TX history from chain** — scan BlockScout API for Joey wallet TXs
 - [ ] **WebSocket push** — replace polling with server-push for real-time updates
 - [ ] **Token gate** — Vercel deployment with GIBSON-token-gated access
 - [ ] **Engine controls** — Layer 3: start/stop toggles, strategy override (write API)

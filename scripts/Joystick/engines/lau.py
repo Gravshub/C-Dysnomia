@@ -123,6 +123,7 @@ from ..core.config import (
     JOEY_WALLET,
     AFFECTION,
     GIBS_LAU,
+    GAS_MULT,
 )
 from ..core.chain import w3_read, w3_submit, erc20, safe
 from ..core.executor import send_tx, approve_if_needed
@@ -433,7 +434,7 @@ class LAUEngine(EngineBase):
         sim_call(alpha_fn)  # raises SimulationFailed on revert
 
         gas_price    = w3_submit.eth.gas_price
-        gas_cost_wei = int(FULL_ROUND_GAS_EST * gas_price * 1.3)
+        gas_cost_wei = int(FULL_ROUND_GAS_EST * gas_price * GAS_MULT)
 
         return 0, gas_cost_wei
 

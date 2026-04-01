@@ -52,7 +52,7 @@ Joystick V2 runs a **3-wallet parallel pipeline** with async orchestration. Each
 scripts/Joystick/
 ├── bot.py                  # V2 orchestrator — 3-wallet async pipeline
 ├── __init__.py
-├── requirements.txt        # web3, eth_abi, pycryptodome, requests, python-dotenv
+├── requirements.txt        # web3, python-dotenv, requests
 │
 ├── core/                   # Infrastructure layer
 │   ├── config.py           # Single source of truth: addresses, thresholds, env vars
@@ -78,16 +78,17 @@ scripts/Joystick/
 │   ├── route_auditor.py    # Multi-hop route profitability verification
 │   ├── pair_discovery.py   # Automated LP pair discovery across factories
 │   ├── graph.py            # Token graph for pathfinding
-│   └── data_store.py       # Persistent data layer (JSON files)
+│   ├── data_store.py       # Persistent data layer (JSON files)
+│   └── supply_oracle.py   # Supply inflation tracking
 │
 ├── engines/                # Income engines (each inherits EngineBase)
 │   ├── base.py             # EngineBase ABC + EngineResult + SimResult dataclasses
 │   ├── arb.py              # E1 RAZOR — cross-DEX QING arbitrage         [Seller]
-│   ├── dss.py              # E2 CEREAL — chatAndClaim → GIBS → PLS       [Joey]
+│   ├── dss.py              # E2 CEREAL — JoystickHub primeGibs+mintLPAndSell [Joey]
 │   ├── beat.py             # E3 MERIDIAN — territory positioning          [Joey]
 │   ├── token_factory.py    # E4 FACTORY — AFF multiBuyWith + WM mint     [Minter]
 │   ├── lau.py              # E5 ABUPRU — math state loop + EmitSniper    [Joey]
-│   ├── treasury_sniper.py  # E6 DaVINCI — batchClaimTreasury via recon   [Minter]
+│   ├── treasury_sniper.py  # E6 DaVINCI — batchClaimTreasury via recon   [Joey]
 │   ├── spine_runner.py     # E7 BACKBONE — batchMintAndClaim on Deb=True [Minter]
 │   └── phreak.py           # E8 PHR3AK — token web manipulation          [Minter]
 │
@@ -100,7 +101,10 @@ scripts/Joystick/
 │   ├── tgsv8_mint_test.py  # TGSv8 mint testing
 │   ├── tgsv8_mint_wm_test.py  # WM mint test via TGSv8
 │   ├── test_aff_wm_cycle.py   # AFF+WM cycle profitability test
-│   └── archive/            # Superseded tools
+│   ├── hub_diagnostic.py      # JoystickHub diagnostic tool
+│   ├── setup_tgsv8plus_auth.py # TGSv8Plus auth setup
+│   ├── test_tgsv8plus_live.py  # TGSv8Plus live testing
+│   └── verify_key.py         # Wallet key verification
 │
 ├── tests/                  # Test suite
 │   ├── conftest.py         # Pytest fixtures
@@ -108,6 +112,9 @@ scripts/Joystick/
 │   ├── test_anvil_full.py  # Full integration tests on Anvil fork
 │   ├── test_data_store.py  # Data store unit tests
 │   ├── test_engines_5_6.py # E5/E6 unit tests
+│   ├── test_helios_upgrades.py  # Helios PingPong intelligence tests
+│   ├── test_joystick_hub.py     # JoystickHub integration tests
+│   ├── test_tgsv8plus.py        # TGSv8Plus unit tests
 │   ├── test_razor_pulsechain.py  # E1 live PulseChain tests
 │   ├── TEST_REPORT.md      # Test results documentation
 │   └── README.md           # Test setup guide
@@ -132,10 +139,50 @@ scripts/Joystick/
     │   ├── affection_minter_profiles.json      # Bot operator profiles
     │   ├── affection_txs_2026_raw.json         # Raw TX data
     │   └── gas_efficiency_reference.json       # Gas benchmarks
+    ├── deploy_candidates.json   # V4 token candidates for E8 DEPLOY
+    ├── supply_snapshots.json    # Supply inflation tracking
+    ├── arb_routes.json          # Arbitrage route definitions
+    ├── strategist_state.json    # Persisted strategist state
+    ├── pulsex_dual_dex_tokens.json  # Dual-DEX token metadata
     ├── JOYSTICK_v2_PLAN.md  # Treasury web exploitation plan
     ├── gibs_liquidity_strategy.md  # LP deployment strategy
     ├── build_log.md         # Build history
     └── treasury_recon.py    # Recon data generation script
+
+├── dashboard/              # FastAPI read-only API server
+│   ├── CLAUDE.md           # Dashboard-specific docs
+│   ├── server.py           # FastAPI app, CORS, lifespan
+│   ├── config.py           # Dashboard config
+│   ├── models.py           # Pydantic response models
+│   ├── chain_reader.py     # Multicall3 batch reads
+│   ├── overview.py         # Aggregated dashboard payload
+│   ├── engines.py          # Engine status rendering
+│   ├── wallet.py           # Wallet balance display
+│   ├── gas.py              # Gas price module
+│   ├── history.py          # TX history
+│   ├── routes/             # API route handlers
+│   │   ├── overview.py     # GET /api/overview
+│   │   ├── wallet.py       # GET /api/wallet
+│   │   ├── engines.py      # GET /api/engines
+│   │   ├── gas.py          # GET /api/gas
+│   │   ├── terminal.py     # Terminal interface
+│   │   ├── canopy.py       # Parity Scope — leaf token parity rankings
+│   │   ├── comms.py        # Communications
+│   │   ├── explorer.py     # Block explorer integration
+│   │   ├── history_route.py # TX history endpoint
+│   │   └── tgsv8.py        # TGSv8 state endpoint
+│   └── frontend/
+│       └── index.html      # Dashboard frontend
+
+└── deploy/                 # Production VPS deployment
+    ├── DEPLOY_GUIDE.md     # Deployment documentation
+    ├── joystick-bot.service    # systemd unit for bot
+    ├── joystick-api.service    # systemd unit for API
+    ├── setup_vps.sh        # VPS initial setup
+    ├── update.sh           # Update script
+    ├── health_check.sh     # Health check
+    ├── Fix_imports.sh      # Import fixer
+    └── env.pulse.template  # Environment template
 ```
 
 ---
@@ -145,17 +192,17 @@ scripts/Joystick/
 Non-negotiable across all engines and core modules:
 
 1. **Always simulate via `eth_call` before sending any TX** — use `simulator.py`
-2. **Always `estimate_gas()` with 1.3x multiplier** — abort if it fails, never send blind
-3. **Dual RPC**: `rpc-pulsechain.g4mm4.io` for reads, `rpc.pulsechain.com` for TX submit
-4. **Gas denomination**: Beats (not Gwei). `1 PLS = 1,000,000,000 Beats`
-5. **Gas price ceiling**: skip cycle if `gas_price > GAS_PRICE_CEIL` (default 2M Gwei)
-6. **100K PLS gas buffer**: never let any wallet drop below its floor
-7. **No OpenZeppelin imports** in Solidity — inline guards
-8. **Atomic file writes**: `os.rename()` / `os.replace()` for data persistence
-9. **Never rewrite existing scripts** — import as modules
-10. **Chain ID 369** — always set explicitly
-11. **Single RPC for critical TXs** — avoid RPCPool race ("replacement underpriced" bug)
-12. **pycryptodome for keccak** — not pysha3 (unreliable)
+2. **Always `estimate_gas()` with `GAS_MULT` (2.5x) multiplier** — abort if it fails, never send blind
+3. **EIP-1559 Type 2 transactions** — all TXs use `maxFeePerGas` + `maxPriorityFeePerGas`
+4. **Dual RPC**: `rpc-pulsechain.g4mm4.io` for reads, `rpc.pulsechain.com` for TX submit
+5. **Gas denomination**: Beats (not Gwei). `1 PLS = 1,000,000,000 Beats`
+6. **Gas price ceiling**: skip cycle if `maxFeePerGas > GAS_PRICE_CEIL` (default 2M Gwei)
+7. **100K PLS gas buffer**: never let any wallet drop below its floor
+8. **No OpenZeppelin imports** in Solidity — inline guards
+9. **Atomic file writes**: `os.rename()` / `os.replace()` for data persistence
+10. **Never rewrite existing scripts** — import as modules
+11. **Chain ID 369** — always set explicitly
+12. **Single RPC for critical TXs** — avoid RPCPool race ("replacement underpriced" bug)
 
 ---
 
@@ -222,25 +269,25 @@ ENGINE_DISPLAY_NAMES = {
 ENGINE_WALLET_ROLES = {
     "Arb": "seller",  "DSS": "joey",  "Beat": "joey",
     "TokenFactory": "minter",  "LAU": "joey",
-    "TreasurySniper": "minter",  "SpineRunner": "minter",
+    "TreasurySniper": "joey",  "SpineRunner": "minter",
     "PHR3AK": "minter",
 }
 ```
 
 ---
 
-## Engine Status Summary (Block 26,041,473 — 2026-03-16)
+## Engine Status Summary (as of 2026-04-01)
 
 | # | Name | File | Wallet | Description | Status |
 |---|------|------|--------|-------------|--------|
-| E1 | RAZOR (Arb) | `arb.py` (41K) | Seller | Cross-DEX QING arbitrage via TGSv8 `atomicArb()` | Ready — net-negative per recon |
-| E2 | CEREAL (DSS) | `dss.py` (7.5K) | Joey | `chatAndClaimWithMultiplier(17)` → GIBS → PLS | **BLOCKED** — DSS has 0 GIBS |
-| E3 | MERIDIAN (Beat) | `beat.py` (6.5K) | Joey | Territory positioning (`CHEON.Su` + `META.Beat`) | Running — Dione=41 |
-| E4 | FACTORY | `token_factory.py` (50K) | Minter | AFF `multiBuyWith` all 5 routes + TGSv8 `mintWM()` | **AFF DISABLED** — BuyWith unprofitable |
-| E5 | ABUPRU (LAU) | `lau.py` (35K) | Joey | Mathematical state loop + EmitSniper | Gated — 150K PLS floor |
-| E6 | DaVINCI (Treasury Sniper) | `treasury_sniper.py` (12K) | Minter | `batchClaimTreasury()` via recon data | Wired — needs recon targets |
-| E7 | BACKBONE (Spine Runner) | `spine_runner.py` (17K) | Minter | `batchMintAndClaim()` on Debenture=True | Blocked — needs E8 ARM |
-| **E8** | **PHR3AK** | **`phreak.py` (47K)** | **Minter** | **Token web manipulation (ARM/DEPLOY/STITCH)** | **Ready — ARM mode critical path** |
+| E1 | RAZOR (Arb) | `arb.py` | Seller | Cross-DEX QING arbitrage via TGSv8 `atomicArb()` | Ready — net-negative per recon |
+| E2 | CEREAL (Hub) | `dss.py` | Joey | JoystickHub `primeGibs` + `mintLPAndSell` — LP first, sell second | Wired — Hub V2 deployed |
+| E3 | MERIDIAN (Beat) | `beat.py` | Joey | Territory positioning (`CHEON.Su` + `META.Beat`) | Running — Dione=41 |
+| E4 | FACTORY | `token_factory.py` | Minter | AFF `multiBuyWith` all 5 routes + TGSv8 `mintWM()` | AFF routes unprofitable |
+| E5 | ABUPRU (LAU) | `lau.py` | Joey | Mathematical state loop + EmitSniper | Gated — 150K PLS floor |
+| E6 | DaVINCI (Treasury Sniper) | `treasury_sniper.py` | Joey | `batchClaimTreasury()` via recon — routes through Joey | Wired — recon refresh added |
+| E7 | BACKBONE (Spine Runner) | `spine_runner.py` | Minter | `batchMintAndClaim()` on Debenture=True | Blocked — needs E8 ARM |
+| **E8** | **PHR3AK** | **`phreak.py`** | **Minter** | **Token web manipulation (ARM/DEPLOY/STITCH)** | **Ready — ARM mode critical path** |
 
 ---
 
@@ -252,13 +299,17 @@ ENGINE_WALLET_ROLES = {
 **Current**: Net-negative across all scanned pairs. V1 pools too shallow.
 **Triggers**: Price oracle detects >5% spread between any two DEX paths.
 
-### E2 — CEREAL (DSS Income) `[Joey]`
-**File**: `dss.py` (7.5K)
-**Mechanism**: `chatAndClaimWithMultiplier(17)` on DSS → 18 GIBS per call → swap GIBS→PLS via GIBS/WPLS V2 pair.
-**Economics**: GIBS at 195.73 PLS, break-even at ~21.5 PLS/GIBS = **9x above break-even**.
-**Per cycle**: ~3,523 PLS gross before gas.
-**Current**: **BLOCKED** — DSS has 0 GIBS balance. Needs refund or mint cycle.
-**Key addresses**: DSS `0x91Df6931...`, GIBS/WPLS V2 `0x7BCa1c997c...`
+### E2 — CEREAL (Hub Harvest) `[Joey]`
+**File**: `dss.py`
+
+**History**: V1 (DSS chatAndClaim — DEPRECATED) → V2 (TGSv8+ harvestCycle) → **V3 (JoystickHub)**
+
+**Mechanism (V3 — current)**: Two-TX pipeline via JoystickHub:
+1. `hub.primeGibs(N)` — calls `GIBS_LAU.mintToCap()` × N to prime self-balance (silent, no VOID spam)
+2. `hub.mintLPAndSell{value}(N, lpBps, burnBps, lpDex, minSellOut, sellPath, sellDex)` — LP first (50% GIBS + WPLS), sell second (remaining 50%)
+
+**Economics**: Per cycle: mint 17 GIBS, LP 50% + sell 50% → ~1,190 PLS net + LP position value (~1,678 PLS recoverable). Gas: ~390 PLS.
+**Key addresses**: Hub `0x7bd76A0f...`, Hub:Harvest V2 `0x400D052F...`, GIBS/WPLS V2 `0x7BCa1c997c...`
 
 ### E3 — MERIDIAN (Territory Beat) `[Joey]`
 **File**: `beat.py` (6.5K)
@@ -281,10 +332,10 @@ ENGINE_WALLET_ROLES = {
 **Gate**: 150K PLS floor. Wallet at 1.98M PLS (above floor, low priority).
 **Strategic**: Always valid to run alongside other engines.
 
-### E6 — DaVINCI (Treasury Sniper) `[Minter]`
-**File**: `treasury_sniper.py` (12K)
-**Mechanism**: TGSv8 `batchClaimTreasury()` on tokens with claimable backing > acquisition cost.
-**Data**: `data/recon_results.json` (39K lines).
+### E6 — DaVINCI (Treasury Sniper) `[Joey]`
+**File**: `treasury_sniper.py`
+**Mechanism**: `batchClaimTreasury()` on tokens with claimable backing > acquisition cost. Routes through Joey wallet (TGSv8 balance gate removed).
+**Data**: `data/recon_results.json` (39K lines). Recon refresh added for live target discovery.
 **Yield**: Realistic ~1-10K PLS after pool price impact.
 **Key finding**: All high-value targets are V3 Index Minter tokens (family-isolated Claim).
 
@@ -296,7 +347,7 @@ ENGINE_WALLET_ROLES = {
 **Blocked by**: E8 PHR3AK ARM mode — needs ammo tokens in TGSv8 to unlock.
 
 ### E8 — PHR3AK (Token Web Manipulation) `[Minter]`
-**File**: `phreak.py` (47K, 1221 lines)
+**File**: `phreak.py` (1,337 lines)
 
 > *"Phantom Phreak didn't need to own the phone company. He just needed to know how the switches worked."*
 
@@ -459,11 +510,11 @@ Owner:       Joey (0x1736...)
 
 ## PLS Generation Strategies
 
-### Strategy A: DSS (E2) — HIGHEST CONFIDENCE
-`chatAndClaimWithMultiplier(17)` → 18 GIBS → swap to PLS.
-- GIBS: 195.73 PLS (9x above 21.5 PLS break-even)
-- Per cycle: ~3,523 PLS gross
-- **BLOCKED**: DSS has 0 GIBS — needs refund
+### Strategy A: Hub Harvest (E2) — HIGHEST CONFIDENCE
+JoystickHub `primeGibs(N)` → `mintLPAndSell()` — LP-first, sell-second.
+- Per cycle: mint 17 GIBS, LP 50% + sell 50% → ~1,190 PLS net + LP position value
+- Gas: ~390 PLS (prime + harvest)
+- Zero VOID spam (silent `mintToCap` via Hub)
 
 ### Strategy B: PHR3AK ARM → BACKBONE Pipeline (E8 → E7)
 **Critical path for unlocking primary revenue engine.**
@@ -515,6 +566,8 @@ DSS at max capacity: ~184K PLS/hour. Real volume comes from treasury web engines
 
 ### graph.py — Token graph for multi-hop pathfinding. Used by E1 RAZOR and E8 STITCH.
 
+### supply_oracle.py — Supply inflation tracking. Snapshots token totalSupply over time for minting velocity analysis.
+
 ---
 
 ## Core Modules
@@ -526,7 +579,9 @@ All addresses as `Web3.to_checksum_address()`. Key additions in V2:
 - `MINTER_WALLET`, `SELLER_WALLET` — multi-wallet addresses
 - `AdaptiveDelay` — exponential backoff when idle, tighten when profitable
 - Graph arb params: `GRAPH_ARB_MIN_PROFIT_PLS`, `GRAPH_ARB_MAX_IMPACT_PCT`, `GRAPH_ARB_MAX_HOPS`
+- `GAS_MULT` — 2.5x gas estimate multiplier (bumped from 1.3x for PulseChain reliability)
 - `GAS_PRICE_CEIL` — default 2M Gwei (PLS is cheap, gas is typically 500K-1M Beats)
+- `JOYSTICK_HUB` — `0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14` (JoystickHub modular proxy)
 - `BURN_ADDRESS` — `0x0000000000000000000000000000000000000369` (verified EOA, 158B PLS already burned)
 
 ### chain.py — Multicall3 batch reads, `erc20()`, `safe()`, `tgsv8_contract()`, `multi_affection_contract()`
@@ -564,7 +619,9 @@ Tracks competitor wallets and their AFF minting activity. Key operators:
 | Joey Wallet | `0x17367877aF5A8D0Eb33ba5689A880f696386E24D` | EOA — identity |
 | TGSv8 | `0xAD352a27ceaaC5657e3E9127f964F4746A8aAc32` | Execution substrate |
 | JV8A | `0x364793Ea48DEe0b5484F98235ABd1B5f996A0C30` | V4 treasury (unminted) |
-| DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | DysnomiaSelfSnipev4 |
+| JoystickHub | `0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14` | Modular proxy (E2) |
+| Hub:Harvest V2 | `0x400D052FAf0f46D3d5140a8F7246B69954539424` | HarvestModule (active) |
+| DSS | `0x91Df693177eE5C81016d0B7c4c2052A7d229c031` | DysnomiaSelfSnipev4 (DEPRECATED) |
 | GIBS LAU | `0x66a08aa12da955eb63d7ac121a88b2b210a07b03` | Player token |
 | GIBS QING | `0x1B8774C0d0ba2A814A592bE7978DFe78b0e86E35` | Venue |
 | Multi AFF | `0xCF138a83D739eE98D7A54159E94e5BFaa4B61988` | Batch AFF minter |
@@ -611,6 +668,12 @@ python -m scripts.Joystick.bot --status         # print engine/strategist status
 python -m scripts.Joystick.bot --wallet-status  # show 3-wallet balances + auth
 python -m scripts.Joystick.bot --beat-only      # run Beat engine only
 python -m scripts.Joystick.bot --lau-only       # run LAU engine only
+python -m scripts.Joystick.bot --e2-only        # run E2 CEREAL only
+python -m scripts.Joystick.bot --e6-only        # run E6 DaVINCI only
+python -m scripts.Joystick.bot --engine DSS     # run specific engine by name
+python -m scripts.Joystick.bot --log-status     # print log status
+python -m scripts.Joystick.bot --rpc-status     # check RPC connectivity
+python -m scripts.Joystick.bot --force-test     # force test mode
 ```
 
 ### Environment Variables
@@ -630,7 +693,7 @@ python -m scripts.Joystick.bot --lau-only       # run LAU engine only
 | `SELLER_GAS_FLOOR` | `30000` | Min PLS to keep (Seller) |
 | `SWEEP_THRESHOLD` | `500000` | PLS threshold to trigger Seller→Joey sweep |
 | `GAS_PRICE_CEIL` | `2000000` | Max gas price in Gwei |
-| `GAS_MULT` | `1.3` | Gas estimate multiplier |
+| `GAS_MULT` | `2.5` | Gas estimate multiplier (EIP-1559 Type 2) |
 | `MAX_SLIPPAGE` | `0.02` | DEX slippage tolerance |
 | `CYCLE_DELAY` | `30` | Base seconds between cycles |
 | `CYCLE_DELAY_MIN` | `15` | Min adaptive delay |
@@ -643,14 +706,14 @@ python -m scripts.Joystick.bot --lau-only       # run LAU engine only
 
 ---
 
-## Current State (Block 26,041,473 — 2026-03-16)
+## Current State (as of 2026-04-01)
 
 ### Wallet
 ```
-PLS:        1,979,625        Nonce:  128
-GIBS:       0 (all in LP)    WM:     263.15
-AFF:        127.18           ATROPA: 166.78
-VOID:       51.22            FED:    0.04
+PLS:        ~1,979,625       Nonce:  128+
+GIBS:       0 (all in LP)    WM:     ~263
+AFF:        ~127             ATROPA: ~167
+VOID:       ~51              Gas:    EIP-1559 Type 2
 ```
 
 ### TGSv8
@@ -658,21 +721,25 @@ VOID:       51.22            FED:    0.04
 PLS:  0        WM:  9
 ```
 
-### Market
-```
-GIBS:     195.73 PLS         GIBS supply:  3,396
-PLS/USD:  ~$0.0148           DSS GIBS:     0
-Gas:      ~741K Beats
-```
+### Key Changes Since 2026-03-16
+- JoystickHub deployed (block 26,092,219) + Hub:Harvest V2 (block 26,149,418)
+- E2 rewritten: V1 DSS → V2 TGSv8+ → V3 JoystickHub (silent `mintToCap`, LP-first)
+- EIP-1559 Type 2 TXs, GAS_MULT bumped 1.3x → 2.5x
+- E6 routes through Joey (TGSv8 balance gate removed, recon refresh added)
+- 6 autoresearch experiments merged (E2/E8 unblock, E4 sim timeout, UNLOCK_MAP cleanup)
+- New CLI flags: `--e2-only`, `--e6-only`, `--engine`, `--log-status`, `--rpc-status`, `--force-test`
+- Dashboard: canopy route added (Parity Scope — leaf token parity rankings)
+- Supply oracle module added
+- Bug fixes: gas ceiling now checks `maxFeePerGas`, `safe()` logs exceptions, E5 uses `GAS_MULT`
 
 ### Engine Readiness
 ```
 E1 RAZOR:      Ready — net-negative, low priority              [Seller]
-E2 CEREAL:     BLOCKED — 0 GIBS in DSS                        [Joey]
+E2 CEREAL:     Wired — Hub V2 deployed, primeGibs+mintLPAndSell [Joey]
 E3 MERIDIAN:   Running — Dione=41                              [Joey]
-E4 FACTORY:    AFF DISABLED / WM unprofitable                  [Minter]
+E4 FACTORY:    AFF routes unprofitable / WM unprofitable        [Minter]
 E5 ABUPRU:     Gated — 150K floor (wallet OK, low priority)   [Joey]
-E6 DaVINCI:    Wired — needs live recon targets                [Minter]
+E6 DaVINCI:    Wired — recon refresh, routes through Joey      [Joey]
 E7 BACKBONE:   Blocked — needs E8 ARM first                    [Minter]
 E8 PHR3AK:     READY — ARM mode is critical path              [Minter]
 ```
@@ -682,12 +749,12 @@ E8 PHR3AK:     READY — ARM mode is critical path              [Minter]
 ## What's Next
 
 1. **E8 ARM** → Buy OZZY → unlock E7 BACKBONE (one 100 PLS TX)
-2. **Unblock E2** — DSS needs GIBS
+2. **E2 Hub Harvest** → Run primeGibs + mintLPAndSell cycles
 3. **E4 background monitoring** — scan for WM and AFF price crossover windows
-4. **E6 use current recon** — treasury targets
+4. **E6 live recon** — treasury targets with refreshed data
 5. **E8 STITCH** — create missing high-value LP pairs for E1 arb surfaces
 6. **Debenture Monitor** — watch for V2 Federal token Deb status flips
 7. **Multi-wallet deployment** — set up Minter + Seller keys, TGSv8 `setAuth()`
 
-**Last Updated**: 2026-03-16 (block 26,041,473)
-**Status**: OPERATIONAL (V2). E8 PHR3AK ready — ARM mode is critical path to unlock E7. E2 blocked (0 GIBS). AFF routes unprofitable. 3-wallet pipeline ready.
+**Last Updated**: 2026-04-01
+**Status**: OPERATIONAL (V2). JoystickHub deployed. E2 rewritten to Hub V3 (silent harvest). E8 PHR3AK ready — ARM mode is critical path to unlock E7. EIP-1559 Type 2 TXs with 2.5x gas. 3-wallet pipeline ready.
