@@ -133,7 +133,10 @@ class TreasurySniperEngine(EngineBase):
         if not best:
             return (0, 0)
 
-        total_profit = sum(int(t.estimated_pls * 10**18) for t in best)
+        MAX_SANE_PROFIT_WEI = int(100_000 * 10**18)  # 100K PLS sanity cap per target
+        total_profit = sum(
+            min(int(t.estimated_pls * 10**18), MAX_SANE_PROFIT_WEI) for t in best
+        )
         gas_price = w3_read.eth.gas_price
         gas_cost = GAS_PER_CLAIM * len(best) * gas_price
 
@@ -386,7 +389,11 @@ class TreasurySniperEngine(EngineBase):
 
         fn_call = tgsv8.functions.batchClaimTreasury(treasuries, backing_assets, amounts)
 
-        # Estimate real PLS output using best sell routes
+        # Estimate real PLS output using best sell routes.
+        # route["expected_pls"] is in wei (raw DEX output). Cap at 100K PLS per
+        # target to prevent inflated cross-treasury route estimates from
+        # dominating strategist scoring.
+        MAX_SANE_PROFIT_WEI = int(100_000 * 10**18)  # 100K PLS sanity cap
         total_est_pls = 0
         sell_routes = {}
         for t in batch:
@@ -394,7 +401,11 @@ class TreasurySniperEngine(EngineBase):
             if claim_amount > 0:
                 route = self._find_best_sell_route(t.backing_asset, claim_amount)
                 sell_routes[t.address.lower()] = route
-                total_est_pls += route["expected_pls"]
+                est = route["expected_pls"]
+                if est > MAX_SANE_PROFIT_WEI:
+                    log.warning("E6: capping inflated route estimate %d wei → %d", est, MAX_SANE_PROFIT_WEI)
+                    est = MAX_SANE_PROFIT_WEI
+                total_est_pls += est
             else:
                 total_est_pls += int(t.estimated_pls * 10**18)
 
