@@ -270,9 +270,14 @@ class WalletManager:
                      sweep_amount / 1e18)
             return None
 
-        gas_price = self._submit_pool.call(lambda w3: w3.eth.gas_price)
+        # EIP-1559 Type 2 gas params (consistent with all other TXs)
+        base_fee = self._read_pool.call(
+            lambda w3: w3.eth.get_block("latest")["baseFeePerGas"]
+        )
+        max_priority = int(base_fee * 0.1)  # 10% tip
+        max_fee = int(base_fee * 2) + max_priority  # 2x base + tip
         gas_limit = 21000  # Simple PLS transfer
-        gas_cost = gas_price * gas_limit
+        gas_cost = max_fee * gas_limit
         send_amount = sweep_amount - gas_cost
         if send_amount <= 0:
             return None
@@ -285,9 +290,11 @@ class WalletManager:
             "to": self.joey.address,
             "value": send_amount,
             "gas": gas_limit,
-            "gasPrice": gas_price,
+            "maxFeePerGas": max_fee,
+            "maxPriorityFeePerGas": max_priority,
             "nonce": nonce_tracker.next(),
             "chainId": CHAIN_ID,
+            "type": 2,
         }
 
         # Sweep is a plain ETH transfer (21K gas, zero revert risk).
@@ -297,17 +304,30 @@ class WalletManager:
         log.info("Sweep TX: 0x%s (%.4f PLS Seller → Joey)",
                  tx_hash, send_amount / 1e18)
 
+        # Poll receipt directly (don't use RPCPool — same hang pattern as executor)
+        import time as _time
+        from .chain import w3_read
+        tx_hash_bytes = bytes.fromhex(tx_hash.replace("0x", ""))
+        receipt = None
+        for _poll in range(24):  # 24 × 5s = 120s max
+            _time.sleep(5)
+            try:
+                receipt = w3_read.eth.get_transaction_receipt(tx_hash_bytes)
+                break
+            except Exception:
+                pass
+
+        if receipt is None:
+            log.warning("Sweep receipt not found after 120s — TX may have been dropped")
+            return None
         try:
-            tx_hash_bytes = bytes.fromhex(tx_hash.replace("0x", ""))
-            receipt = self._submit_pool.call(
-                lambda w3: w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=120))
             if receipt["status"] == 1:
                 log.info("Sweep OK: %.4f PLS transferred", send_amount / 1e18)
             else:
                 log.error("Sweep REVERTED")
             return dict(receipt)
         except Exception as exc:
-            log.error("Sweep receipt timeout: %s", exc)
+            log.error("Sweep receipt error: %s", exc)
             return None
 
     def wallet_status_lines(self) -> list[str]:
