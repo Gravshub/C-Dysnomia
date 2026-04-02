@@ -163,14 +163,17 @@ class SpineRunnerEngine(EngineBase):
         self._refresh_spines()
         best = self._pick_best_spine()
         if not best:
+            log.debug("E7: no best spine — all inactive or empty")
             return (0, 0)
 
         if not self._live_debenture_check(best):
             best.active = False
+            log.info("E7: %s Debenture flipped to False — deactivated", best.label)
             return (0, 0)
 
         amount_per_iter = self._size_iteration(best)
         if amount_per_iter == 0:
+            log.debug("E7: iteration size = 0 for %s", best.label)
             return (0, 0)
 
         child_out    = BATCH_ITERATIONS * amount_per_iter
@@ -182,6 +185,10 @@ class SpineRunnerEngine(EngineBase):
         gas_cost  = int(SPINE_GAS_EST * gas_price * GAS_MULT)
 
         if pls_expected <= gas_cost:
+            log.info("E7: %s unprofitable — revenue %.6f PLS vs gas %.1f PLS "
+                     "(price=%.2e PLS/tok, batch=%d tok)",
+                     best.label, pls_expected / 1e18, gas_cost / 1e18,
+                     best.pls_per_child, child_out // 10**18)
             return (0, 0)
 
         return (pls_expected - gas_cost, gas_cost)
@@ -501,6 +508,14 @@ class SpineRunnerEngine(EngineBase):
             return 0
         if parent_bal == 0:
             return 0
+
+        # For near-zero value tokens, use maximum available balance
+        # divided across iterations to maximize revenue per TX
+        if spine.pls_per_child < 1e-6:
+            max_per_iter = parent_bal // BATCH_ITERATIONS
+            return max(max_per_iter, 10**spine.decimals)
+
+        # Normal sizing for tokens with meaningful value
         per_iter = max(10**spine.decimals, parent_bal // 10)
         return min(per_iter, 1000 * 10**spine.decimals)
 
