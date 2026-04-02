@@ -30,7 +30,7 @@ SIM_TIMEOUT = 5.0
 SIM_TIMEOUT_MAP: dict[str, float] = {
     "Arb": 15.0,
     "TokenFactory": 15.0,  # 5 routes × 2 DEXes + WM = ~12 RPC calls
-    "PHR3AK": 20.0,  # STITCH mode scans full token graph (~16s)
+    "PHR3AK": 30.0,  # STITCH mode scans full token graph (14-22s depending on RPC load)
 }
 
 
