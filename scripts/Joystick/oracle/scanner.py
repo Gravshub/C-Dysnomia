@@ -47,7 +47,7 @@ _active_payment_filter: set = set()
 
 
 # ── Cache helpers ─────────────────────────────────────────────────────────────
-def _load_cache() -> list[dict] | None:
+def _load_cache(allow_stale: bool = False) -> list[dict] | None:
     if not os.path.exists(CACHE_FILE):
         return None
     try:
@@ -56,6 +56,11 @@ def _load_cache() -> list[dict] | None:
         age = time.time() - data.get("timestamp", 0)
         if age < CACHE_TTL:
             log.debug("Scanner cache hit: %d tokens, age %.0fs", len(data["tokens"]), age)
+            return data["tokens"]
+        # Stale cache grace: return old data rather than triggering 4,600+ RPC calls
+        if allow_stale and age < CACHE_TTL * 2:
+            log.info("Scanner cache stale (%.0fs > TTL %.0fs) — using anyway to avoid RPC blast",
+                     age, CACHE_TTL)
             return data["tokens"]
     except Exception as exc:
         log.debug("Cache load failed: %s", exc)
@@ -199,15 +204,20 @@ def _enrich_token(label: str, token_addr: str) -> dict | None:
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
-def scan_tokens(force: bool = False) -> list[dict]:
+def scan_tokens(force: bool = False, max_tokens: int | None = None) -> list[dict]:
     """
     Return enriched list of arb-eligible tokens, sorted by spot PLS price descending.
 
     Uses TTL cache. Set force=True to bypass cache.
     Merges MAP QING discovery with SEED_LAUS.
+
+    Args:
+        max_tokens: If set, cap the number of tokens enriched on cache miss.
+                    Prioritizes SEED_LAUS first, then extras. Reduces RPC blast
+                    from 4,600+ calls (272 tokens) to ~850 (50 tokens).
     """
     if not force:
-        cached = _load_cache()
+        cached = _load_cache(allow_stale=(max_tokens is not None))
         if cached is not None:
             return cached
 
@@ -248,6 +258,18 @@ def scan_tokens(force: bool = False) -> list[dict]:
 
     log.info("Scan pool: %d tokens (%d seed + %d QING + %d data)",
              len(all_tokens), len(SEED_LAUS), len(qing_addrs), len(extra_tokens))
+
+    # Cap enrichment on cache miss to limit RPC blast
+    if max_tokens is not None and len(all_tokens) > max_tokens:
+        # Prioritize SEED_LAUS (always included), then take remaining from extras
+        seed_addrs = {addr.lower() for _, addr in SEED_LAUS}
+        seed_items = [(a, l) for a, l in all_tokens.items() if a in seed_addrs]
+        extra_items = [(a, l) for a, l in all_tokens.items() if a not in seed_addrs]
+        remaining = max_tokens - len(seed_items)
+        capped = dict(seed_items + extra_items[:max(0, remaining)])
+        log.info("Capping enrichment: %d → %d tokens (max_tokens=%d)",
+                 len(all_tokens), len(capped), max_tokens)
+        all_tokens = capped
 
     results = []
     for addr, label in all_tokens.items():
