@@ -36,8 +36,8 @@ class TestE6SimulateUsesLiveQuotes(unittest.TestCase):
     """Flaw #1: simulate() must use live DEX quotes, not stale recon estimates."""
 
     @patch("scripts.Joystick.engines.treasury_sniper.w3_read")
-    def test_simulate_calls_find_best_sell_route(self, mock_w3):
-        """simulate() should call _find_best_sell_route for each target, not use t.estimated_pls."""
+    def test_simulate_calls_estimate_sell_value(self, mock_w3):
+        """simulate() should call _estimate_sell_value (direct V1+V2 quotes), not stale t.estimated_pls."""
         mock_w3.eth.gas_price = 100 * 10**9  # 100 Gwei
 
         engine = TreasurySniperEngine()
@@ -55,14 +55,11 @@ class TestE6SimulateUsesLiveQuotes(unittest.TestCase):
         engine._size_claim = MagicMock(return_value=int(500e18))
 
         live_pls = int(2000 * 10**18)  # 2000 PLS (much less than 99K)
-        engine._find_best_sell_route = MagicMock(return_value={
-            "route": ["0xparent", "0xwpls"], "router": "V2",
-            "expected_pls": live_pls, "mode": "direct",
-        })
+        engine._estimate_sell_value = MagicMock(return_value=live_pls)
 
         profit, gas = engine.simulate()
 
-        engine._find_best_sell_route.assert_called_once()
+        engine._estimate_sell_value.assert_called_once()
         self.assertLess(profit, 5000 * 10**18, "Profit should reflect live DEX quote, not stale recon")
 
 

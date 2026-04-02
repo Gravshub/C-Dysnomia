@@ -133,17 +133,20 @@ class TreasurySniperEngine(EngineBase):
         if not best:
             return (0, 0)
 
-        # Use live DEX quotes per target (same method as _execute_batch)
+        # Use lightweight direct-only DEX quotes for ranking (2 RPC calls per target).
+        # Cross-treasury routing is deferred to _execute_batch() where accuracy matters.
+        # This cuts simulate() from 420+ RPC calls to ~30.
         MAX_SANE_PROFIT_WEI = int(100_000 * 10**18)  # 100K PLS per-target cap
         MAX_BATCH_PROFIT_WEI = int(50_000 * 10**18)   # 50K PLS batch cap
         total_profit = 0
         for t in best:
             claim_amount = self._size_claim(t)
             if claim_amount > 0:
-                route = self._find_best_sell_route(t.backing_asset, claim_amount)
-                est = min(route["expected_pls"], MAX_SANE_PROFIT_WEI)
+                est = self._estimate_sell_value(t.backing_asset, claim_amount)
+                est = min(est, MAX_SANE_PROFIT_WEI)
             else:
-                est = min(int(t.estimated_pls * 10**18), MAX_SANE_PROFIT_WEI)
+                # No claim amount — skip entirely (stale recon data unreliable)
+                continue
             total_profit += est
 
         # Batch-level cap prevents runaway sums from many targets
@@ -315,6 +318,27 @@ class TreasurySniperEngine(EngineBase):
 
         available = min(tgsv8_child_bal, t.self_balance)
         return available
+
+    def _estimate_sell_value(self, parent_addr: str, amount: int) -> int:
+        """
+        Lightweight sell estimate: direct V1 + V2 quotes only (2 RPC calls).
+
+        Used in simulate() for ranking — cross-treasury routing is an execution
+        optimization that doesn't justify 40+ extra RPC calls per target.
+        """
+        parent_cs = Web3.to_checksum_address(parent_addr)
+        wpls_cs = Web3.to_checksum_address(WPLS)
+        best_pls = 0
+
+        v1_out = get_amounts_out(amount, [parent_cs, wpls_cs])
+        if v1_out and v1_out[-1] > best_pls:
+            best_pls = v1_out[-1]
+
+        v2_out = get_amounts_out_v2(amount, [parent_cs, wpls_cs])
+        if v2_out and v2_out[-1] > best_pls:
+            best_pls = v2_out[-1]
+
+        return best_pls
 
     def _find_best_sell_route(self, parent_addr: str, amount: int) -> dict:
         """
