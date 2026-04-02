@@ -26,12 +26,16 @@ log = get_logger(__name__)
 SIM_WORKERS = 8
 # Default timeout per engine simulation in seconds
 SIM_TIMEOUT = 5.0
-# Per-engine timeout overrides (Arb/TokenFactory do graph + reserve refresh)
+# Per-engine timeout overrides (engines with heavy RPC loads need more time)
 SIM_TIMEOUT_MAP: dict[str, float] = {
     "Arb": 15.0,
-    "TokenFactory": 15.0,  # 5 routes × 2 DEXes + WM = ~12 RPC calls
-    "PHR3AK": 30.0,  # STITCH mode scans full token graph (14-22s depending on RPC load)
+    "TokenFactory": 15.0,       # 5 routes × 2 DEXes + WM = ~12 RPC calls
+    "TreasurySniper": 10.0,     # 30+ RPC calls (direct V1+V2 quotes per target)
+    "PHR3AK": 30.0,             # STITCH mode scans full token graph (14-22s)
 }
+
+# Engines with 200+ RPC calls per simulate() — skip when RPC pool is degraded
+HEAVY_ENGINES = {"Arb", "TreasurySniper"}
 
 
 class SimExecutor:
@@ -67,6 +71,22 @@ class SimExecutor:
         if not eligible:
             log.info("Parallel sim: 0/%d engines eligible", len(engines))
             return {}
+
+        # RPC health gate: skip heavy engines when pool is degraded
+        try:
+            from .chain import get_read_pool
+            healthy = get_read_pool().healthy_count()
+            if healthy < 2:
+                before = len(eligible)
+                eligible = [e for e in eligible if e.name not in HEAVY_ENGINES]
+                skipped = before - len(eligible)
+                if skipped > 0:
+                    log.warning(
+                        "RPC degraded (%d/%d providers healthy) — skipping %d heavy engines (%s)",
+                        healthy, 4, skipped, ", ".join(HEAVY_ENGINES),
+                    )
+        except Exception:
+            pass  # Non-critical — proceed with all engines
 
         async def _run_one(engine: "EngineBase") -> tuple[str, SimResult]:
             timeout = SIM_TIMEOUT_MAP.get(engine.name, SIM_TIMEOUT)
