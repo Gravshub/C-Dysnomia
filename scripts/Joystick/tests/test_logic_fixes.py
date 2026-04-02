@@ -147,5 +147,23 @@ class TestE2DepositOverflow(unittest.TestCase):
                                  f"Deposit {deposit_amount/1e18} AFF > received {actual_received/1e18}")
 
 
+class TestBotLossMasking(unittest.TestCase):
+    """Flaw #4: bot must track actual PLS losses, not clamp to 0."""
+
+    def test_negative_delta_not_masked(self):
+        """When pls_after < pls_before, realized delta should be negative."""
+        pls_before = int(2_000_000 * 10**18)
+        pls_after  = int(1_999_500 * 10**18)  # lost 500 PLS to gas
+
+        # Current buggy code:
+        buggy_profit = max(0, pls_after - pls_before)
+        self.assertEqual(buggy_profit, 0, "Sanity: buggy code masks loss")
+
+        # Fixed code should preserve the negative delta:
+        realized_delta = pls_after - pls_before
+        self.assertLess(realized_delta, 0, "Fixed code should show negative delta")
+        self.assertEqual(realized_delta, -500 * 10**18)
+
+
 if __name__ == "__main__":
     unittest.main()

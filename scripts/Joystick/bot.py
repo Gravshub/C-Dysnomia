@@ -392,19 +392,23 @@ class DysnomiaBot:
                 engine.record_success()
 
                 pls_after = pls_balance()
-                realized_profit = max(0, pls_after - pls_before)
+                realized_delta = pls_after - pls_before  # can be negative (gas loss)
 
                 log.info("✓ %s [%s]: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
                          engine.display_name, rec.wallet_role,
-                         result.net_pls, realized_profit / 1e18,
+                         result.net_pls, realized_delta / 1e18,
                          len(result.tx_hashes), result.notes)
 
-                if realized_profit > 0 and not self.dry_run and not self.multi_wallet:
+                if realized_delta > 0 and not self.dry_run and not self.multi_wallet:
                     # Only auto-compound in single-wallet mode
-                    self.compound(realized_profit)
+                    self.compound(realized_delta)
                     cycle_outcome = "profit"
-                elif realized_profit > 0:
+                elif realized_delta > 0:
                     cycle_outcome = "profit"
+                elif realized_delta < -100 * 10**18:
+                    # Lost more than 100 PLS — treat as failure for adaptive delay
+                    cycle_outcome = "failure"
+                    log.warning("  Loss detected: %.1f PLS (gas > revenue)", realized_delta / 1e18)
                 else:
                     cycle_outcome = "strategic"
             else:
