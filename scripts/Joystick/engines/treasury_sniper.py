@@ -123,7 +123,7 @@ class TreasurySniperEngine(EngineBase):
     def simulate(self) -> tuple[int, int]:
         """
         Returns (expected_profit_wei, estimated_gas_cost_wei).
-        Loads recon data, filters profitable targets, picks best batch.
+        Uses live DEX quotes (same as execute) to avoid stale recon inflation.
         """
         self._refresh_targets()
         if not self._targets:
@@ -133,10 +133,22 @@ class TreasurySniperEngine(EngineBase):
         if not best:
             return (0, 0)
 
-        MAX_SANE_PROFIT_WEI = int(100_000 * 10**18)  # 100K PLS sanity cap per target
-        total_profit = sum(
-            min(int(t.estimated_pls * 10**18), MAX_SANE_PROFIT_WEI) for t in best
-        )
+        # Use live DEX quotes per target (same method as _execute_batch)
+        MAX_SANE_PROFIT_WEI = int(100_000 * 10**18)  # 100K PLS per-target cap
+        MAX_BATCH_PROFIT_WEI = int(50_000 * 10**18)   # 50K PLS batch cap
+        total_profit = 0
+        for t in best:
+            claim_amount = self._size_claim(t)
+            if claim_amount > 0:
+                route = self._find_best_sell_route(t.backing_asset, claim_amount)
+                est = min(route["expected_pls"], MAX_SANE_PROFIT_WEI)
+            else:
+                est = min(int(t.estimated_pls * 10**18), MAX_SANE_PROFIT_WEI)
+            total_profit += est
+
+        # Batch-level cap prevents runaway sums from many targets
+        total_profit = min(total_profit, MAX_BATCH_PROFIT_WEI)
+
         gas_price = w3_read.eth.gas_price
         gas_cost = GAS_PER_CLAIM * len(best) * gas_price
 
