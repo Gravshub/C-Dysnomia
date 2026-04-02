@@ -131,6 +131,10 @@ class RPCPool:
                 active.append(p)
         return sorted(active, key=lambda p: p.score)
 
+    def healthy_count(self) -> int:
+        """Return number of currently healthy (non-circuit-broken) providers."""
+        return len(self._ranked_providers())
+
     def call(self, fn):
         """
         Execute a read call with automatic failover.
