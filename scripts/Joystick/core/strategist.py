@@ -499,8 +499,11 @@ class Strategist:
         if pool_impact > 10.0 and confidence == "MEDIUM":
             confidence = "LOW"
 
-        # Phase E: GAS_FALLING downgrades non-HIGH, non-strategic to SKIP
-        if "GAS_FALLING" in risks and confidence not in ("HIGH",):
+        # Phase E: GAS_FALLING — only downgrade LOW to SKIP, leave MEDIUM alone.
+        # Previously this was too aggressive (any non-HIGH → SKIP), which caused
+        # profitable E2 cycles to stall for extended periods during normal gas
+        # fluctuations. MEDIUM-confidence engines should still execute.
+        if "GAS_FALLING" in risks and confidence == "LOW":
             if engine.name not in STRATEGIC_ENGINES:
                 confidence = "SKIP"
 

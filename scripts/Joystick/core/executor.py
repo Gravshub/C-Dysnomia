@@ -170,6 +170,7 @@ def send_tx(
     gas_mult: float = GAS_MULT,
     value: int = 0,
     skip_simulate: bool = False,
+    fixed_gas: int = 0,
     gas_tier: str = "fast",
     wallet_ctx=None,
 ) -> TxReceipt | None:
@@ -184,6 +185,8 @@ def send_tx(
         value:         Native PLS value to send with TX (for payable functions)
         skip_simulate: Skip eth_call pre-check (use only if .call() would fail
                        due to msg.value or state requirements)
+        fixed_gas:     Use this gas limit instead of estimate_gas (for when
+                       estimate would fail due to read RPC lag after approve)
         wallet_ctx:    Optional WalletConfig for multi-wallet support.
                        If None, uses Joey's wallet (backward compat).
 
@@ -220,9 +223,14 @@ def send_tx(
     if tx_account is None:
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
 
-    # Step 2: estimate_gas (abort if fails)
-    gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
-    gas_limit = int(gas_est * gas_mult)
+    # Step 2: estimate_gas (abort if fails) — or use fixed_gas
+    if fixed_gas > 0:
+        gas_est = fixed_gas
+        gas_limit = fixed_gas
+        log.info("  ⛽ Using fixed gas limit: %d (skipping estimate)", fixed_gas)
+    else:
+        gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
+        gas_limit = int(gas_est * gas_mult)
 
     # Step 2b: Build EIP-1559 gas params
     eip1559 = build_gas_params(gas_tier)
