@@ -79,6 +79,88 @@ def _reset_nonce_for(wallet_ctx) -> None:
         log.info("  Nonce reset for Joey (will re-fetch from chain)")
 
 
+def submit_tx_nowait(
+    fn_call,
+    label: str,
+    *,
+    dry_run: bool = False,
+    gas_mult: float = GAS_MULT,
+    value: int = 0,
+    skip_simulate: bool = False,
+    fixed_gas: int = 0,
+    wallet_ctx=None,
+) -> str | None:
+    """
+    Sign and submit a TX without waiting for receipt. Returns tx_hash hex string.
+
+    Use this for back-to-back TX pipelines where you need to submit multiple
+    TXs with sequential nonces before waiting for receipts. This prevents MEV
+    bots from sniping state between TXs (e.g., E2 primeGibs → mintLPAndSell).
+
+    Args:
+        fixed_gas: If >0, skip estimate_gas and use this as gas limit directly.
+                   Use when the TX depends on state from a prior unconfirmed TX.
+
+    Returns None on dry_run. Raises on simulation failure or gas ceiling.
+    """
+    if wallet_ctx is not None:
+        tx_from = wallet_ctx.address
+        tx_account = wallet_ctx.account
+    else:
+        tx_from = JOEY_WALLET
+        tx_account = wallet.account
+
+    log.info("📤 %s [%s] (no-wait)", label, tx_from[:10])
+
+    if not skip_simulate:
+        try:
+            simulate(fn_call, from_address=tx_from)
+        except SimulationFailed as exc:
+            log.error("  Simulation FAILED: %s", exc)
+            raise
+
+    if dry_run:
+        log.info("  [dry-run] TX not sent: %s", label)
+        return None
+
+    if tx_account is None:
+        raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
+
+    if fixed_gas > 0:
+        gas_limit = fixed_gas
+        log.info("  ⛽ Using fixed gas limit: %d (skipping estimate)", gas_limit)
+    else:
+        gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
+        gas_limit = int(gas_est * gas_mult)
+    eip1559 = build_gas_params("fast")
+
+    if eip1559["maxFeePerGas"] > GAS_PRICE_CEIL:
+        raise GasTooHigh(
+            f"maxFeePerGas {eip1559['maxFeePerGas'] / 1e9:.1f} Beats > ceiling"
+        )
+
+    if wallet_ctx is not None and hasattr(wallet_ctx, 'nonce_tracker') and wallet_ctx.nonce_tracker:
+        nonce = wallet_ctx.nonce_tracker.next()
+    else:
+        nonce = wallet.next_nonce()
+
+    tx_params: dict[str, Any] = {
+        "from": tx_from, "nonce": nonce, "gas": gas_limit,
+        "chainId": CHAIN_ID, **eip1559,
+    }
+    if value > 0:
+        tx_params["value"] = value
+
+    tx = fn_call.build_transaction(tx_params)
+    signed = tx_account.sign_transaction(tx)
+    pool = get_submit_pool()
+    tx_hash_hex = pool.send_raw(signed.raw_transaction)
+    if tx_hash_hex is None:
+        tx_hash_hex = signed.hash.hex()
+    log.info("  TX: 0x%s (submitted, not waiting)", tx_hash_hex)
+    return tx_hash_hex
+
+
 def send_tx(
     fn_call,
     label: str,

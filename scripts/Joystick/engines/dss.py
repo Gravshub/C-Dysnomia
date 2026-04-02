@@ -51,7 +51,7 @@ from ..core.chain import (
     erc20, factory_contract, safe, w3_read, w3_submit,
     joystick_hub, router_contract,
 )
-from ..core.executor import send_tx, approve_if_needed
+from ..core.executor import send_tx, submit_tx_nowait, approve_if_needed
 from ..core.simulator import SimulationFailed
 from ..oracle.price import get_amounts_out, get_amounts_out_v2
 
@@ -519,18 +519,24 @@ class DSSEngine(EngineBase):
                                         tx_hashes=tx_hashes,
                                         notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {shortfall//10**18}")
 
-            # ── Step 2: primeGibs — Generate() × N to build GIBS_LAU self-balance ──
-            log.info("E2: primeGibs(%d)", mint_count)
-            r = send_tx(
+            # ── Step 2+3: primeGibs → mintLPAndSell (back-to-back, no receipt wait) ──
+            # CRITICAL: These two TXs MUST land in the same or consecutive blocks.
+            # If we wait for primeGibs receipt, MEV bots snipe the GIBS self-balance
+            # via Purchase() before mintLPAndSell can execute.
+            # Fix: submit primeGibs without waiting, then immediately submit
+            # mintLPAndSell with the next nonce. Miners must include them in order.
+
+            # ── Step 2: primeGibs (fire-and-forget — no receipt wait) ──
+            log.info("E2: primeGibs(%d) [no-wait]", mint_count)
+            prime_hash = submit_tx_nowait(
                 hub.functions.primeGibs(mint_count),
                 f"primeGibs({mint_count})",
                 dry_run=dry_run,
             )
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            if prime_hash:
+                tx_hashes.append(prime_hash)
 
-            # ── Step 3: mintLPAndSell — Purchase(AFF→GIBS) + LP + sell ──
+            # ── Step 3: mintLPAndSell (fire-and-forget, fixed gas — can't estimate against pre-prime state) ──
             gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
             wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
 
@@ -540,14 +546,18 @@ class DSSEngine(EngineBase):
 
             log.info(
                 "E2: mintLPAndSell(%d, lp=%d%%, burn=%d%%, lpDex=%d, "
-                "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS)",
+                "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS) [no-wait]",
                 mint_count, lp_bps / 100, HARVEST_BURN_BPS / 100,
                 HARVEST_LP_DEX, min_sell_out / 1e18,
                 [a[-6:] for a in sell_path], sell_dex,
                 wpls_needed / 1e18,
             )
 
-            r = send_tx(
+            # Submit mintLPAndSell WITHOUT waiting — both TXs now in mempool together.
+            # Can't use estimate_gas here because primeGibs hasn't mined yet (state
+            # still shows 0 GIBS self-balance). Use fixed 1M gas based on observed
+            # usage (~377K with sell, ~515K with 2-hop sell, padded to 1M).
+            harvest_hash = submit_tx_nowait(
                 hub.functions.mintLPAndSell(
                     mint_count,
                     lp_bps,
@@ -561,11 +571,44 @@ class DSSEngine(EngineBase):
                 f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
                 dry_run=dry_run,
                 value=wpls_needed,
-                skip_simulate=True,  # payable — simulate() doesn't pass msg.value
+                skip_simulate=True,  # payable + depends on primeGibs state
+                fixed_gas=1_000_000,  # can't estimate — primeGibs hasn't mined yet
             )
-            if r:
-                tx_hashes.append(r["transactionHash"].hex())
-                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            if harvest_hash:
+                tx_hashes.append(harvest_hash)
+
+            # ── Step 4: Wait for both TXs to mine ──
+            if not dry_run and harvest_hash:
+                import time as _time
+                from ..core.chain import w3_read
+                log.info("E2: Waiting for primeGibs + mintLPAndSell receipts...")
+                harvest_bytes = bytes.fromhex(harvest_hash.replace("0x", ""))
+                _w3_submit = w3_submit
+                receipt = None
+                for _poll in range(24):  # 120s max
+                    _time.sleep(5)
+                    for _w3 in [_w3_submit, w3_read]:
+                        try:
+                            receipt = _w3.eth.get_transaction_receipt(harvest_bytes)
+                            if receipt:
+                                break
+                        except Exception:
+                            pass
+                    if receipt:
+                        break
+
+                if receipt and receipt.get("status") == 1:
+                    gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                    log.info("E2: mintLPAndSell mined. Block: %d, Gas: %d",
+                             receipt["blockNumber"], receipt["gasUsed"])
+                elif receipt:
+                    log.error("E2: mintLPAndSell REVERTED on-chain")
+                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                        tx_hashes=tx_hashes, notes="mintLPAndSell reverted on-chain")
+                else:
+                    log.error("E2: mintLPAndSell receipt timeout (120s)")
+                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                        tx_hashes=tx_hashes, notes="mintLPAndSell receipt timeout")
 
             log.info("E2 complete: %d GIBS — %d%% LP, %d%% sold",
                      mint_count, lp_bps / 100, HARVEST_SELL_BPS / 100)
