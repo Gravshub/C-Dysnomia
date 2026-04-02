@@ -121,6 +121,11 @@ if JOYSTICK_HUB:
 # HarvestModuleV2 — primeGibs calls mintToCap() instead of Generate()
 # Deployed block 26,149,418. Replaces V1 at 0xFAFB227DdC0804A55677A23eE2Ca0E966452D3B2.
 HARVEST_MODULE_V2 = Web3.to_checksum_address("0x400D052FAf0f46D3d5140a8F7246B69954539424")
+
+# HarvestModuleV3 — atomic primeAndSell (anti-sniper)
+# Deployed block 26,182,431. Registered at block 26,182,499.
+# Closes sniper exploit: mintToCap + Purchase + sell in one atomic TX.
+HARVEST_MODULE_V3 = Web3.to_checksum_address("0x281286b7c338fF570B1Cbf4911b3FA23353A3c02")
 AFFECTION_MODULE  = Web3.to_checksum_address("0xfb7C1A1Ef0Ce8AB527998a1c2Ca12C6CA400da4B")
 PURCHASE_MODULE   = Web3.to_checksum_address("0xc59cb7229872E72B7349Ef7DFa170A2444a8264E")
 
