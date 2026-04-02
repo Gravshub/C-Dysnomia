@@ -251,11 +251,15 @@ class TreasurySniperEngine(EngineBase):
                 continue
 
             qty_tokens = self_bal / (10 ** decimals)
-            parent_pls = pls_per_tok
-            # Both qty_tokens and parent_pls are human-readable floats
-            est_pls    = qty_tokens * parent_pls
+            # pls_per_tok is the child token's DEX price (from recon).
+            # This gives gross value of claimable tokens, NOT net profit
+            # (cost to acquire ammo is unknown here). Used only for
+            # filtering and sort order — live DEX quotes in simulate()
+            # and _execute_batch() do the real pricing.
+            token_pls = pls_per_tok
+            est_pls_gross = qty_tokens * token_pls
 
-            if est_pls < MIN_PROFIT_PLS:
+            if est_pls_gross < MIN_PROFIT_PLS:
                 continue
 
             targets.append(TreasuryTarget(
@@ -265,9 +269,9 @@ class TreasurySniperEngine(EngineBase):
                 self_balance  = self_bal,
                 parent_balance= parent_bal,
                 pls_per_token = pls_per_tok,
-                parent_pls    = parent_pls,
+                parent_pls    = token_pls,
                 decimals      = decimals,
-                estimated_pls = est_pls,
+                estimated_pls = est_pls_gross,
             ))
 
         targets.sort(key=lambda t: t.estimated_pls, reverse=True)
