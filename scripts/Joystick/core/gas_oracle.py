@@ -53,12 +53,13 @@ class GasOracle:
         self._window: deque[int] = deque(maxlen=window_size)
         self._timestamps: deque[float] = deque(maxlen=window_size)
         self._last_price: int = 0
+        self._last_base_fee: int = 0  # baseFeePerGas from latest block header
         self._mempool_data: dict | None = None
         self._mempool_ts: float = 0.0
 
     def update(self) -> int:
         """
-        Poll eth_gasPrice and add to rolling window.
+        Poll eth_gasPrice and baseFeePerGas, add to rolling window.
         Call once per bot cycle. Returns current gas price in wei.
         """
         try:
@@ -66,6 +67,13 @@ class GasOracle:
         except Exception as exc:
             log.warning("GasOracle: eth_gasPrice failed (%s), using last known", exc)
             price = self._last_price or 1_000_000 * 10**9  # 1M Beats fallback
+
+        # Track baseFeePerGas from block header (more accurate than eth_gasPrice)
+        try:
+            block = w3_read.eth.get_block("latest")
+            self._last_base_fee = block.get("baseFeePerGas", 0)
+        except Exception:
+            pass  # Keep last known base fee
 
         self._window.append(price)
         self._timestamps.append(time.time())
@@ -95,6 +103,14 @@ class GasOracle:
 
     # Keep alias for backward compat
     current_gwei = current_beats
+
+    def base_fee(self) -> int:
+        """Latest baseFeePerGas in wei (from block header). 0 if unavailable."""
+        return self._last_base_fee
+
+    def base_fee_beats(self) -> float:
+        """Latest baseFeePerGas in Beats."""
+        return self._last_base_fee / 1e9
 
     def average(self) -> int:
         """Rolling average gas price in wei."""
@@ -138,7 +154,17 @@ class GasOracle:
         return self.trend() == "falling"
 
     def is_above_ceiling(self) -> bool:
-        """True if current gas price exceeds GAS_PRICE_CEIL."""
+        """True if the effective maxFeePerGas would exceed GAS_PRICE_CEIL.
+
+        Uses baseFeePerGas * GAS_PRICE_FLOOR_MULT + priority to match
+        the actual maxFeePerGas computed by build_gas_params().
+        Falls back to eth_gasPrice if baseFeePerGas is unavailable.
+        """
+        from .config import GAS_PRICE_FLOOR_MULT, GAS_PRIORITY_FEE
+        if self._last_base_fee > 0:
+            priority_wei = GAS_PRIORITY_FEE * 10**9 * 4  # "fast" tier = 4x
+            effective_max = int(self._last_base_fee * GAS_PRICE_FLOOR_MULT) + priority_wei
+            return effective_max > GAS_PRICE_CEIL
         return self._last_price > GAS_PRICE_CEIL
 
     def estimate_tx_cost_pls(self, gas_units: int) -> Decimal:
@@ -215,6 +241,7 @@ class GasOracle:
         """Full status dict for logging / --status display."""
         s = {
             "current_beats":    self.current_beats(),
+            "base_fee_beats":   self.base_fee_beats(),
             "average_beats":    self.average_beats(),
             "trend":           self.trend(),
             "should_wait":     self.should_wait(),

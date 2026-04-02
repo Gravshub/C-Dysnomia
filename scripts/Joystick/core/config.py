@@ -204,11 +204,15 @@ PLS_REPLENISH  = int(os.getenv("PLS_REPLENISH",  "200000")) * 10**18
 PROFIT_SPLIT   = float(os.getenv("PROFIT_SPLIT",  "0.25"))
 # Gas price ceiling in Beats — skip cycle if exceeded
 # PulseChain gas is typically 500K-1M Beats (PLS is very cheap ~$0.00001)
-GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "2000000")) * 10**9
+GAS_PRICE_CEIL = int(os.getenv("GAS_PRICE_CEIL",  "3000000")) * 10**9
 # DEX slippage tolerance
 MAX_SLIPPAGE   = float(os.getenv("MAX_SLIPPAGE",  "0.02"))
 # Gas estimate multiplier (safety buffer)
 GAS_MULT       = float(os.getenv("GAS_MULT",      "2.5"))
+# Gas pricing — PulseChain has no MEV, floor+epsilon is sufficient
+# BOT3 proves 811K Beats works (~8% above floor of ~748K Beats)
+GAS_PRICE_FLOOR_MULT = float(os.getenv("GAS_PRICE_FLOOR_MULT", "1.12"))  # 12% above base
+GAS_PRIORITY_FEE     = int(os.getenv("GAS_PRIORITY_FEE", "50000"))       # 50K Beats fixed tip
 # Seconds between bot cycles (base for adaptive delay)
 CYCLE_DELAY      = int(os.getenv("CYCLE_DELAY",       "30"))
 # Adaptive delay bounds and backoff factor
