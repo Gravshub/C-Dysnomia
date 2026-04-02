@@ -1,6 +1,6 @@
 {
-  "_comment": "Wallets to monitor for AFF minting activity. When these resume, conditions are favorable.",
-  "generated": "2026-03-15",
+  "_comment": "Wallets to monitor for competitive activity. Bot recon updated 2026-04-02.",
+  "generated": "2026-04-02",
 
   "watchlist": [
     {
@@ -74,6 +74,56 @@
       "received_from_alpha_2": 288293,
       "threat_level": "LOW",
       "monitor_for": ["AFF outflows", "Purchase() calls"]
+    }
+  ],
+
+  "active_bots": [
+    {
+      "tag": "bot1_surgeon",
+      "address": "0x8bc6070a8b0afb5fa1e88b635289e2964882c23d",
+      "contract": "0x0d97b2ef35391677be319b70a0de4577d6ba4610",
+      "threat_level": "MEDIUM",
+      "nonce": 27099,
+      "style": "Custom contract, direct pair swaps (router-less), 324 byte calldata",
+      "avg_gas_beats": 2155158,
+      "monitor_for": ["GIBS pair trades", "new token approvals"],
+      "last_active": "2026-04-02",
+      "notes": "27K nonce, trades Dysnomia tokens including GIBS pairs. Approved GIBS LAU."
+    },
+    {
+      "tag": "bot2_farmer",
+      "address": "0xaeef117467d6bd21e7ac882410adbc6e51fe9708",
+      "threat_level": "HIGH",
+      "nonce": 4288,
+      "pls_balance": 10196356,
+      "style": "Direct Dysnomia calls, 13s cadence, no custom contract",
+      "avg_gas_beats": 1056907,
+      "monitor_for": ["AFFECTION Generate()", "CHEON.Su()", "territory moves"],
+      "last_active": "2026-04-02",
+      "notes": "10.2M PLS, 4.3K nonce in 4 days, hammers AFFECTION Generate() (public-good minting), also calls CHEON.Su(). Fire-and-forget nonce pipeline, 0% errors."
+    },
+    {
+      "tag": "bot3_loop",
+      "address": "0x4a0bcf8db7ee0eba28afa98567470657fe4b1dcc",
+      "contract": "0xd50417daccefd9c52da8b7ee98be1aa3c64d5790",
+      "threat_level": "MEDIUM",
+      "nonce": 59027,
+      "style": "2.3KB atomic loop contract, 50 iterations per TX, 68 byte calldata",
+      "avg_gas_beats": 811115,
+      "monitor_for": ["FED/DISMISSED/FDIC mint loops"],
+      "last_active": "2026-04-02",
+      "notes": "59K nonce (since Jan 2024), lowest gas of all bots (8% above floor). Proves PulseChain needs no priority tips."
+    },
+    {
+      "tag": "gibs_sniper",
+      "address": "0x65930aa7db622b1e4b5440ff7a2b2fab45c9b5a7",
+      "contract": "0x73a43f88d12ab153548116544dadce2d0457bd3c",
+      "threat_level": "CRITICAL",
+      "nonce": 126,
+      "style": "Watches GIBS LAU self-balance, extracts via Purchase(), sells on GIBS/WPLS",
+      "monitor_for": ["Purchase(GIBS_LAU)", "GIBS sells on V2 pair"],
+      "last_active": "2026-04-02",
+      "notes": "Targets our primeGibs output. ~455 PLS profit per snipe, caused 836 PLS in reverted TXs. Started Mar 30. Fix: HarvestModuleV3 primeAndSell()."
     }
   ],
 
