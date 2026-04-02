@@ -20,7 +20,10 @@ from typing import Any
 from web3.types import TxReceipt
 from web3.exceptions import TimeExhausted
 
-from .config import JOEY_WALLET, CHAIN_ID, GAS_MULT, GAS_PRICE_CEIL
+from .config import (
+    JOEY_WALLET, CHAIN_ID, GAS_MULT, GAS_PRICE_CEIL,
+    GAS_PRICE_FLOOR_MULT, GAS_PRIORITY_FEE,
+)
 from .chain import w3_submit, get_submit_pool
 from .simulator import simulate, estimate_gas, SimulationFailed, GasTooHigh
 from . import wallet
@@ -33,31 +36,55 @@ log = get_logger(__name__)
 # ceiling (maxFeePerGas) and a tip (maxPriorityFeePerGas). You only pay
 # base_fee + tip; the ceiling protects against block-to-block variance.
 #
-# Tiers (priority tip as % of base fee):
-#   slow:     0% tip  — lands in 3-5 blocks
-#   standard: 5% tip  — lands in 1-3 blocks
-#   fast:     25% tip — next block (P75 priority)
+# Bot recon (2026-04-02) showed we were paying 106% above network floor:
+#   - BOT3 (Loop Machine): avg 811K Beats (8% above floor) — 0% revert rate
+#   - BOT2 (Farmer):       avg 1.06M Beats (41% above floor) — 0% revert rate
+#   - JOYSTICK (old):      avg 1.54M Beats (106% above floor) — 2% revert rate
+# PulseChain has no MEV infrastructure. Floor + small fixed tip is sufficient.
 #
-# maxFeePerGas set to 2x base fee — absorbs spikes, excess refunded.
+# Tiers adjust the priority tip multiplier above the fixed base tip:
+#   slow:     1x fixed tip    — lands in 3-5 blocks
+#   standard: 2x fixed tip    — lands in 1-3 blocks
+#   fast:     4x fixed tip    — next block
+#   urgent:   8x fixed tip    — priority inclusion
+#
+# maxFeePerGas = baseFee * GAS_PRICE_FLOOR_MULT + priority_fee
+# This gives ~12% headroom above base for block-to-block variance.
 
-_GAS_TIERS = {"slow": 5, "standard": 25, "fast": 50, "urgent": 100}
+_GAS_TIER_TIP_MULT = {"slow": 1, "standard": 2, "fast": 4, "urgent": 8}
 
-# Minimum priority fee in Impulses (wei). PulseChain miners often ignore
-# sub-500K-Beat tips even when maxFee is well above baseFee.
-MIN_PRIORITY_FEE = 500_000 * 10**9  # 500K Beats
+# Fixed priority fee in Impulses (wei), configured via GAS_PRIORITY_FEE.
+# Default 50K Beats — BOT3 proves sub-100K tips get included on PulseChain.
+_PRIORITY_FEE_WEI = GAS_PRIORITY_FEE * 10**9  # Convert Beats → Impulses
 
 
 def build_gas_params(tier: str = "fast", w3=None) -> dict:
-    """Return EIP-1559 Type 2 gas parameters for the given speed tier."""
+    """Return EIP-1559 Type 2 gas parameters for the given speed tier.
+
+    Uses baseFeePerGas from latest block header. Falls back to legacy
+    eth_gasPrice if baseFeePerGas is unavailable (with warning).
+    """
     _w3 = w3 or get_submit_pool().call(lambda w: w)
-    base_fee = _w3.eth.get_block("latest")["baseFeePerGas"]
 
-    tip_pct = _GAS_TIERS.get(tier, 50)
-    priority_fee = base_fee * tip_pct // 100
-    max_fee = base_fee * 2  # 2x ceiling absorbs 2-3 block base fee swings
+    try:
+        block = _w3.eth.get_block("latest")
+        base_fee = block["baseFeePerGas"]
+    except (KeyError, Exception) as exc:
+        # Fallback: EIP-1559 not available or block read failed
+        log.warning("build_gas_params: baseFeePerGas unavailable (%s), falling back to eth_gasPrice", exc)
+        gas_price = _w3.eth.gas_price
+        return {
+            "maxFeePerGas": gas_price,
+            "maxPriorityFeePerGas": min(gas_price // 10, _PRIORITY_FEE_WEI),
+            "type": 2,
+        }
 
-    # Floor: minimum priority to avoid stuck TXs on PulseChain
-    priority_fee = max(priority_fee, MIN_PRIORITY_FEE)
+    tip_mult = _GAS_TIER_TIP_MULT.get(tier, 4)
+    priority_fee = _PRIORITY_FEE_WEI * tip_mult
+
+    # maxFeePerGas: base_fee * floor_mult + priority_fee
+    # GAS_PRICE_FLOOR_MULT default 1.12 gives 12% headroom above current base
+    max_fee = int(base_fee * GAS_PRICE_FLOOR_MULT) + priority_fee
 
     return {
         "maxFeePerGas": max_fee,
@@ -272,18 +299,18 @@ def send_tx(
         tx_hash_hex = signed.hash.hex()
     log.info("  TX: 0x%s", tx_hash_hex)
 
-    # Wait for receipt by polling the SUBMIT RPC first (it accepted the TX and sees
-    # it in its mempool), then fall back to read RPCs. PulseChain RPCs have propagation
-    # delays — a TX accepted by rpc.pulsechain.com may not be visible on g4mm4/publicnode
-    # for several blocks.
+    # Wait for receipt with resubmit on drop.
+    # PulseChain intermittently drops TXs from mempool. If the TX isn't mined
+    # after 30s and the nonce hasn't advanced, resubmit with bumped priority.
     import time as _time
     from .chain import w3_read
-    _w3_submit_direct = pool.get_w3()  # same RPC that accepted the TX
+    _w3_submit_direct = pool.get_w3()
     tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
     receipt = None
+    _resubmitted = False
+
     for _poll in range(24):  # 24 × 5s = 120s max
         _time.sleep(5)
-        # Try submit RPC first (has the TX in its mempool), then read RPC
         for _w3_check in [_w3_submit_direct, w3_read]:
             try:
                 receipt = _w3_check.eth.get_transaction_receipt(tx_hash_bytes)
@@ -294,22 +321,57 @@ def send_tx(
         if receipt:
             break
 
+        # After 30s with no receipt, check if TX was dropped and resubmit once
+        # with 50% higher priority fee to bump it through the mempool
+        if _poll == 5 and not _resubmitted:
+            try:
+                cur_nonce = _w3_submit_direct.eth.get_transaction_count(tx_from)
+            except Exception:
+                cur_nonce = nonce
+            if cur_nonce == nonce:
+                log.warning("  TX not mined after 30s — rebuilding with 50%% higher priority")
+                try:
+                    bumped_eip = build_gas_params("urgent")
+                    bumped_eip["maxPriorityFeePerGas"] = int(
+                        bumped_eip["maxPriorityFeePerGas"] * 1.5
+                    )
+                    bumped_eip["maxFeePerGas"] = max(
+                        bumped_eip["maxFeePerGas"],
+                        bumped_eip["maxPriorityFeePerGas"] + 1,
+                    )
+                    bumped_tx = dict(tx)
+                    bumped_tx.update(bumped_eip)
+                    bumped_signed = tx_account.sign_transaction(bumped_tx)
+                    new_hash = pool.send_raw(bumped_signed.raw_transaction)
+                    if new_hash:
+                        tx_hash_hex = new_hash
+                        tx_hash_bytes = bytes.fromhex(
+                            tx_hash_hex.replace("0x", "")
+                        )
+                        log.info("  Resubmitted (bumped): 0x%s", new_hash)
+                    _resubmitted = True
+                except Exception as resub_err:
+                    err_s = str(resub_err).lower()
+                    if "already known" in err_s:
+                        log.info("  TX still in mempool (already known)")
+                        _resubmitted = True
+                    elif "nonce too low" in err_s:
+                        log.info("  Nonce consumed — TX likely mined")
+                    else:
+                        log.warning("  Resubmit failed: %s", str(resub_err)[:80])
+
     if receipt is None:
         # Receipt not found after 120s — check if nonce advanced (TX mined but hash lost)
-        # Check both submit and read RPCs for nonce
         on_chain_nonce = nonce
         for _w3_check in [_w3_submit_direct, w3_read]:
             try:
                 n = _w3_check.eth.get_transaction_count(tx_from)
                 on_chain_nonce = max(on_chain_nonce, n)
             except Exception:
-                pass
-            on_chain_nonce = nonce  # Can't check, assume stuck
+                pass  # Can't check this RPC, try next
         if on_chain_nonce > nonce:
             log.warning("  Receipt not found but nonce advanced (%d->%d) -- TX mined (hash dropped by RPC)", nonce, on_chain_nonce)
             _reset_nonce_for(wallet_ctx)
-            # Return synthetic receipt so engines can record the TX hash and estimated gas.
-            # Gas cost is estimated (gas_limit * maxFeePerGas) since we can't read the receipt.
             estimated_gas_cost = gas_limit * eip1559["maxFeePerGas"]
             log.warning("  Returning synthetic receipt (estimated gas: %d wei)", estimated_gas_cost)
             return {
