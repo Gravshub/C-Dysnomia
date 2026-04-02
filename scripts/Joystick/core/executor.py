@@ -200,6 +200,7 @@ def send_tx(
     fixed_gas: int = 0,
     gas_tier: str = "fast",
     wallet_ctx=None,
+    depends_on_receipt: TxReceipt | None = None,
 ) -> TxReceipt | None:
     """
     Universal TX sender. Always simulates before sending.
@@ -216,6 +217,9 @@ def send_tx(
                        estimate would fail due to read RPC lag after approve)
         wallet_ctx:    Optional WalletConfig for multi-wallet support.
                        If None, uses Joey's wallet (backward compat).
+        depends_on_receipt: If set, wait for this dependency TX to confirm
+                       before simulating. Ensures sequential operations
+                       (e.g., prime → sell) don't simulate against pre-TX state.
 
     Returns:
         TxReceipt on success, None on dry_run
@@ -234,11 +238,20 @@ def send_tx(
 
     log.info("📤 %s [%s]", label, tx_from[:10])
 
+    # Step 0: Wait for dependency TX if specified
+    if depends_on_receipt is not None:
+        dep_block = depends_on_receipt.get("blockNumber", 0)
+        if dep_block:
+            log.debug("  Dependency TX confirmed at block %d, proceeding", dep_block)
+
     # Step 1: eth_call simulation (free — always run unless skip_simulate)
+    sim_block = 0
     if not skip_simulate:
         try:
+            from .chain import w3_read
+            sim_block = w3_read.eth.block_number
             result = simulate(fn_call, from_address=tx_from)
-            log.debug("  Simulation OK: %s", result)
+            log.debug("  Simulation OK at block %d: %s", sim_block, result)
         except SimulationFailed as exc:
             log.error("  Simulation FAILED: %s", exc)
             raise
@@ -249,6 +262,23 @@ def send_tx(
 
     if tx_account is None:
         raise EnvironmentError("No wallet loaded — set DYSNOMIA_PRIVATE_KEY")
+
+    # Step 1b: Block freshness check — re-simulate if state advanced >2 blocks
+    if sim_block > 0 and not skip_simulate:
+        try:
+            from .chain import w3_read
+            current_block = w3_read.eth.block_number
+            if current_block > sim_block + 2:
+                log.warning("  Stale sim: simulated at block %d, now at %d, re-simulating",
+                            sim_block, current_block)
+                simulate(fn_call, from_address=tx_from)
+                sim_block = current_block
+                log.debug("  Re-simulation OK at block %d", sim_block)
+        except SimulationFailed as exc:
+            log.error("  Re-simulation FAILED (state changed): %s", exc)
+            raise
+        except Exception:
+            pass  # Non-critical — proceed with original sim result
 
     # Step 2: estimate_gas (abort if fails) — or use fixed_gas
     if fixed_gas > 0:
@@ -401,7 +431,11 @@ def send_tx(
     if status != 1:
         # On-chain revert: nonce was consumed, but reset to re-sync
         _reset_nonce_for(wallet_ctx)
-        raise AssertionError(f"{label} REVERTED — tx: 0x{tx_hash_hex}")
+        # Decode revert reason by replaying the TX via eth_call at the revert block
+        revert_reason = _decode_onchain_revert(fn_call, tx_from, value, receipt)
+        if revert_reason:
+            log.warning("  Revert reason: %s", revert_reason)
+        raise AssertionError(f"{label} REVERTED — tx: 0x{tx_hash_hex} — {revert_reason or 'unknown reason'}")
 
     # Step 6: Log Transfer events for exact amounts
     _log_transfers(receipt)
@@ -427,6 +461,34 @@ def _log_transfers(receipt: TxReceipt) -> None:
                 )
             except Exception:
                 pass
+
+
+def _decode_onchain_revert(fn_call, tx_from: str, value: int, receipt: TxReceipt) -> str:
+    """
+    Replay a reverted TX via eth_call at the revert block to extract the reason.
+
+    Decodes:
+      - 0x08c379a0 = Error(string) — standard Solidity require/revert
+      - 0x4e487b71 = Panic(uint256) — div by zero, overflow, etc.
+      - Custom errors — logged as raw selector + params
+    """
+    from .simulator import decode_revert
+    block_num = receipt.get("blockNumber", 0)
+    if not block_num:
+        return ""
+
+    try:
+        from .chain import w3_read
+        call_params = {"from": tx_from, "gas": 5_000_000}
+        if value > 0:
+            call_params["value"] = value
+        fn_call.call(call_params, block_identifier=block_num)
+        return ""  # Didn't revert on replay — state-dependent failure
+    except Exception as exc:
+        try:
+            return decode_revert(exc)
+        except Exception:
+            return f"undecoded: {str(exc)[:120]}"
 
 
 def approve_if_needed(
