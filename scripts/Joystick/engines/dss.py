@@ -333,17 +333,23 @@ class DSSEngine(EngineBase):
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # Now deposit AFF from Joey → Hub
+            # Now deposit AFF from Joey → Hub (use actual balance, not shortfall)
             aff_c_submit = w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi)
-            r = approve_if_needed(aff_c_submit, hub_addr, shortfall_wei,
+            actual_aff = safe(aff_c_submit, "balanceOf", JOEY_WALLET) or 0
+            deposit_amount = min(actual_aff, shortfall_wei)
+            if deposit_amount == 0:
+                log.warning("E2: No AFF to deposit after swap")
+                return tx_hashes, gas_spent
+
+            r = approve_if_needed(aff_c_submit, hub_addr, deposit_amount,
                                   "AFF→Hub", dry_run=dry_run)
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
             r = send_tx(
-                hub.functions.deposit(aff_cs, shortfall_wei),
-                f"Deposit {int(shortfall_wei / 10**18)} AFF → Hub",
+                hub.functions.deposit(aff_cs, deposit_amount),
+                f"Deposit {int(deposit_amount / 10**18)} AFF → Hub",
                 dry_run=dry_run,
             )
             if r:

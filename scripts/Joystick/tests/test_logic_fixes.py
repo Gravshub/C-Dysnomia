@@ -9,6 +9,7 @@ import sys
 import os
 import unittest
 from unittest.mock import patch, MagicMock
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -21,6 +22,14 @@ if "scripts.Joystick.core.wallet" in sys.modules:
     del sys.modules["scripts.Joystick.core.wallet"]
 
 from scripts.Joystick.engines.treasury_sniper import TreasurySniperEngine, TreasuryTarget
+
+
+# Override the session-scoped autouse fixture so these pure unit tests
+# do not require Anvil to be running.
+@pytest.fixture(autouse=True)
+def isolate(request):
+    """No-op override: unit tests in this file need no Anvil snapshot/revert."""
+    yield
 
 
 class TestE6SimulateUsesLiveQuotes(unittest.TestCase):
@@ -91,6 +100,51 @@ class TestE6BatchCap(unittest.TestCase):
         MAX_BATCH_CAP = 50_000 * 10**18
         self.assertLessEqual(profit + gas, MAX_BATCH_CAP,
                              "Total batch estimate must be capped at 50K PLS")
+
+
+class TestE2DepositOverflow(unittest.TestCase):
+    """Flaw #2: E2 _acquire_aff must deposit actual AFF received, not full shortfall."""
+
+    @patch("scripts.Joystick.engines.dss.send_tx")
+    @patch("scripts.Joystick.engines.dss.approve_if_needed")
+    @patch("scripts.Joystick.engines.dss.router_contract")
+    @patch("scripts.Joystick.engines.dss.erc20")
+    @patch("scripts.Joystick.engines.dss.safe")
+    @patch("scripts.Joystick.engines.dss.w3_submit")
+    def test_deposit_uses_actual_balance(self, mock_w3s, mock_safe, mock_erc20,
+                                          mock_router, mock_approve, mock_send):
+        """Deposit amount should be min(actual_aff_balance, shortfall_wei)."""
+        from scripts.Joystick.engines.dss import DSSEngine
+
+        engine = DSSEngine()
+
+        # Setup mocks
+        mock_w3s.eth.gas_price = 100 * 10**9
+        mock_w3s.eth.contract = MagicMock()
+
+        fake_receipt = {
+            "transactionHash": MagicMock(hex=MagicMock(return_value="0x" + "aa" * 32)),
+            "gasUsed": 100_000,
+            "effectiveGasPrice": 100 * 10**9,
+        }
+        mock_send.return_value = fake_receipt
+        mock_approve.return_value = None
+
+        shortfall = int(100 * 10**18)  # 100 AFF needed
+        actual_received = int(95 * 10**18)  # only got 95 AFF
+
+        mock_safe.return_value = actual_received
+
+        hub = MagicMock()
+        engine._cheapest_aff_route = MagicMock(return_value=("dex", int(5000 * 10**18)))
+
+        tx_hashes, gas_spent = engine._acquire_aff(shortfall, hub, dry_run=False)
+
+        deposit_calls = [c for c in hub.functions.deposit.call_args_list]
+        if deposit_calls:
+            deposit_amount = deposit_calls[0][0][1]  # second positional arg
+            self.assertLessEqual(deposit_amount, actual_received,
+                                 f"Deposit {deposit_amount/1e18} AFF > received {actual_received/1e18}")
 
 
 if __name__ == "__main__":
