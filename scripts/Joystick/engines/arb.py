@@ -293,7 +293,9 @@ class ArbEngine(EngineBase):
         """Mode 1: Purchase → DEX arb scan."""
         gas_cost_wei = PURCHASE_GAS_ESTIMATE * gas_price
 
-        tokens = scan_tokens()
+        # Cap enrichment at 50 tokens during simulate() to limit RPC blast.
+        # Full 272+ scan happens on background cache refresh, not in hot sim path.
+        tokens = scan_tokens(max_tokens=50)
         ranked = rank_opportunities(tokens, gas_cost_wei)
 
         if not ranked:
