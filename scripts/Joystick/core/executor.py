@@ -170,6 +170,7 @@ def send_tx(
     gas_mult: float = GAS_MULT,
     value: int = 0,
     skip_simulate: bool = False,
+    gas_tier: str = "fast",
     wallet_ctx=None,
 ) -> TxReceipt | None:
     """
@@ -224,7 +225,7 @@ def send_tx(
     gas_limit = int(gas_est * gas_mult)
 
     # Step 2b: Build EIP-1559 gas params
-    eip1559 = build_gas_params("fast")
+    eip1559 = build_gas_params(gas_tier)
 
     # Step 2c: Gas price ceiling check (against actual maxFeePerGas)
     if eip1559["maxFeePerGas"] > GAS_PRICE_CEIL:
