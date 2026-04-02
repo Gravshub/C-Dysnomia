@@ -198,13 +198,24 @@ def send_tx(
         except Exception:
             on_chain_nonce = nonce  # Can't check, assume stuck
         if on_chain_nonce > nonce:
-            log.warning("  Receipt not found but nonce advanced (%d→%d) — TX mined (hash dropped by RPC)", nonce, on_chain_nonce)
+            log.warning("  Receipt not found but nonce advanced (%d->%d) -- TX mined (hash dropped by RPC)", nonce, on_chain_nonce)
             _reset_nonce_for(wallet_ctx)
-            return None  # Nonce consumed, TX succeeded
+            # Return synthetic receipt so engines can record the TX hash and estimated gas.
+            # Gas cost is estimated (gas_limit * maxFeePerGas) since we can't read the receipt.
+            estimated_gas_cost = gas_limit * eip1559["maxFeePerGas"]
+            log.warning("  Returning synthetic receipt (estimated gas: %d wei)", estimated_gas_cost)
+            return {
+                "status": 1,
+                "transactionHash": type('', (), {"hex": lambda self: tx_hash_hex})(),
+                "blockNumber": 0,
+                "gasUsed": gas_limit,
+                "effectiveGasPrice": eip1559["maxFeePerGas"],
+                "_synthetic": True,
+            }
         else:
-            log.error("  Receipt timeout and nonce unchanged — TX 0x%s dropped from mempool", tx_hash_hex)
+            log.error("  Receipt timeout and nonce unchanged -- TX 0x%s dropped from mempool", tx_hash_hex)
             _reset_nonce_for(wallet_ctx)
-            raise TimeExhausted(f"TX 0x{tx_hash_hex} dropped — nonce {nonce} still pending")
+            raise TimeExhausted(f"TX 0x{tx_hash_hex} dropped -- nonce {nonce} still pending")
 
     if receipt is None:
         return None
