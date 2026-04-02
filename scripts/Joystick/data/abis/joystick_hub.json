@@ -1126,5 +1126,58 @@
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "minPLSOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "dex",
+        "type": "uint8"
+      },
+      {
+        "internalType": "address[]",
+        "name": "sellPath",
+        "type": "address[]"
+      }
+    ],
+    "name": "primeAndSell",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "plsReceived",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "plsOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrimeAndSell",
+    "type": "event"
   }
 ]
