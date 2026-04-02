@@ -536,91 +536,60 @@ class DSSEngine(EngineBase):
             # Fix: submit primeGibs without waiting, then immediately submit
             # mintLPAndSell with the next nonce. Miners must include them in order.
 
-            # ── Step 2: primeGibs (fire-and-forget — no receipt wait) ──
-            log.info("E2: primeGibs(%d) [no-wait, urgent]", mint_count)
-            prime_hash = submit_tx_nowait(
+            # ── Step 2: primeGibs (wait for receipt) ──
+            # Previously sent both TXs back-to-back to prevent MEV sniping of
+            # the GIBS self-balance. But PulseChain doesn't guarantee same-block
+            # inclusion, causing mintLPAndSell to revert ~50% of the time when it
+            # executes before primeGibs state is committed.
+            # Fix: wait for primeGibs receipt, then send mintLPAndSell.
+            # MEV snipe risk is theoretical — no bots actively snipe GIBS mintToCap.
+            log.info("E2: primeGibs(%d) [wait for receipt]", mint_count)
+            r = send_tx(
                 hub.functions.primeGibs(mint_count),
                 f"primeGibs({mint_count})",
                 dry_run=dry_run,
-                gas_tier="urgent",  # must land quickly — sniper watches self-balance
+                gas_tier="urgent",
             )
-            if prime_hash:
-                tx_hashes.append(prime_hash)
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # ── Step 3: mintLPAndSell (fire-and-forget, fixed gas — can't estimate against pre-prime state) ──
+            # ── Step 3: mintLPAndSell (now safe — primeGibs state confirmed) ──
             gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
             wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
-
             sell_gibs_wei = gibs_amount - gibs_for_lp_wei
             sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
             min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
 
             log.info(
                 "E2: mintLPAndSell(%d, lp=%d%%, burn=%d%%, lpDex=%d, "
-                "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS) [no-wait]",
+                "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS)",
                 mint_count, lp_bps / 100, HARVEST_BURN_BPS / 100,
                 HARVEST_LP_DEX, min_sell_out / 1e18,
                 [a[-6:] for a in sell_path], sell_dex,
                 wpls_needed / 1e18,
             )
 
-            # Submit mintLPAndSell WITHOUT waiting — both TXs now in mempool together.
-            # Can't use estimate_gas here because primeGibs hasn't mined yet (state
-            # still shows 0 GIBS self-balance). Use fixed 1M gas based on observed
-            # usage (~377K with sell, ~515K with 2-hop sell, padded to 1M).
-            harvest_hash = submit_tx_nowait(
+            harvest_hash = None
+            r = send_tx(
                 hub.functions.mintLPAndSell(
-                    mint_count,
-                    lp_bps,
-                    HARVEST_BURN_BPS,
-                    HARVEST_LP_DEX,
-                    min_sell_out,
-                    sell_path,
-                    sell_dex,
+                    mint_count, lp_bps, HARVEST_BURN_BPS, HARVEST_LP_DEX,
+                    min_sell_out, sell_path, sell_dex,
                 ),
                 f"mintLPAndSell({mint_count}, LP={lp_bps/100:.0f}%, "
                 f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
                 dry_run=dry_run,
                 value=wpls_needed,
-                skip_simulate=True,  # payable + depends on primeGibs state
-                fixed_gas=1_000_000,  # can't estimate — primeGibs hasn't mined yet
-                gas_tier="urgent",    # 100% base fee tip — must land same block as primeGibs
+                skip_simulate=True,  # payable — eth_call can't simulate msg.value correctly
+                fixed_gas=500_000,   # actual ~292K, padded
+                gas_tier="urgent",
             )
-            if harvest_hash:
+            if r:
+                harvest_hash = r["transactionHash"].hex()
                 tx_hashes.append(harvest_hash)
-
-            # ── Step 4: Wait for both TXs to mine ──
-            if not dry_run and harvest_hash:
-                import time as _time
-                from ..core.chain import w3_read
-                log.info("E2: Waiting for primeGibs + mintLPAndSell receipts...")
-                harvest_bytes = bytes.fromhex(harvest_hash.replace("0x", ""))
-                _w3_submit = w3_submit
-                receipt = None
-                for _poll in range(24):  # 120s max
-                    _time.sleep(5)
-                    for _w3 in [_w3_submit, w3_read]:
-                        try:
-                            receipt = _w3.eth.get_transaction_receipt(harvest_bytes)
-                            if receipt:
-                                break
-                        except Exception:
-                            pass
-                    if receipt:
-                        break
-
-                if receipt and receipt.get("status") == 1:
-                    gas_spent += receipt["gasUsed"] * receipt.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                    log.info("E2: mintLPAndSell mined. Block: %d, Gas: %d",
-                             receipt["blockNumber"], receipt["gasUsed"])
-                elif receipt:
-                    log.error("E2: mintLPAndSell REVERTED on-chain")
-                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
-                                        tx_hashes=tx_hashes, notes="mintLPAndSell reverted on-chain")
-                else:
-                    log.error("E2: mintLPAndSell receipt timeout (120s)")
-                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
-                                        tx_hashes=tx_hashes, notes="mintLPAndSell receipt timeout")
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                log.info("E2: mintLPAndSell mined. Block: %d, Gas: %d",
+                         r["blockNumber"], r["gasUsed"])
 
             log.info("E2 complete: %d GIBS — %d%% LP, %d%% sold",
                      mint_count, lp_bps / 100, HARVEST_SELL_BPS / 100)
