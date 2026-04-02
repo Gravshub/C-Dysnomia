@@ -40,7 +40,7 @@ log = get_logger(__name__)
 #
 # maxFeePerGas set to 2x base fee — absorbs spikes, excess refunded.
 
-_GAS_TIERS = {"slow": 5, "standard": 25, "fast": 50}
+_GAS_TIERS = {"slow": 5, "standard": 25, "fast": 50, "urgent": 100}
 
 # Minimum priority fee in Impulses (wei). PulseChain miners often ignore
 # sub-500K-Beat tips even when maxFee is well above baseFee.
@@ -88,6 +88,7 @@ def submit_tx_nowait(
     value: int = 0,
     skip_simulate: bool = False,
     fixed_gas: int = 0,
+    gas_tier: str = "fast",
     wallet_ctx=None,
 ) -> str | None:
     """
@@ -132,7 +133,7 @@ def submit_tx_nowait(
     else:
         gas_est = estimate_gas(fn_call, from_address=tx_from, value=value)
         gas_limit = int(gas_est * gas_mult)
-    eip1559 = build_gas_params("fast")
+    eip1559 = build_gas_params(gas_tier)
 
     if eip1559["maxFeePerGas"] > GAS_PRICE_CEIL:
         raise GasTooHigh(
