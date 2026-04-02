@@ -190,7 +190,12 @@ class RPCPool:
         if not ranked:
             raise RPCAllProvidersDown("No healthy submit providers")
 
+        # Broadcast to ALL submit providers for reliability.
+        # PulseChain RPCs can accept a TX but then drop it from mempool.
+        # Broadcasting to all providers maximizes the chance of inclusion.
+        first_hash = None
         last_error = None
+        accepted_count = 0
         for provider in ranked:
             try:
                 t0 = time.time()
@@ -198,22 +203,33 @@ class RPCPool:
                 latency = time.time() - t0
                 provider.record_success(latency)
                 h = tx_hash.hex() if hasattr(tx_hash, 'hex') else tx_hash
-                log.info("TX submitted to %s: %s", provider.name, h)
-                return h
+                accepted_count += 1
+                if first_hash is None:
+                    first_hash = h
+                    log.info("TX submitted to %s: %s", provider.name, h)
+                else:
+                    log.debug("TX broadcast to %s: %s", provider.name, h)
             except Exception as e:
                 err_str = str(e).lower()
                 if "nonce too low" in err_str:
+                    if first_hash:
+                        break  # already accepted elsewhere
                     raise  # nonce consumed on-chain, no retry
                 if "already known" in err_str:
-                    log.info("TX already in %s mempool", provider.name)
-                    return None  # executor handles None → uses signed.hash
+                    accepted_count += 1
+                    log.debug("TX already in %s mempool", provider.name)
+                    continue  # broadcast to remaining
                 provider.record_failure()
                 last_error = e
                 log.warning("TX submit to %s failed: %s — trying next",
                             provider.name, str(e)[:80])
 
+        if first_hash:
+            if accepted_count > 1:
+                log.info("TX broadcast to %d/%d providers", accepted_count, len(ranked))
+            return first_hash
+
         raise RPCAllProvidersDown(f"TX submission failed on all providers. Last: {last_error}")
-        return None
 
     def get_w3(self) -> Web3:
         """Get the Web3 instance for the best current provider.
