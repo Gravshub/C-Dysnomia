@@ -289,10 +289,12 @@ def build_default_pools() -> tuple[RPCPool, RPCPool]:
     submit_providers.extend([
         ProviderState(url="https://rpc.pulsechain.com",
                       name="PulseChain", tier=1, role="submit"),
+        # G4MM4 and PublicNode are Tier 2 fallbacks for TX submission.
+        # PublicNode accepts TXs but doesn't reliably propagate them.
         ProviderState(url="https://rpc-pulsechain.g4mm4.io",
-                      name="G4MM4", tier=1, role="submit"),
+                      name="G4MM4", tier=2, role="submit"),
         ProviderState(url="https://pulsechain-rpc.publicnode.com",
-                      name="PublicNode", tier=1, role="submit"),
+                      name="PublicNode", tier=2, role="submit"),
     ])
 
     custom_submit = os.getenv("PULSECHAIN_RPC", "")

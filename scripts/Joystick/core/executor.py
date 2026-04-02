@@ -40,7 +40,11 @@ log = get_logger(__name__)
 #
 # maxFeePerGas set to 2x base fee — absorbs spikes, excess refunded.
 
-_GAS_TIERS = {"slow": 0, "standard": 5, "fast": 25}
+_GAS_TIERS = {"slow": 5, "standard": 25, "fast": 50}
+
+# Minimum priority fee in Impulses (wei). PulseChain miners often ignore
+# sub-500K-Beat tips even when maxFee is well above baseFee.
+MIN_PRIORITY_FEE = 500_000 * 10**9  # 500K Beats
 
 
 def build_gas_params(tier: str = "fast", w3=None) -> dict:
@@ -48,12 +52,12 @@ def build_gas_params(tier: str = "fast", w3=None) -> dict:
     _w3 = w3 or get_submit_pool().call(lambda w: w)
     base_fee = _w3.eth.get_block("latest")["baseFeePerGas"]
 
-    tip_pct = _GAS_TIERS.get(tier, 25)
+    tip_pct = _GAS_TIERS.get(tier, 50)
     priority_fee = base_fee * tip_pct // 100
     max_fee = base_fee * 2  # 2x ceiling absorbs 2-3 block base fee swings
 
-    # Floor: minimum 1 wei priority to avoid stuck TXs
-    priority_fee = max(priority_fee, 1)
+    # Floor: minimum priority to avoid stuck TXs on PulseChain
+    priority_fee = max(priority_fee, MIN_PRIORITY_FEE)
 
     return {
         "maxFeePerGas": max_fee,
@@ -176,26 +180,38 @@ def send_tx(
         tx_hash_hex = signed.hash.hex()
     log.info("  TX: 0x%s", tx_hash_hex)
 
-    # Wait for receipt via simple polling (NOT RPCPool — pool retries cause multi-minute hangs).
-    # PulseChain RPCs frequently drop TX hashes, so poll w3_read directly with a short timeout,
-    # then fall back to nonce-based confirmation if the hash was lost.
+    # Wait for receipt by polling the SUBMIT RPC first (it accepted the TX and sees
+    # it in its mempool), then fall back to read RPCs. PulseChain RPCs have propagation
+    # delays — a TX accepted by rpc.pulsechain.com may not be visible on g4mm4/publicnode
+    # for several blocks.
     import time as _time
     from .chain import w3_read
+    _w3_submit_direct = pool.get_w3()  # same RPC that accepted the TX
     tx_hash_bytes = bytes.fromhex(tx_hash_hex.replace("0x", ""))
     receipt = None
-    for _poll in range(12):  # 12 × 5s = 60s max
+    for _poll in range(24):  # 24 × 5s = 120s max
         _time.sleep(5)
-        try:
-            receipt = w3_read.eth.get_transaction_receipt(tx_hash_bytes)
+        # Try submit RPC first (has the TX in its mempool), then read RPC
+        for _w3_check in [_w3_submit_direct, w3_read]:
+            try:
+                receipt = _w3_check.eth.get_transaction_receipt(tx_hash_bytes)
+                if receipt:
+                    break
+            except Exception:
+                pass
+        if receipt:
             break
-        except Exception:
-            pass
 
     if receipt is None:
-        # Receipt not found after 60s — check if nonce advanced (TX mined but hash lost)
-        try:
-            on_chain_nonce = w3_read.eth.get_transaction_count(tx_from)
-        except Exception:
+        # Receipt not found after 120s — check if nonce advanced (TX mined but hash lost)
+        # Check both submit and read RPCs for nonce
+        on_chain_nonce = nonce
+        for _w3_check in [_w3_submit_direct, w3_read]:
+            try:
+                n = _w3_check.eth.get_transaction_count(tx_from)
+                on_chain_nonce = max(on_chain_nonce, n)
+            except Exception:
+                pass
             on_chain_nonce = nonce  # Can't check, assume stuck
         if on_chain_nonce > nonce:
             log.warning("  Receipt not found but nonce advanced (%d->%d) -- TX mined (hash dropped by RPC)", nonce, on_chain_nonce)

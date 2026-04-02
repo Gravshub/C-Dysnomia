@@ -379,8 +379,12 @@ class DysnomiaBot:
                      engine.display_name, rec.confidence, rec.wallet_role,
                      rec.profit_est, rec.gas_est, rec.roi)
 
-            # Measure realized PLS profit via balance delta
+            # Measure realized value via PLS + WPLS balance delta.
+            # E2 sends native PLS as msg.value but sell output returns WPLS (ERC20),
+            # so checking only native PLS would falsely report LP-building as a loss.
+            from .core.chain import erc20, safe
             pls_before = pls_balance()
+            wpls_before = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
 
             result = engine.execute(dry_run=self.dry_run)
             _events.log_engine_result(engine.name, result, cycle_num=self.cycle)
@@ -392,7 +396,8 @@ class DysnomiaBot:
                 engine.record_success()
 
                 pls_after = pls_balance()
-                realized_delta = pls_after - pls_before  # can be negative (gas loss)
+                wpls_after = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
+                realized_delta = (pls_after + wpls_after) - (pls_before + wpls_before)
 
                 log.info("✓ %s [%s]: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
                          engine.display_name, rec.wallet_role,
