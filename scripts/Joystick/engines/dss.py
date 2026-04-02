@@ -527,11 +527,12 @@ class DSSEngine(EngineBase):
             # mintLPAndSell with the next nonce. Miners must include them in order.
 
             # ── Step 2: primeGibs (fire-and-forget — no receipt wait) ──
-            log.info("E2: primeGibs(%d) [no-wait]", mint_count)
+            log.info("E2: primeGibs(%d) [no-wait, urgent]", mint_count)
             prime_hash = submit_tx_nowait(
                 hub.functions.primeGibs(mint_count),
                 f"primeGibs({mint_count})",
                 dry_run=dry_run,
+                gas_tier="urgent",  # must land quickly — sniper watches self-balance
             )
             if prime_hash:
                 tx_hashes.append(prime_hash)
@@ -573,6 +574,7 @@ class DSSEngine(EngineBase):
                 value=wpls_needed,
                 skip_simulate=True,  # payable + depends on primeGibs state
                 fixed_gas=1_000_000,  # can't estimate — primeGibs hasn't mined yet
+                gas_tier="urgent",    # 100% base fee tip — must land same block as primeGibs
             )
             if harvest_hash:
                 tx_hashes.append(harvest_hash)
