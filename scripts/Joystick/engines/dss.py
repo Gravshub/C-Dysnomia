@@ -341,7 +341,8 @@ class DSSEngine(EngineBase):
                 log.warning("E2: No AFF to deposit after swap")
                 return tx_hashes, gas_spent
 
-            r = approve_if_needed(aff_c_submit, hub_addr, deposit_amount,
+            MAX_UINT256 = 2**256 - 1
+            r = approve_if_needed(aff_c_submit, hub_addr, MAX_UINT256,
                                   "AFF→Hub", dry_run=dry_run)
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
@@ -351,6 +352,8 @@ class DSSEngine(EngineBase):
                 hub.functions.deposit(aff_cs, deposit_amount),
                 f"Deposit {int(deposit_amount / 10**18)} AFF → Hub",
                 dry_run=dry_run,
+                skip_simulate=True,
+                fixed_gas=200_000,
             )
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
@@ -485,39 +488,46 @@ class DSSEngine(EngineBase):
             gibs_amount = mint_count * 10**18
 
             # ── Step 1: Ensure Hub has enough AFF for Purchase (1 AFF per GIBS) ──
+            # Batch deposit: when Hub runs low, deposit enough for ~30 cycles
+            # to avoid a deposit TX every single cycle.
+            AFF_BATCH_CYCLES = 30
             aff_needed = mint_count * 10**18
             aff_in_hub = self._aff_in_hub()
             if aff_in_hub < aff_needed:
-                shortfall = aff_needed - aff_in_hub
-                log.info("E2: Hub needs %d more AFF (has %d, needs %d)",
-                         shortfall // 10**18, aff_in_hub // 10**18, mint_count)
-
-                # Check Joey's AFF balance
+                # Deposit enough for many cycles, capped by Joey's balance
+                desired_deposit = mint_count * AFF_BATCH_CYCLES * 10**18
                 aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-                if aff_joey >= shortfall:
-                    # Deposit Joey's AFF into Hub
-                    aff_c_submit = w3_submit.eth.contract(
-                        address=aff_cs, abi=erc20(AFFECTION).abi,
-                    )
-                    r = approve_if_needed(aff_c_submit, hub_addr, shortfall,
-                                          "AFF→Hub", dry_run=dry_run)
-                    if r:
-                        tx_hashes.append(r["transactionHash"].hex())
-                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                deposit_amount = min(desired_deposit, aff_joey)
 
-                    r = send_tx(
-                        hub.functions.deposit(aff_cs, shortfall),
-                        f"Deposit {shortfall//10**18} AFF → Hub",
-                        dry_run=dry_run,
-                        skip_simulate=True,  # approve just landed — read RPC may lag
-                    )
-                    if r:
-                        tx_hashes.append(r["transactionHash"].hex())
-                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                else:
+                if deposit_amount < aff_needed:
                     return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
                                         tx_hashes=tx_hashes,
-                                        notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {shortfall//10**18}")
+                                        notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {aff_needed//10**18}")
+
+                log.info("E2: Hub needs AFF (has %d, needs %d) — batch depositing %d (~%d cycles)",
+                         aff_in_hub // 10**18, mint_count,
+                         deposit_amount // 10**18, deposit_amount // aff_needed)
+
+                MAX_UINT256 = 2**256 - 1
+                aff_c_submit = w3_submit.eth.contract(
+                    address=aff_cs, abi=erc20(AFFECTION).abi,
+                )
+                r = approve_if_needed(aff_c_submit, hub_addr, MAX_UINT256,
+                                      "AFF→Hub", dry_run=dry_run)
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                r = send_tx(
+                    hub.functions.deposit(aff_cs, deposit_amount),
+                    f"Deposit {deposit_amount//10**18} AFF → Hub",
+                    dry_run=dry_run,
+                    skip_simulate=True,  # approve may just have landed — read RPC lag
+                    fixed_gas=200_000,   # skip estimate_gas for same reason
+                )
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
             # ── Step 2+3: primeGibs → mintLPAndSell (back-to-back, no receipt wait) ──
             # CRITICAL: These two TXs MUST land in the same or consecutive blocks.

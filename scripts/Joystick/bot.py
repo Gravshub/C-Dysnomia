@@ -399,21 +399,30 @@ class DysnomiaBot:
                 wpls_after = safe(erc20(WPLS), "balanceOf", JOEY_WALLET) or 0
                 realized_delta = (pls_after + wpls_after) - (pls_before + wpls_before)
 
+                # E2 deposits PLS into LP (creates LP tokens not tracked here),
+                # so realized_delta will appear negative even on profitable cycles.
+                # Use engine-reported profit for LP-building engines.
+                lp_engine = engine.name in ("DSS",)  # engines that deposit into LP
+                effective_delta = result.net_pls * 1e18 if lp_engine else realized_delta
+
                 log.info("✓ %s [%s]: reported=%.4f PLS  realized=%.4f PLS  TXs=%d  notes=%s",
                          engine.display_name, rec.wallet_role,
                          result.net_pls, realized_delta / 1e18,
                          len(result.tx_hashes), result.notes)
+                if lp_engine and realized_delta < 0:
+                    log.info("  (LP deposit: %.1f PLS in LP tokens, not counted in realized)",
+                             abs(realized_delta / 1e18) + result.net_pls)
 
-                if realized_delta > 0 and not self.dry_run and not self.multi_wallet:
+                if effective_delta > 0 and not self.dry_run and not self.multi_wallet:
                     # Only auto-compound in single-wallet mode
-                    self.compound(realized_delta)
+                    self.compound(int(effective_delta))
                     cycle_outcome = "profit"
-                elif realized_delta > 0:
+                elif effective_delta > 0:
                     cycle_outcome = "profit"
-                elif realized_delta < -100 * 10**18:
+                elif effective_delta < -100 * 10**18:
                     # Lost more than 100 PLS — treat as failure for adaptive delay
                     cycle_outcome = "failure"
-                    log.warning("  Loss detected: %.1f PLS (gas > revenue)", realized_delta / 1e18)
+                    log.warning("  Loss detected: %.1f PLS (gas > revenue)", effective_delta / 1e18)
                 else:
                     cycle_outcome = "strategic"
             else:
