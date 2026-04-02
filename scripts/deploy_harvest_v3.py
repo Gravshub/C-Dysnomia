@@ -114,11 +114,37 @@ def compile_contract():
         sys.exit(1)
 
 
+def _load_env():
+    """Try to load .env.pulse from known locations."""
+    candidates = [
+        os.path.expanduser("~/.env.pulse"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env.pulse"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Joystick", "deploy", ".env.pulse"),
+        "/opt/joystick/.env.pulse",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            print(f"Loading env from {path}")
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+            return True
+    return False
+
+
 def deploy(dry_run: bool = False):
     """Deploy HarvestModuleV3 and register selectors in Hub."""
-    pk = os.environ.get("DYSNOMIA_PRIVATE_KEY")
+    # Try loading .env.pulse if key not already in env
+    pk = os.environ.get("DYSNOMIA_PRIVATE_KEY") or os.environ.get("PRIVATE_KEY")
+    if not pk:
+        _load_env()
+        pk = os.environ.get("DYSNOMIA_PRIVATE_KEY") or os.environ.get("PRIVATE_KEY")
     if not pk and not dry_run:
-        print("ERROR: DYSNOMIA_PRIVATE_KEY not set")
+        print("ERROR: No private key found. Set DYSNOMIA_PRIVATE_KEY or PRIVATE_KEY,")
+        print("       or place .env.pulse in ~/.env.pulse or /opt/joystick/.env.pulse")
         sys.exit(1)
 
     w3 = Web3(Web3.HTTPProvider(SUBMIT_RPC))
