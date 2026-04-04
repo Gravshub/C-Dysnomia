@@ -1013,63 +1013,33 @@ class PhreakEngine(EngineBase):
         log.info("E8 STITCH: creating pair %s/%s", candidate.symbol_a, candidate.symbol_b)
 
         try:
-            # Check existing balances in TGSv8 and wallet
+            # Check existing balances in TGSv8 (only TGSv8 matters — wallet
+            # tokens require fragile approve+deposit, so we buy into TGSv8 directly)
             bal_a_tgs = safe(tgs_read, "bal", token_a) or 0
             bal_b_tgs = safe(tgs_read, "bal", token_b) or 0
 
-            bal_a_wallet = safe(erc20(token_a), "balanceOf", JOEY_WALLET) or 0
-            bal_b_wallet = safe(erc20(token_b), "balanceOf", JOEY_WALLET) or 0
-
-            total_a = bal_a_tgs + bal_a_wallet
-            total_b = bal_b_tgs + bal_b_wallet
-
-            if total_a == 0 or total_b == 0:
-                # Need to acquire tokens — buy small amounts on DEX
-                # Use 50 PLS worth of each token
-                buy_pls = 50 * 10**18
-
-                for token, sym in [(token_a, candidate.symbol_a),
-                                   (token_b, candidate.symbol_b)]:
-                    bal_tgs = safe(tgs_read, "bal", token) or 0
-                    bal_wal = safe(erc20(token), "balanceOf", JOEY_WALLET) or 0
-
-                    if bal_tgs + bal_wal > 0:
-                        continue
-
-                    # Buy via TGSv8.swapNativeForTokens
-                    r = send_tx(
-                        tgs.functions.swapNativeForTokens(token, 1, 2),
-                        f"STITCH: buy {sym} ({buy_pls//10**18} PLS)",
-                        dry_run=dry_run,
-                        value=buy_pls,
-                        skip_simulate=True,
-                    )
-                    if r:
-                        tx_hashes.append(r["transactionHash"].hex())
-                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice",
-                                                           w3_submit.eth.gas_price)
-
-                # Re-check balances after purchase
-                bal_a_tgs = safe(tgs_read, "bal", token_a) or 0
-                bal_b_tgs = safe(tgs_read, "bal", token_b) or 0
-
-            # Deposit wallet tokens into TGSv8 if needed
+            # Ensure TGSv8 has tokens for both sides of the pair.
+            # Always buy directly into TGSv8 via swapNativeForTokens —
+            # avoids fragile approve+deposit dance from wallet.
+            buy_pls = 50 * 10**18
             for token, sym in [(token_a, candidate.symbol_a),
-                                (token_b, candidate.symbol_b)]:
-                wal_bal = safe(erc20(token), "balanceOf", JOEY_WALLET) or 0
-                if wal_bal > 0:
-                    tgs_addr = Web3.to_checksum_address(TGSV8)
-                    tok_c = w3_submit.eth.contract(address=token, abi=erc20(token).abi)
-                    approve_if_needed(tok_c, tgs_addr, wal_bal, f"{sym}→TGSv8", dry_run=dry_run)
-                    r = send_tx(
-                        tgs.functions.deposit(token, wal_bal),
-                        f"Deposit {sym} into TGSv8",
-                        dry_run=dry_run,
-                    )
-                    if r:
-                        tx_hashes.append(r["transactionHash"].hex())
-                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice",
-                                                           w3_submit.eth.gas_price)
+                               (token_b, candidate.symbol_b)]:
+                bal_tgs = safe(tgs_read, "bal", token) or 0
+                if bal_tgs > 0:
+                    continue
+
+                # Buy via TGSv8.swapNativeForTokens (tokens land in TGSv8)
+                r = send_tx(
+                    tgs.functions.swapNativeForTokens(token, 1, 2),
+                    f"STITCH: buy {sym} ({buy_pls//10**18} PLS)",
+                    dry_run=dry_run,
+                    value=buy_pls,
+                    skip_simulate=True,
+                )
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice",
+                                                       w3_submit.eth.gas_price)
 
             # Re-read final balances in TGSv8
             amt_a = safe(tgs_read, "bal", token_a) or 0
