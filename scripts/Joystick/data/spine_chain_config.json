@@ -1,0 +1,39 @@
+{
+  "chain": "v2_autonomous_ammo",
+  "status": "template",
+  "target": {
+    "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
+    "symbol": "FDIC",
+    "parent": "0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff",
+    "parent_symbol": "FED"
+  },
+  "jbase": {
+    "address": null,
+    "symbol": "JBASE",
+    "parent": "0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff",
+    "parent_symbol": "FED",
+    "deployed_block": null,
+    "deployed_tx": null
+  },
+  "jammo": {
+    "address": null,
+    "symbol": "JAMMO",
+    "parent": null,
+    "parent_symbol": "JBASE",
+    "deployed_block": null,
+    "deployed_tx": null
+  },
+  "thresholds": {
+    "jammo_reload_floor": 100,
+    "min_cycle_amount": 100,
+    "max_cycle_amount": 10000,
+    "min_profit_pls": 5,
+    "gas_mult": 2.5
+  },
+  "created_at": null,
+  "last_run": null,
+  "total_cycles": 0,
+  "total_jammo_consumed": 0,
+  "total_fed_locked": 0,
+  "total_revenue_pls": 0
+}

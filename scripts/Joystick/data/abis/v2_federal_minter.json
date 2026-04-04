@@ -1,0 +1,52 @@
+[
+  {
+    "name": "New",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "Name", "type": "string"},
+      {"name": "Symbol", "type": "string"},
+      {"name": "InitialMint", "type": "uint256"},
+      {"name": "Parent", "type": "address"}
+    ],
+    "outputs": [{"name": "", "type": "address"}]
+  },
+  {
+    "name": "TreasuryTokens",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [{"name": "ctx", "type": "address"}],
+    "outputs": [{"name": "", "type": "address"}]
+  },
+  {
+    "name": "GetTreasuryTokenOwner",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [{"name": "ctx", "type": "address"}],
+    "outputs": [{"name": "", "type": "address"}]
+  },
+  {
+    "name": "Transfer",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "ctx", "type": "address"},
+      {"name": "newOwner", "type": "address"}
+    ],
+    "outputs": []
+  },
+  {
+    "name": "FDIC",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "address"}]
+  },
+  {
+    "name": "FED",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "address"}]
+  }
+]
