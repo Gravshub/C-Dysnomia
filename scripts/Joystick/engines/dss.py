@@ -442,7 +442,8 @@ class DSSEngine(EngineBase):
 
         gas_price = w3_read.eth.gas_price
 
-        # FloorHarvestModule path: use quoteFloorCycle for accurate economics
+        # FloorHarvestModule path: always run when feasible — LP burn is permanent
+        # floor value, GIBS supply is expendable. Sell side recovers gas when possible.
         hub = self._get_hub()
         if self._has_floor_harvest(hub):
             lp_bps = 10000 - HARVEST_SELL_BPS
@@ -457,10 +458,10 @@ class DSSEngine(EngineBase):
                     net_wpls / 1e18, gas_cost_wei / 1e18, gibs_price / 1e18,
                 )
                 if not feasible:
-                    log.debug("E2 not ready: quoteFloorCycle infeasible")
+                    log.debug("E2 not ready: quoteFloorCycle infeasible (pair empty or no WPLS)")
                     return False
-                # Ready if sell revenue covers gas (LP value is bonus floor)
-                return wpls_from_sell > gas_cost_wei
+                # Always ready — LP burn builds permanent price floor
+                return True
 
         # Fallback: sell-only break-even check
         lp_bps = 10000 - HARVEST_SELL_BPS
@@ -488,7 +489,7 @@ class DSSEngine(EngineBase):
         gas_price = w3_read.eth.gas_price
         hub = self._get_hub()
 
-        # FloorHarvestModule path
+        # FloorHarvestModule path — always run, LP burn is strategic
         if self._has_floor_harvest(hub):
             lp_bps = 10000 - HARVEST_SELL_BPS
             quote = self._quote_floor_cycle(hub, HARVEST_MINT_COUNT, lp_bps)
@@ -501,11 +502,7 @@ class DSSEngine(EngineBase):
                     f"wplsNeeded={wpls_needed/1e18:.1f}"
                 )
             gas_cost_wei = FLOOR_GAS_ESTIMATE * gas_price
-            if wpls_from_sell <= gas_cost_wei:
-                raise SimulationFailed(
-                    f"E2 unprofitable: sell → {wpls_from_sell/1e18:.1f} PLS "
-                    f"<= gas {gas_cost_wei/1e18:.1f} PLS"
-                )
+            # Return sell revenue and gas — even if net-negative, we run for LP floor
             return wpls_from_sell, gas_cost_wei
 
         # Fallback: sell-only estimate
