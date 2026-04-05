@@ -627,6 +627,22 @@ class DSSEngine(EngineBase):
                             log.info("E2: floorAndHarvest mined. Block: %d, Gas: %d",
                                      r["blockNumber"], r["gasUsed"])
 
+                        # Withdraw WPLS from Hub → Joey (sell proceeds accumulate in Hub)
+                        wpls_cs = Web3.to_checksum_address(WPLS)
+                        hub_wpls = safe(erc20(WPLS), "balanceOf", hub_addr) or 0
+                        if hub_wpls > 0:
+                            log.info("E2: withdrawing %.1f WPLS from Hub → Joey", hub_wpls / 1e18)
+                            r = send_tx(
+                                hub.functions.withdraw(wpls_cs, hub_wpls),
+                                f"Withdraw {hub_wpls/1e18:.0f} WPLS → Joey",
+                                dry_run=dry_run,
+                                skip_simulate=True,
+                                fixed_gas=100_000,
+                            )
+                            if r:
+                                tx_hashes.append(r["transactionHash"].hex())
+                                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
                         return EngineResult(
                             success=True,
                             profit_wei=revenue_wei,
