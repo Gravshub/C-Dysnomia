@@ -454,6 +454,7 @@ class DSSEngine(EngineBase):
 
         # FloorHarvestModule path: always run when feasible — LP burn is permanent
         # floor value, GIBS supply is expendable. Sell side recovers gas when possible.
+        floor_feasible = False
         hub = self._get_hub()
         if self._has_floor_harvest(hub):
             lp_bps = 10000 - HARVEST_SELL_BPS
@@ -467,11 +468,24 @@ class DSSEngine(EngineBase):
                     feasible, wpls_from_sell / 1e18, wpls_needed / 1e18,
                     net_wpls / 1e18, gas_cost_wei / 1e18, gibs_price / 1e18,
                 )
-                if not feasible:
-                    log.debug("E2 not ready: quoteFloorCycle infeasible (pair empty or no WPLS)")
-                    return False
-                # Always ready — LP burn builds permanent price floor
+                floor_feasible = feasible
+                if feasible:
+                    return True
+
+        # LADDER mode — uses mintLPAndSell with Joey's PLS as msg.value,
+        # so works even when Hub WPLS=0 (floor infeasible).
+        # When floor is infeasible, force ladder regardless of oracle mode.
+        try:
+            signal = get_ladder_signal()
+            if signal.should_ladder or (not floor_feasible and signal.gibs_price_pls > 0):
+                mode_label = signal.mode if signal.should_ladder else f"FORCED ({signal.mode})"
+                log.info(
+                    "E2 [ladder]: mode=%s, gap=%.2f%%, disp=%.1f GIBS, price=%.1f PLS",
+                    mode_label, signal.gap_pct, signal.displacement_gibs, signal.gibs_price_pls,
+                )
                 return True
+        except Exception as exc:
+            log.debug("E2: ladder oracle check failed in is_ready: %s", exc)
 
         # Fallback: sell-only break-even check
         lp_bps = 10000 - HARVEST_SELL_BPS
@@ -542,33 +556,52 @@ class DSSEngine(EngineBase):
             signal = None
             self._last_ladder_signal = None
 
-        # 2. If ladder signal fires, simulate ladder mode
-        if signal and signal.should_ladder:
+        # 2. Check floor harvest feasibility first
+        floor_feasible = False
+        gas_price = w3_read.eth.gas_price
+        hub = self._get_hub()
+        if self._has_floor_harvest(hub):
+            lp_bps = 10000 - HARVEST_SELL_BPS
+            quote = self._quote_floor_cycle(hub, HARVEST_MINT_COUNT, lp_bps)
+            if quote:
+                feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
+                floor_feasible = feasible
+
+        # 3. If ladder signal fires OR floor is down, use ladder
+        force_ladder = not floor_feasible and signal and signal.gibs_price_pls > 0
+        if signal and (signal.should_ladder or force_ladder):
             try:
-                self._last_sim_mode = DSSMode(signal.mode.lower())
+                # Force LADDER mode when floor is down
+                mode = signal.mode.lower() if signal.should_ladder else "ladder"
+                self._last_sim_mode = DSSMode(mode)
+                # Override signal params if forced
+                if force_ladder and not signal.should_ladder:
+                    from ..oracle.ladder_oracle import LadderSignal, HARVEST_MINT_COUNT as _HMC
+                    signal = LadderSignal(
+                        should_ladder=True, mode="LADDER",
+                        gibs_price_pls=signal.gibs_price_pls,
+                        gap_pct=signal.gap_pct,
+                        arb_threshold_pct=signal.arb_threshold_pct,
+                        displacement_gibs=max(signal.displacement_gibs, 5.0),
+                        mint_count=HARVEST_MINT_COUNT,
+                        lp_bps=3000, burn_bps=500,
+                        tvl_pls=signal.tvl_pls,
+                        notes=f"FORCED: floor infeasible, original mode={signal.mode}",
+                    )
+                    self._last_ladder_signal = signal
+                    log.info("E2: forcing LADDER — floor infeasible, GIBS=%.1f PLS",
+                             signal.gibs_price_pls)
                 return self._simulate_ladder(signal)
             except SimulationFailed:
                 raise
             except Exception as exc:
                 log.warning("E2: ladder sim failed (%s), falling through to harvest", exc)
 
-        # 3. Fall through to existing HARVEST simulation
+        # 4. Fall through to existing HARVEST simulation
         self._last_sim_mode = DSSMode.HARVEST
-        gas_price = w3_read.eth.gas_price
-        hub = self._get_hub()
 
-        # FloorHarvestModule path — always run, LP burn is strategic
-        if self._has_floor_harvest(hub):
-            lp_bps = 10000 - HARVEST_SELL_BPS
-            quote = self._quote_floor_cycle(hub, HARVEST_MINT_COUNT, lp_bps)
-            if not quote:
-                raise SimulationFailed("quoteFloorCycle call failed")
-            feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
-            if not feasible:
-                raise SimulationFailed(
-                    f"E2 infeasible: quoteFloorCycle({HARVEST_MINT_COUNT}, {lp_bps}) "
-                    f"wplsNeeded={wpls_needed/1e18:.1f}"
-                )
+        # FloorHarvestModule path — already checked feasibility above
+        if floor_feasible and quote:
             gas_cost_wei = FLOOR_GAS_ESTIMATE * gas_price
             return wpls_from_sell, gas_cost_wei
 
