@@ -57,6 +57,8 @@ from ..core.chain import (
 from ..core.executor import send_tx, submit_tx_nowait, approve_if_needed
 from ..core.simulator import SimulationFailed
 from ..oracle.price import get_amounts_out, get_amounts_out_v2
+from enum import Enum
+from ..oracle.ladder_oracle import get_ladder_signal, LadderSignal
 
 log = get_logger(__name__)
 
@@ -78,6 +80,12 @@ AFF_ACQUIRE_GAS_ESTIMATE = 250_000
 BUYWITH_MATH_SELECTOR = Web3.keccak(text="BuyWithMATH(uint256)")[:4]
 
 
+class DSSMode(str, Enum):
+    HARVEST = "harvest"
+    LADDER = "ladder"
+    LADDER_LITE = "ladder_lite"
+
+
 class DSSEngine(EngineBase):
     """
     Engine 2: CEREAL — Silent GIBS harvest via JoystickHub.
@@ -87,6 +95,8 @@ class DSSEngine(EngineBase):
     Wallet role: joey (owner of JoystickHub).
     """
     name = "DSS"  # Keep registry name for Strategist/bot.py compatibility
+    _last_ladder_signal: LadderSignal | None = None
+    _last_sim_mode: DSSMode = DSSMode.HARVEST
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -474,10 +484,46 @@ class DSSEngine(EngineBase):
         )
         return revenue_wei > gas_cost_wei
 
+    def _simulate_ladder(self, signal: LadderSignal) -> tuple[int, int]:
+        """
+        Simulate LADDER mode: estimate PLS from sell leg of mintLPAndSell
+        using the oracle signal's parameters.
+        """
+        gas_price = w3_read.eth.gas_price
+
+        # Check Hub AFF balance
+        aff_needed = signal.mint_count * 10**18
+        aff_in_hub = self._aff_in_hub()
+        if aff_in_hub < aff_needed:
+            raise SimulationFailed(
+                f"LADDER: Hub AFF {aff_in_hub // 10**18} < needed {signal.mint_count}"
+            )
+
+        # Estimate sell output: sell_gibs = total * (1 - lp_bps/10000)
+        total_gibs_wei = signal.mint_count * 10**18
+        sell_gibs_wei = total_gibs_wei * (10000 - signal.lp_bps) // 10000
+        if sell_gibs_wei == 0:
+            sell_gibs_wei = 10**18  # minimum 1 GIBS
+
+        _, _, pls_out = self._best_sell_route(sell_gibs_wei)
+        if not pls_out:
+            gibs_price = self._gibs_price_v2()
+            if not gibs_price:
+                raise SimulationFailed("LADDER: GIBS price oracle failed")
+            pls_out = gibs_price * signal.mint_count
+
+        # Gas estimate: mintLPAndSell ~550K, maybe + primeGibs ~200K
+        gas_cost_wei = HARVEST_GAS_ESTIMATE * gas_price
+        gibs_self_balance = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
+        if gibs_self_balance < total_gibs_wei:
+            gas_cost_wei += PRIME_GAS_ESTIMATE * gas_price
+
+        return pls_out, gas_cost_wei
+
     def simulate(self) -> tuple[int, int]:
         """
-        Estimate (profit_wei, gas_cost_wei) for one harvest cycle.
-        Uses quoteFloorCycle when FloorHarvestModule is available.
+        Estimate (profit_wei, gas_cost_wei) for one cycle.
+        Checks ladder oracle first; falls back to HARVEST.
         """
         if not JOYSTICK_HUB:
             raise SimulationFailed("JOYSTICK_HUB_ADDRESS not configured")
@@ -486,6 +532,27 @@ class DSSEngine(EngineBase):
         if not pair:
             raise SimulationFailed("No GIBS/WPLS V2 pair")
 
+        # 1. Always get ladder oracle signal (just reads, cheap)
+        try:
+            signal = get_ladder_signal()
+            self._last_ladder_signal = signal
+        except Exception as exc:
+            log.debug("E2: ladder oracle failed: %s", exc)
+            signal = None
+            self._last_ladder_signal = None
+
+        # 2. If ladder signal fires, simulate ladder mode
+        if signal and signal.should_ladder:
+            try:
+                self._last_sim_mode = DSSMode(signal.mode.lower())
+                return self._simulate_ladder(signal)
+            except SimulationFailed:
+                raise
+            except Exception as exc:
+                log.warning("E2: ladder sim failed (%s), falling through to harvest", exc)
+
+        # 3. Fall through to existing HARVEST simulation
+        self._last_sim_mode = DSSMode.HARVEST
         gas_price = w3_read.eth.gas_price
         hub = self._get_hub()
 
@@ -502,7 +569,6 @@ class DSSEngine(EngineBase):
                     f"wplsNeeded={wpls_needed/1e18:.1f}"
                 )
             gas_cost_wei = FLOOR_GAS_ESTIMATE * gas_price
-            # Return sell revenue and gas — even if net-negative, we run for LP floor
             return wpls_from_sell, gas_cost_wei
 
         # Fallback: sell-only estimate
