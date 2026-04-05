@@ -15,7 +15,7 @@ from web3 import Web3
 from .anvil_helpers import (
     set_balance, impersonate, stop_impersonate,
     balance_of, transfer_via_impersonate, read_reserves,
-    get_pair_tokens, snapshot, revert,
+    get_pair_tokens,
 )
 
 log = logging.getLogger("joystick.test.ladder")
