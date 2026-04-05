@@ -58,7 +58,8 @@ _STATE_FILE = _JOYSTICK_DIR / "data" / "strategist_state.json"
 VALIDATOR_GOAL_PLS = 32_000_000
 
 # Strategic engines — always valid to run regardless of profit or rotation
-STRATEGIC_ENGINES = {"Beat", "LAU"}
+# DSS (E2): FloorHarvestModule LP burn builds permanent price floor — always run
+STRATEGIC_ENGINES = {"Beat", "LAU", "DSS"}
 
 # Revenue engines — get a score floor of 2.0 when profitable (ensures MEDIUM confidence)
 # These are proven income generators that shouldn't be blocked by RPC jitter
