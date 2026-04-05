@@ -432,10 +432,6 @@ class Strategist:
             risks.append("Unprofitable (profit <= gas)")
             score -= 5.0
 
-        # 7b. Revenue engine floor — proven generators shouldn't be blocked by RPC jitter
-        if engine.name in REVENUE_ENGINES and profit_pls > gas_pls and score < 2.0:
-            score = 2.0
-
         # 8. Pool impact penalty (Phase C — from SimResult data)
         # Atropa ecosystem pools are inherently thin. atomicArb() reverts if
         # unprofitable, so worst case is gas loss (~240 PLS). Thresholds tuned
@@ -457,6 +453,11 @@ class Strategist:
                     and engine.name not in STRATEGIC_ENGINES):
                 score -= 1.0
                 risks.append("RECENT_RUN")
+
+        # 9b. Revenue engine floor — applied AFTER rotation penalty so proven
+        # generators (DSS/E2) aren't blocked by rotation cooldown.
+        if engine.name in REVENUE_ENGINES and profit_pls > gas_pls and score < 2.0:
+            score = 2.0
 
         # 10. GasOracle integration (Phase E) — defer non-urgent when gas is falling
         if oracle and oracle.should_wait():
