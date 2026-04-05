@@ -26,6 +26,7 @@ Implements: EngineBase ABC (is_ready, simulate, execute)
 
 import json
 import logging
+import subprocess
 
 from ..core.log_names import get_logger
 import os
@@ -96,6 +97,7 @@ class TreasurySniperEngine(EngineBase):
         self._recon_path = os.path.join(
             os.path.dirname(__file__), "..", "data", "recon_results.json"
         )
+        self._recon_proc: Optional["subprocess.Popen"] = None  # background recon
 
     # ── EngineBase interface ───────────────────────────────────────────────
 
@@ -191,17 +193,29 @@ class TreasurySniperEngine(EngineBase):
     # ── Internal mechanics ────────────────────────────────────────────────
 
     def _maybe_refresh_recon(self):
-        """Re-run treasury recon if data is >24h stale."""
+        """Refresh recon data if >24h stale. Non-blocking — runs in background."""
+        # Reap completed background recon
+        if self._recon_proc is not None:
+            rc = self._recon_proc.poll()
+            if rc is not None:
+                if rc == 0:
+                    log.info("E6: background recon completed (rc=0)")
+                else:
+                    log.warning("E6: background recon exited rc=%d", rc)
+                self._recon_proc = None
+            else:
+                return  # still running — don't start another
+
         if not os.path.exists(self._recon_path):
-            self._run_recon()
+            self._run_recon_bg()
             return
         mtime = os.path.getmtime(self._recon_path)
         if time.time() - mtime > 86400:  # 24 hours
-            log.info("E6: recon data >24h stale — refreshing")
-            self._run_recon()
+            log.info("E6: recon data >24h stale — starting background refresh")
+            self._run_recon_bg()
 
-    def _run_recon(self):
-        """Shell out to treasury_recon.py."""
+    def _run_recon_bg(self):
+        """Launch treasury_recon.py as a non-blocking background process."""
         import subprocess
         import sys
         recon_script = os.path.join(
@@ -209,15 +223,12 @@ class TreasurySniperEngine(EngineBase):
         )
         if os.path.exists(recon_script):
             data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
-            log.info("E6: running treasury_recon.py (timeout 300s)")
-            try:
-                subprocess.run(
-                    [sys.executable, recon_script, "--data-dir", data_dir],
-                    timeout=300,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired:
-                log.warning("E6: treasury_recon.py timed out — using cached data")
+            log.info("E6: launching treasury_recon.py in background")
+            self._recon_proc = subprocess.Popen(
+                [sys.executable, recon_script, "--data-dir", data_dir],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
             log.debug("E6: treasury_recon.py not found at %s", recon_script)
 
