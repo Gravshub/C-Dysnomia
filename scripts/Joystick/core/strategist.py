@@ -414,6 +414,11 @@ class Strategist:
             if profit_pls <= gas_pls:
                 risks.append("Strategic run (no direct profit)")
 
+        # 4b. DSS/E2 FloorHarvest is highest-priority joey engine — LP burn is
+        # the primary value driver. Always wins joey slot when ready.
+        if engine.name == "DSS" and score < 10.0:
+            score = 10.0
+
         # 5. PLS balance below gas buffer floor
         from .config import PLS_GAS_FLOOR
         if pls_balance < PLS_GAS_FLOOR / 1e18:
