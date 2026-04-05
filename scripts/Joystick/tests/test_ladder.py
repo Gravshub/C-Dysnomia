@@ -31,29 +31,14 @@ GIBS_WPLS  = "0x7BCa1c997c475eac9c61417e88bed158ACA757f0"
 GIBS_FED   = "0xA2a7a2153136b6ee075335b979fb6ac033412e4d"
 BURN_369   = "0x0000000000000000000000000000000000000369"
 
-ANVIL_URL  = "http://127.0.0.1:8545"
 
-
-@pytest.fixture(scope="module")
-def w3():
-    """Connect to Anvil fork."""
-    _w3 = Web3(Web3.HTTPProvider(ANVIL_URL))
-    if not _w3.is_connected():
-        pytest.skip("Anvil not running — start with: anvil --fork-url https://rpc-pulsechain.g4mm4.io --chain-id 369 --auto-impersonate")
-    return _w3
-
-
-@pytest.fixture(scope="module")
-def funded_joey(w3):
-    """Fund Joey wallet on Anvil fork."""
-    set_balance(JOEY, 2_000_000 * 10**18)
-    impersonate(JOEY)
-    return JOEY
+# Uses session-scoped w3, fund_joey, patch_wallet, joystick_ready from conftest.py
+# The autouse `isolate` fixture provides snapshot/revert per test.
 
 
 # ── Test 1: Oracle reads live data ─────────────────────────────────────────
 
-def test_ladder_oracle_reads_live_data(w3, funded_joey):
+def test_ladder_oracle_reads_live_data(w3, joystick_ready):
     """get_ladder_signal() returns valid data from forked chain state."""
     from scripts.Joystick.oracle.ladder_oracle import get_ladder_signal
 
@@ -74,7 +59,7 @@ def test_ladder_oracle_reads_live_data(w3, funded_joey):
 
 # ── Test 2: Ladder simulate does not revert ────────────────────────────────
 
-def test_ladder_simulate_does_not_revert(w3, funded_joey):
+def test_ladder_simulate_does_not_revert(w3, joystick_ready):
     """DSSEngine._simulate_ladder() returns valid profit/gas estimates."""
     from scripts.Joystick.oracle.ladder_oracle import LadderSignal
     from scripts.Joystick.engines.dss import DSSEngine
@@ -106,7 +91,7 @@ def test_ladder_simulate_does_not_revert(w3, funded_joey):
 
 # ── Test 3: Ladder execute changes reserves ────────────────────────────────
 
-def test_ladder_execute_changes_reserves(w3, funded_joey):
+def test_ladder_execute_changes_reserves(w3, joystick_ready):
     """Execute ladder cycle changes pool reserves in expected direction."""
     # Read reserves before
     r0_before, r1_before, _ = read_reserves(GIBS_WPLS, w3)
@@ -166,7 +151,7 @@ def test_ladder_execute_changes_reserves(w3, funded_joey):
 
 # ── Test 4: Arb opportunity is profitable ──────────────────────────────────
 
-def test_arb_opportunity_is_profitable(w3, funded_joey):
+def test_arb_opportunity_is_profitable(w3, joystick_ready):
     """
     After ladder creates displacement in GIBS/WPLS, verify the gap between
     GIBS/WPLS and GIBS/FED is measurable and both pairs have reserves.
@@ -195,7 +180,7 @@ def test_arb_opportunity_is_profitable(w3, funded_joey):
 
 # ── Test 5: LP burn reduces supply (or sends to burn address) ──────────────
 
-def test_ladder_burn_reduces_lp_supply(w3, funded_joey):
+def test_ladder_burn_reduces_lp_supply(w3, joystick_ready):
     """
     Verify burn mechanic tracking: LP tokens should go somewhere
     (burn address or Joey depending on Hub config).
