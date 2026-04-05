@@ -1179,5 +1179,186 @@
     ],
     "name": "PrimeAndSell",
     "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "opNonce",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "primeCount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "lpGibs",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "wplsCommitted",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "lpMinted",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "lpBurned",
+        "type": "bool"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "sellGibs",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "wplsReceived",
+        "type": "uint256"
+      }
+    ],
+    "name": "FloorCycleComplete",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "primeCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lpBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "wplsMax",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "burnLp",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "minWplsOut",
+        "type": "uint256"
+      }
+    ],
+    "name": "floorAndHarvest",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "wplsReceived",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "floorConfig",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "gibsLau",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "affection",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "gibsWplsPair",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "gibsIsToken0",
+        "type": "bool"
+      },
+      {
+        "internalType": "address",
+        "name": "burnAddr",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "primeCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lpBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "wplsAvailable",
+        "type": "uint256"
+      }
+    ],
+    "name": "quoteFloorCycle",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "feasible",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "wplsNeeded",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "wplsFromSell",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "netWpls",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lpGibs",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellGibs",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]
