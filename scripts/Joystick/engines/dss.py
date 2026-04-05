@@ -627,17 +627,20 @@ class DSSEngine(EngineBase):
                             log.info("E2: floorAndHarvest mined. Block: %d, Gas: %d",
                                      r["blockNumber"], r["gasUsed"])
 
-                        # Withdraw WPLS from Hub → Joey (sell proceeds accumulate in Hub)
+                        # Withdraw excess WPLS from Hub → Joey
+                        # Keep a reserve for LP side (~wplsNeeded × 10 cycles buffer)
                         wpls_cs = Web3.to_checksum_address(WPLS)
                         hub_wpls = safe(erc20(WPLS), "balanceOf", hub_addr) or 0
-                        if hub_wpls > 0:
-                            log.info("E2: withdrawing %.1f WPLS from Hub → Joey", hub_wpls / 1e18)
+                        wpls_reserve = wpls_needed * 10  # ~5K WPLS buffer for LP
+                        withdraw_amount = hub_wpls - wpls_reserve if hub_wpls > wpls_reserve else 0
+                        if withdraw_amount > 100 * 10**18:  # only bother if >100 WPLS
+                            log.info("E2: withdrawing %.1f WPLS from Hub → Joey (keeping %.1f reserve)",
+                                     withdraw_amount / 1e18, wpls_reserve / 1e18)
                             r = send_tx(
-                                hub.functions.withdraw(wpls_cs, hub_wpls),
-                                f"Withdraw {hub_wpls/1e18:.0f} WPLS → Joey",
+                                hub.functions.withdraw(wpls_cs, withdraw_amount),
+                                f"Withdraw {withdraw_amount/1e18:.0f} WPLS → Joey",
                                 dry_run=dry_run,
-                                skip_simulate=True,
-                                fixed_gas=100_000,
+                                fixed_gas=150_000,
                             )
                             if r:
                                 tx_hashes.append(r["transactionHash"].hex())
