@@ -608,7 +608,7 @@ class DSSEngine(EngineBase):
                         min_wpls_out = int(wpls_from_sell * 90 / 100)
 
                         log.info(
-                            "E2: floorAndHarvest(%d, lp=%d%%, wplsMax=%.1f, burn=True, "
+                            "E2: floorAndHarvest(%d, lp=%d%%, wplsMax=%.1f, LP→Joey, "
                             "minOut=%.1f) [FLOOR]",
                             mint_count, lp_bps / 100, wpls_max / 1e18,
                             min_wpls_out / 1e18,
@@ -632,7 +632,7 @@ class DSSEngine(EngineBase):
                             profit_wei=revenue_wei,
                             gas_wei=gas_spent,
                             tx_hashes=tx_hashes,
-                            notes=f"Floor: {mint_count} GIBS — {lp_bps/100:.0f}% LP (burned), "
+                            notes=f"Floor: {mint_count} GIBS — {lp_bps/100:.0f}% LP (→ Joey), "
                                   f"sell={sell_gibs/1e18:.1f} GIBS → {wpls_from_sell/1e18:.1f} WPLS",
                         )
 
