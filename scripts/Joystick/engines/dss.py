@@ -6,41 +6,35 @@ V1: DysnomiaSelfSnipev4 (DSS) — chatAndClaim, spammed VOID chat. DEPRECATED.
 V2: TGSv8+ — harvestCycle(sellBps=10000), 100% sell, no LP. Sell-first order.
 V3: JoystickHub — mintLPAndSell. LP-first, sell-second, modular proxy.
 V4: HarvestModuleV3 — primeAndSell. Atomic prime+extract+sell, anti-sniper.
+V5: FloorHarvestModule — atomic prime→LP(direct pair.mint)→sell(direct pair.swap).
 
-=== CURRENT (JoystickHub + HarvestModuleV3) ===
+=== CURRENT (JoystickHub + FloorHarvestModule) ===
 Hub at 0x7bd76A0f7e03A3BA76A621ba0988C7db0AdbAB14 (block 26,092,219).
-HarvestModuleV3 via delegatecall.
+FloorHarvestModule at 0xF3Be3a9Ae911EEA2Ad5C07a74069f30AADAc8669.
 
-Anti-sniper atomic pipeline (when V3 module deployed):
+Primary pipeline (FloorHarvestModule):
+  TX1: hub.floorAndHarvest(primeCount, lpBps, wplsMax, burnLp, minWplsOut)
+       - mintToCap() × N → Purchase(AFF, N*1e18) → LP via pair.mint → sell via pair.swap
+       - ALL in one TX — no router, no sniper gap
+       - PulseX V2 pair.mint(to, feeTo) — two-arg mint
+
+Fallback (HarvestModuleV3 primeAndSell):
   TX1: hub.primeAndSell(N, minPLSOut, dex, sellPath)
-       - mintToCap() × N → Purchase(AFF, N) → sell GIBS → PLS
-       - ALL in one TX — no gap for snipers
+       - sell-only, no LP component
 
-Fallback two-TX pipeline (V2 module):
-  TX1: hub.primeGibs(N) — calls GIBS_LAU.mintToCap() × N to prime self-balance
-  TX2: hub.mintLPAndSell{value: wplsNeeded}(N, lpBps, burnBps, lpDex, minSellOut, sellPath, sellDex)
-
-=== SNIPER CONTEXT ===
-Bot recon (2026-04-02) found dedicated sniper 0x65930aa7... watching GIBS LAU
-self-balance. When primeGibs(17) deposits 17 GIBS, sniper calls Purchase() to
-extract them before mintLPAndSell can execute. Cost: ~836 PLS in reverted TXs.
-HarvestModuleV3 primeAndSell() closes this exploit window.
-
-=== ECONOMICS (Sell-only mode via primeAndSell) ===
-Per cycle:
-  - Mints: 17 GIBS (costs 17 AFFECTION)
-  - Sell: 17 GIBS → ~3,315 PLS (all sold, no LP split)
-  - Gas: ~400K (single atomic TX) ≈ 200 PLS
-  - Net: ~3,115 PLS per cycle
-  - VOID spam: ZERO
+=== ECONOMICS (FloorHarvestModule) ===
+Per cycle (17 GIBS, 50% LP / 50% sell):
+  - Mints: 17 GIBS via mintToCap (costs 17 AFFECTION)
+  - LP: 8.5 GIBS + proportional WPLS → burned LP (permanent floor)
+  - Sell: 8.5 GIBS → WPLS via direct pair.swap
+  - Net: wplsFromSell (variable) — LP value is permanent floor contribution
+  - Gas: single atomic TX (~1.2M gas)
   - Sniper risk: ZERO (atomic TX)
 
 Prerequisites:
-  - JoystickHub deployed, owner=Joey, selectors wired, config set
-  - HarvestModuleV3 deployed and primeAndSell selector registered
-  - AFFECTION deposited into Hub (17 per cycle)
-  - GIBS/WPLS V2 pair exists on PulseX
-  - GIBS price above break-even
+  - JoystickHub deployed, FloorHarvestModule registered + configured
+  - Hub holds AFFECTION (17 per cycle) + WPLS (for LP side)
+  - GIBS/WPLS V2 pair exists on PulseX V2
 """
 
 from ..core.log_names import get_logger
@@ -54,7 +48,7 @@ from ..core.config import (
     PULSEX_V1_ROUTER,
     HARVEST_MINT_COUNT, HARVEST_SELL_DEX, HARVEST_LP_DEX,
     HARVEST_SELL_BPS, HARVEST_BURN_BPS,
-    AFF_MATH,
+    AFF_MATH, GIBS_WPLS_V2_PAIR,
 )
 from ..core.chain import (
     erc20, factory_contract, safe, w3_read, w3_submit,
@@ -70,6 +64,9 @@ log = get_logger(__name__)
 PRIME_GAS_ESTIMATE = 200_000      # primeGibs(17) via mintToCap() × 17
 HARVEST_GAS_ESTIMATE = 550_000    # mintLPAndSell with LP + sell (~550K est)
 TOTAL_GAS_ESTIMATE = PRIME_GAS_ESTIMATE + HARVEST_GAS_ESTIMATE
+
+# FloorHarvestModule gas — single atomic TX (prime + purchase + LP + sell)
+FLOOR_GAS_ESTIMATE = 1_500_000    # ~1.2M observed, 1.5M conservative
 
 # Extra gas per hop in multi-hop sell route
 GAS_PER_EXTRA_HOP = 80_000
@@ -96,7 +93,6 @@ class DSSEngine(EngineBase):
     def _has_prime_and_sell(self, hub) -> bool:
         """Check if HarvestModuleV3 primeAndSell selector is registered in Hub."""
         try:
-            # primeAndSell(uint256,uint256,uint8,address[]) selector
             selector = Web3.keccak(text="primeAndSell(uint256,uint256,uint8,address[])")[:4]
             from ..core.chain import safe as _safe
             impl = _safe(hub, "module", selector)
@@ -105,6 +101,29 @@ class DSSEngine(EngineBase):
         except Exception:
             pass
         return False
+
+    def _has_floor_harvest(self, hub) -> bool:
+        """Check if FloorHarvestModule floorAndHarvest selector is registered in Hub."""
+        try:
+            selector = Web3.keccak(text="floorAndHarvest(uint256,uint256,uint256,bool,uint256)")[:4]
+            from ..core.chain import safe as _safe
+            impl = _safe(hub, "module", selector)
+            if impl and impl != "0x" + "0" * 40:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _quote_floor_cycle(self, hub, prime_count: int, lp_bps: int) -> tuple | None:
+        """Call quoteFloorCycle on Hub. Returns (feasible, wplsNeeded, wplsFromSell, netWpls, lpGibs, sellGibs) or None."""
+        try:
+            wpls_available = safe(erc20(WPLS), "balanceOf", JOYSTICK_HUB) or 0
+            result = safe(hub, "quoteFloorCycle", prime_count, lp_bps, wpls_available)
+            if result:
+                return result
+        except Exception as exc:
+            log.debug("E2: quoteFloorCycle failed: %s", exc)
+        return None
 
     def _get_hub(self):
         """Return JoystickHub contract instance (read RPC)."""
@@ -390,8 +409,8 @@ class DSSEngine(EngineBase):
         Ready when:
         1. JoystickHub is deployed and configured
         2. GIBS/WPLS V2 pair exists with reserves
-        3. GIBS price exceeds break-even
-        4. AFF acquirable (Hub has AFF, or Joey has AFF, or Joey has PLS to buy AFF)
+        3. AFF available (Hub or Joey)
+        4. quoteFloorCycle says feasible (or sell-only break-even for fallback)
         """
         if not JOYSTICK_HUB:
             log.debug("E2 not ready: JOYSTICK_HUB_ADDRESS not set")
@@ -402,7 +421,6 @@ class DSSEngine(EngineBase):
             log.debug("E2 not ready: no GIBS/WPLS V2 pair")
             return False
 
-        # Use V2 router — GIBS/WPLS pair is on PulseX V2
         gibs_price = self._gibs_price_v2()
         if not gibs_price:
             log.debug("E2 not ready: GIBS price oracle failed")
@@ -414,36 +432,51 @@ class DSSEngine(EngineBase):
         aff_in_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
         aff_total = aff_in_hub + aff_in_joey
         if aff_total < aff_needed:
-            # Can Joey buy the shortfall with PLS?
             shortfall = aff_needed - aff_total
             _, acquire_cost = self._cheapest_aff_route(shortfall)
             joey_pls = w3_read.eth.get_balance(JOEY_WALLET)
-            if joey_pls < acquire_cost + 200_000 * 10**18:  # need PLS for AFF + gas buffer
+            if joey_pls < acquire_cost + 200_000 * 10**18:
                 log.debug("E2 not ready: AFF %d < %d, PLS too low to acquire (%d PLS)",
                           aff_total // 10**18, HARVEST_MINT_COUNT, joey_pls // 10**18)
                 return False
-            log.debug("E2: AFF shortfall %d — will auto-acquire (~%d PLS)",
-                      shortfall // 10**18, acquire_cost // 10**18)
 
-        # Break-even check: sell portion revenue must exceed total gas
-        lp_bps = 10000 - HARVEST_SELL_BPS  # LP portion
-        sell_count = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
         gas_price = w3_read.eth.gas_price
+
+        # FloorHarvestModule path: use quoteFloorCycle for accurate economics
+        hub = self._get_hub()
+        if self._has_floor_harvest(hub):
+            lp_bps = 10000 - HARVEST_SELL_BPS
+            quote = self._quote_floor_cycle(hub, HARVEST_MINT_COUNT, lp_bps)
+            if quote:
+                feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
+                gas_cost_wei = FLOOR_GAS_ESTIMATE * gas_price
+                log.info(
+                    "E2 [floor]: feasible=%s, wplsFromSell=%.1f, wplsNeeded=%.1f, "
+                    "net=%.1f PLS, gas=%.1f PLS, GIBS=%.1f PLS",
+                    feasible, wpls_from_sell / 1e18, wpls_needed / 1e18,
+                    net_wpls / 1e18, gas_cost_wei / 1e18, gibs_price / 1e18,
+                )
+                if not feasible:
+                    log.debug("E2 not ready: quoteFloorCycle infeasible")
+                    return False
+                # Ready if sell revenue covers gas (LP value is bonus floor)
+                return wpls_from_sell > gas_cost_wei
+
+        # Fallback: sell-only break-even check
+        lp_bps = 10000 - HARVEST_SELL_BPS
+        sell_count = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
         gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
         revenue_wei = gibs_price * max(sell_count, 1)
-
         log.debug(
-            "E2: GIBS=%.2f PLS, mint=%d, sell=%d%%, LP=%d%%, gas=%.1f PLS",
-            gibs_price / 1e18, HARVEST_MINT_COUNT,
-            HARVEST_SELL_BPS / 100, lp_bps / 100, gas_cost_wei / 1e18,
+            "E2 [fallback]: GIBS=%.2f PLS, sell=%d, revenue=%.1f PLS, gas=%.1f PLS",
+            gibs_price / 1e18, sell_count, revenue_wei / 1e18, gas_cost_wei / 1e18,
         )
-
         return revenue_wei > gas_cost_wei
 
     def simulate(self) -> tuple[int, int]:
         """
-        Estimate (profit_wei, gas_cost_wei) for one LP loop cycle.
-        Profit = sell revenue. LP value tracked separately.
+        Estimate (profit_wei, gas_cost_wei) for one harvest cycle.
+        Uses quoteFloorCycle when FloorHarvestModule is available.
         """
         if not JOYSTICK_HUB:
             raise SimulationFailed("JOYSTICK_HUB_ADDRESS not configured")
@@ -452,13 +485,35 @@ class DSSEngine(EngineBase):
         if not pair:
             raise SimulationFailed("No GIBS/WPLS V2 pair")
 
-        # Calculate sell portion
+        gas_price = w3_read.eth.gas_price
+        hub = self._get_hub()
+
+        # FloorHarvestModule path
+        if self._has_floor_harvest(hub):
+            lp_bps = 10000 - HARVEST_SELL_BPS
+            quote = self._quote_floor_cycle(hub, HARVEST_MINT_COUNT, lp_bps)
+            if not quote:
+                raise SimulationFailed("quoteFloorCycle call failed")
+            feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
+            if not feasible:
+                raise SimulationFailed(
+                    f"E2 infeasible: quoteFloorCycle({HARVEST_MINT_COUNT}, {lp_bps}) "
+                    f"wplsNeeded={wpls_needed/1e18:.1f}"
+                )
+            gas_cost_wei = FLOOR_GAS_ESTIMATE * gas_price
+            if wpls_from_sell <= gas_cost_wei:
+                raise SimulationFailed(
+                    f"E2 unprofitable: sell → {wpls_from_sell/1e18:.1f} PLS "
+                    f"<= gas {gas_cost_wei/1e18:.1f} PLS"
+                )
+            return wpls_from_sell, gas_cost_wei
+
+        # Fallback: sell-only estimate
         sell_count = HARVEST_MINT_COUNT * HARVEST_SELL_BPS // 10000
         if sell_count == 0:
-            sell_count = 1  # Always sell at least 1 for gas recovery
+            sell_count = 1
         sell_gibs_wei = sell_count * 10**18
 
-        # Quote via best route
         _, _, pls_out = self._best_sell_route(sell_gibs_wei)
         if not pls_out:
             gibs_price = self._gibs_price_v2()
@@ -466,25 +521,20 @@ class DSSEngine(EngineBase):
                 raise SimulationFailed("GIBS price oracle failed")
             pls_out = gibs_price * sell_count
 
-        # Gas estimate (2 TXs, extra hop may add gas)
-        gas_price = w3_read.eth.gas_price
         gas_cost_wei = TOTAL_GAS_ESTIMATE * gas_price
-
         if pls_out <= gas_cost_wei:
             raise SimulationFailed(
                 f"E2 unprofitable: sell {sell_count} GIBS → {pls_out/1e18:.1f} PLS "
                 f"<= gas {gas_cost_wei/1e18:.1f} PLS"
             )
-
         return pls_out, gas_cost_wei
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """
-        Two-TX LP loop via JoystickHub:
-
-        1. Ensure AFF is deposited in Hub
-        2. TX1: primeGibs(N) — Generate() × N to prime LAU self-balance
-        3. TX2: mintLPAndSell{value}(N, lpBps, ...) — LP first, sell second
+        Harvest cycle via JoystickHub. Priority:
+        1. FloorHarvestModule: floorAndHarvest() — atomic prime+LP+sell, no router
+        2. HarvestModuleV3: primeAndSell() — atomic prime+sell (no LP)
+        3. V2 fallback: primeGibs() + mintLPAndSell() — two TXs (sniper-vulnerable)
         """
         try:
             hub = self._get_hub_submit()
@@ -505,18 +555,13 @@ class DSSEngine(EngineBase):
             mint_count = HARVEST_MINT_COUNT
             lp_bps = 10000 - HARVEST_SELL_BPS  # e.g., 10000-4500 = 5500
             hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
-            gibs_cs = Web3.to_checksum_address(GIBS_LAU)
             aff_cs = Web3.to_checksum_address(AFFECTION)
-            gibs_amount = mint_count * 10**18
-
-            # ── Step 1: Ensure Hub has enough AFF for Purchase (1 AFF per GIBS) ──
-            # Batch deposit: when Hub runs low, deposit enough for ~30 cycles
-            # to avoid a deposit TX every single cycle.
-            AFF_BATCH_CYCLES = 30
             aff_needed = mint_count * 10**18
+
+            # ── Step 1: Ensure Hub has enough AFF ──
+            AFF_BATCH_CYCLES = 30
             aff_in_hub = self._aff_in_hub()
             if aff_in_hub < aff_needed:
-                # Deposit enough for many cycles, capped by Joey's balance
                 desired_deposit = mint_count * AFF_BATCH_CYCLES * 10**18
                 aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
                 deposit_amount = min(desired_deposit, aff_joey)
@@ -544,23 +589,62 @@ class DSSEngine(EngineBase):
                     hub.functions.deposit(aff_cs, deposit_amount),
                     f"Deposit {deposit_amount//10**18} AFF → Hub",
                     dry_run=dry_run,
-                    skip_simulate=True,  # approve may just have landed — read RPC lag
-                    fixed_gas=200_000,   # skip estimate_gas for same reason
+                    skip_simulate=True,
+                    fixed_gas=200_000,
                 )
                 if r:
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # ── Step 2: Try atomic primeAndSell (anti-sniper) ──
-            # HarvestModuleV3 primeAndSell() combines prime + extract + sell
-            # in ONE atomic TX. No gap for the GIBS LAU sniper (0x65930aa7).
-            # Falls back to V2 two-TX pipeline if primeAndSell selector not registered.
-            sell_gibs_wei = gibs_amount  # Sell all GIBS in atomic mode
-            sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
+            # ── Step 2: Execute harvest ──
+
+            # Priority 1: FloorHarvestModule (atomic LP+sell, no router)
+            if self._has_floor_harvest(hub):
+                hub_read = self._get_hub()
+                quote = self._quote_floor_cycle(hub_read, mint_count, lp_bps)
+                if quote:
+                    feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
+                    if feasible:
+                        # wplsMax = 2x quote for slippage tolerance
+                        wpls_max = wpls_needed * 2
+                        # minWplsOut = 90% of quoted sell output
+                        min_wpls_out = int(wpls_from_sell * 90 / 100)
+
+                        log.info(
+                            "E2: floorAndHarvest(%d, lp=%d%%, wplsMax=%.1f, burn=True, "
+                            "minOut=%.1f) [FLOOR]",
+                            mint_count, lp_bps / 100, wpls_max / 1e18,
+                            min_wpls_out / 1e18,
+                        )
+                        r = send_tx(
+                            hub.functions.floorAndHarvest(
+                                mint_count, lp_bps, wpls_max, True, min_wpls_out,
+                            ),
+                            f"floorAndHarvest({mint_count}, LP={lp_bps/100:.0f}%)",
+                            dry_run=dry_run,
+                            gas_tier="fast",
+                        )
+                        if r:
+                            tx_hashes.append(r["transactionHash"].hex())
+                            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                            log.info("E2: floorAndHarvest mined. Block: %d, Gas: %d",
+                                     r["blockNumber"], r["gasUsed"])
+
+                        return EngineResult(
+                            success=True,
+                            profit_wei=revenue_wei,
+                            gas_wei=gas_spent,
+                            tx_hashes=tx_hashes,
+                            notes=f"Floor: {mint_count} GIBS — {lp_bps/100:.0f}% LP (burned), "
+                                  f"sell={sell_gibs/1e18:.1f} GIBS → {wpls_from_sell/1e18:.1f} WPLS",
+                        )
+
+            # Priority 2: primeAndSell (atomic sell-only, anti-sniper)
+            gibs_amount = mint_count * 10**18
+            sell_path, sell_dex, expected_sell = self._best_sell_route(gibs_amount)
             min_sell_out = int(expected_sell * 90 / 100) if expected_sell else 0
 
-            use_atomic = self._has_prime_and_sell(hub)
-            if use_atomic:
+            if self._has_prime_and_sell(hub):
                 log.info(
                     "E2: primeAndSell(%d, min=%.1f PLS, dex=%d, path=%s) [ATOMIC]",
                     mint_count, min_sell_out / 1e18, sell_dex,
@@ -577,72 +661,47 @@ class DSSEngine(EngineBase):
                 if r:
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                    log.info("E2: primeAndSell mined. Block: %d, Gas: %d",
-                             r["blockNumber"], r["gasUsed"])
 
-                log.info("E2 complete (atomic): %d GIBS → PLS", mint_count)
-            else:
-                # ── Fallback: V2 two-TX pipeline (primeGibs → mintLPAndSell) ──
-                # WARNING: Vulnerable to sniper 0x65930aa7. Deploy HarvestModuleV3
-                # and register primeAndSell selector to close this exploit.
-                log.warning("E2: primeAndSell not available — falling back to V2 two-TX pipeline (sniper-vulnerable)")
-
-                log.info("E2: primeGibs(%d) [wait for receipt]", mint_count)
-                r = send_tx(
-                    hub.functions.primeGibs(mint_count),
-                    f"primeGibs({mint_count})",
-                    dry_run=dry_run,
-                    gas_tier="fast",
-                )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-
-                gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
-                wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
-                sell_gibs_wei = gibs_amount - gibs_for_lp_wei
-                sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
-                min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
-
-                log.info(
-                    "E2: mintLPAndSell(%d, lp=%d%%, burn=%d%%, lpDex=%d, "
-                    "minSell=%.1f, sellPath=%s, sellDex=%d, value=%.1f PLS)",
-                    mint_count, lp_bps / 100, HARVEST_BURN_BPS / 100,
-                    HARVEST_LP_DEX, min_sell_out / 1e18,
-                    [a[-6:] for a in sell_path], sell_dex,
-                    wpls_needed / 1e18,
+                return EngineResult(
+                    success=True, profit_wei=revenue_wei, gas_wei=gas_spent,
+                    tx_hashes=tx_hashes,
+                    notes=f"Atomic: {mint_count} GIBS → PLS via {'→'.join(a[-6:] for a in sell_path)}",
                 )
 
-                r = send_tx(
-                    hub.functions.mintLPAndSell(
-                        mint_count, lp_bps, HARVEST_BURN_BPS, HARVEST_LP_DEX,
-                        min_sell_out, sell_path, sell_dex,
-                    ),
-                    f"mintLPAndSell({mint_count}, LP={lp_bps/100:.0f}%, "
-                    f"burn={HARVEST_BURN_BPS/100:.0f}%, dex={sell_dex})",
-                    dry_run=dry_run,
-                    value=wpls_needed,
-                    skip_simulate=True,
-                    fixed_gas=500_000,
-                    gas_tier="fast",
-                )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
-                    log.info("E2: mintLPAndSell mined. Block: %d, Gas: %d",
-                             r["blockNumber"], r["gasUsed"])
+            # Priority 3: V2 two-TX fallback (sniper-vulnerable)
+            log.warning("E2: no FloorHarvest or primeAndSell — V2 fallback (sniper-vulnerable)")
+            r = send_tx(
+                hub.functions.primeGibs(mint_count),
+                f"primeGibs({mint_count})",
+                dry_run=dry_run, gas_tier="fast",
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-                log.info("E2 complete (V2 fallback): %d GIBS — %d%% LP, %d%% sold",
-                         mint_count, lp_bps / 100, HARVEST_SELL_BPS / 100)
+            gibs_for_lp_wei = (gibs_amount * lp_bps) // 10000
+            wpls_needed = self._wpls_needed_for_lp(gibs_for_lp_wei)
+            sell_gibs_wei = gibs_amount - gibs_for_lp_wei
+            sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
+            min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
+
+            r = send_tx(
+                hub.functions.mintLPAndSell(
+                    mint_count, lp_bps, HARVEST_BURN_BPS, HARVEST_LP_DEX,
+                    min_sell_out, sell_path, sell_dex,
+                ),
+                f"mintLPAndSell({mint_count})",
+                dry_run=dry_run, value=wpls_needed,
+                skip_simulate=True, fixed_gas=500_000, gas_tier="fast",
+            )
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
             return EngineResult(
-                success=True,
-                profit_wei=revenue_wei,
-                gas_wei=gas_spent,
+                success=True, profit_wei=revenue_wei, gas_wei=gas_spent,
                 tx_hashes=tx_hashes,
-                notes=f"LP Loop: {mint_count} GIBS — {lp_bps/100:.0f}% LP, "
-                      f"{HARVEST_SELL_BPS/100:.0f}% sell via "
-                      f"{'→'.join(a[-6:] for a in sell_path)}",
+                notes=f"V2 fallback: {mint_count} GIBS — {lp_bps/100:.0f}% LP, {HARVEST_SELL_BPS/100:.0f}% sell",
             )
 
         except Exception as exc:
