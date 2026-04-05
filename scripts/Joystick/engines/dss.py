@@ -491,12 +491,13 @@ class DSSEngine(EngineBase):
         """
         gas_price = w3_read.eth.gas_price
 
-        # Check Hub AFF balance
+        # Check AFF availability (Hub + Joey wallet)
         aff_needed = signal.mint_count * 10**18
         aff_in_hub = self._aff_in_hub()
-        if aff_in_hub < aff_needed:
+        aff_in_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+        if aff_in_hub + aff_in_joey < aff_needed:
             raise SimulationFailed(
-                f"LADDER: Hub AFF {aff_in_hub // 10**18} < needed {signal.mint_count}"
+                f"LADDER: AFF {(aff_in_hub + aff_in_joey) // 10**18} < needed {signal.mint_count}"
             )
 
         # Estimate sell output: sell_gibs = total * (1 - lp_bps/10000)
@@ -697,7 +698,7 @@ class DSSEngine(EngineBase):
                 ),
                 f"mintLPAndSell({signal.mint_count}) [LADDER {signal.mode}]",
                 dry_run=dry_run, value=wpls_needed,
-                skip_simulate=True, fixed_gas=500_000, gas_tier="fast",
+                skip_simulate=True, fixed_gas=750_000, gas_tier="fast",
             )
             actual_pls = 0
             if r:
