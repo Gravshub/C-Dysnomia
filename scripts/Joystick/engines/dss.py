@@ -594,6 +594,160 @@ class DSSEngine(EngineBase):
 
     def execute(self, dry_run: bool = False) -> EngineResult:
         """
+        Execute harvest cycle. Routes to LADDER or HARVEST based on last simulation mode.
+        """
+        if self._last_sim_mode in (DSSMode.LADDER, DSSMode.LADDER_LITE):
+            return self._execute_ladder(dry_run=dry_run)
+        return self._execute_harvest(dry_run=dry_run)
+
+    def _execute_ladder(self, dry_run: bool = False) -> EngineResult:
+        """
+        Execute LADDER mode: re-read oracle, prime if needed,
+        then mintLPAndSell with calibrated displacement.
+        """
+        from ..core.event_logger import events as _events
+
+        tx_hashes = []
+        gas_spent = 0
+
+        # 1. Re-read oracle (state may have changed since simulate)
+        try:
+            signal = get_ladder_signal()
+        except Exception as exc:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes=f"LADDER oracle re-read failed: {exc}")
+
+        if not signal.should_ladder:
+            log.info("E2: LADDER signal gone — falling back to HARVEST")
+            return self._execute_harvest(dry_run=dry_run)
+
+        try:
+            hub = self._get_hub_submit()
+        except Exception as exc:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes=f"Hub not configured: {exc}")
+
+        hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
+        aff_cs = Web3.to_checksum_address(AFFECTION)
+
+        try:
+            # 2. Ensure Hub has AFF
+            aff_needed = signal.mint_count * 10**18
+            aff_in_hub = self._aff_in_hub()
+            if aff_in_hub < aff_needed:
+                AFF_BATCH_CYCLES = 30
+                aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+                deposit_amount = min(signal.mint_count * AFF_BATCH_CYCLES * 10**18, aff_joey)
+                if deposit_amount < aff_needed:
+                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                        tx_hashes=tx_hashes,
+                                        notes=f"LADDER: insufficient AFF (Joey={aff_joey//10**18})")
+
+                MAX_UINT256 = 2**256 - 1
+                aff_c = w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi)
+                r = approve_if_needed(aff_c, hub_addr, MAX_UINT256, "AFF→Hub", dry_run=dry_run)
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                r = send_tx(
+                    hub.functions.deposit(aff_cs, deposit_amount),
+                    f"Deposit {deposit_amount//10**18} AFF → Hub",
+                    dry_run=dry_run, skip_simulate=True, fixed_gas=200_000,
+                )
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # 3. Prime GIBS if Hub self-balance is low
+            gibs_needed = signal.mint_count * 10**18
+            gibs_in_hub = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
+            if gibs_in_hub < gibs_needed:
+                r = send_tx(
+                    hub.functions.primeGibs(signal.mint_count),
+                    f"primeGibs({signal.mint_count}) [LADDER]",
+                    dry_run=dry_run, gas_tier="fast",
+                )
+                if r:
+                    tx_hashes.append(r["transactionHash"].hex())
+                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # 4. Build mintLPAndSell params
+            sell_gibs_wei = gibs_needed * (10000 - signal.lp_bps) // 10000
+            sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
+            min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
+
+            # WPLS needed for LP side
+            wpls_needed = self._wpls_needed_for_lp(gibs_needed * signal.lp_bps // 10000)
+
+            log.info(
+                "E2: LADDER %s — mintLPAndSell(%d, lp=%d%%, burn=%d%%, min=%.1f PLS) "
+                "gap=%.2f%% disp=%.1f GIBS",
+                signal.mode, signal.mint_count, signal.lp_bps / 100,
+                signal.burn_bps / 100, min_sell_out / 1e18,
+                signal.gap_pct, signal.displacement_gibs,
+            )
+
+            # 5. Send mintLPAndSell TX
+            r = send_tx(
+                hub.functions.mintLPAndSell(
+                    signal.mint_count, signal.lp_bps, signal.burn_bps,
+                    1,  # lpDex = V2
+                    min_sell_out, sell_path, sell_dex,
+                ),
+                f"mintLPAndSell({signal.mint_count}) [LADDER {signal.mode}]",
+                dry_run=dry_run, value=wpls_needed,
+                skip_simulate=True, fixed_gas=500_000, gas_tier="fast",
+            )
+            actual_pls = 0
+            if r:
+                tx_hashes.append(r["transactionHash"].hex())
+                gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                actual_pls = expected_sell or 0
+
+                # 6. Log ladder event
+                _events.log("engine.cereal.ladder", engine="CEREAL", success=True, data={
+                    "mode": signal.mode,
+                    "gap_pct_before": round(signal.gap_pct, 4),
+                    "arb_threshold_pct": round(signal.arb_threshold_pct, 4),
+                    "displacement_gibs": round(signal.displacement_gibs, 2),
+                    "mint_count": signal.mint_count,
+                    "lp_bps": signal.lp_bps,
+                    "burn_bps": signal.burn_bps,
+                    "pls_received": round(actual_pls / 1e18, 4),
+                    "block": r.get("blockNumber", 0),
+                    "tx_hash": r["transactionHash"].hex(),
+                })
+
+                # 7. Post-TX feedback: re-read gap for calibration
+                try:
+                    feedback_signal = get_ladder_signal()
+                    _events.log("engine.cereal.ladder_feedback", engine="CEREAL", data={
+                        "ladder_block": r.get("blockNumber", 0),
+                        "feedback_block": r.get("blockNumber", 0),
+                        "gap_pct_before": round(signal.gap_pct, 4),
+                        "gap_pct_after": round(feedback_signal.gap_pct, 4),
+                        "gap_closed": feedback_signal.gap_pct < signal.gap_pct * 0.5,
+                        "price_before": round(signal.gibs_price_pls, 4),
+                        "price_after": round(feedback_signal.gibs_price_pls, 4),
+                    })
+                except Exception as exc:
+                    log.debug("E2: ladder feedback read failed: %s", exc)
+
+            return EngineResult(
+                success=True, profit_wei=actual_pls, gas_wei=gas_spent,
+                tx_hashes=tx_hashes,
+                notes=f"LADDER {signal.mode}: {signal.mint_count} GIBS — "
+                      f"gap={signal.gap_pct:.2f}% disp={signal.displacement_gibs:.1f}",
+            )
+
+        except Exception as exc:
+            log.error("E2 LADDER execute failed: %s", exc)
+            return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                tx_hashes=tx_hashes, notes=str(exc))
+
+    def _execute_harvest(self, dry_run: bool = False) -> EngineResult:
+        """
         Harvest cycle via JoystickHub. Priority:
         1. FloorHarvestModule: floorAndHarvest() — atomic prime+LP+sell, no router
         2. HarvestModuleV3: primeAndSell() — atomic prime+sell (no LP)
