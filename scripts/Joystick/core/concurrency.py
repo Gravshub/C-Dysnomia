@@ -29,6 +29,7 @@ SIM_TIMEOUT = 5.0
 # Per-engine timeout overrides (engines with heavy RPC loads need more time)
 SIM_TIMEOUT_MAP: dict[str, float] = {
     "Arb": 15.0,
+    "DSS": 15.0,                # ladder oracle + floor quote + sell route = ~8 RPC calls
     "TokenFactory": 15.0,       # 5 routes × 2 DEXes + WM = ~12 RPC calls
     "TreasurySniper": 10.0,     # 30+ RPC calls (direct V1+V2 quotes per target)
     "PHR3AK": 30.0,             # STITCH mode scans full token graph (14-22s)
