@@ -11,8 +11,11 @@ for the full design.
 """
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass, field
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -104,3 +107,108 @@ def solve_for_impact(impact_pct: float, reserves: tuple[int, int]) -> int:
     p = impact_pct / 100.0
     x_gibs = R_gibs * (math.sqrt(1.0 + p) - 1.0) / 0.997
     return int(x_gibs)
+
+
+# Path constant for the live state file. Tests pass an explicit path.
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+STATE_PATH = os.path.join(_DATA_DIR, "probe_state.json")
+SCHEMA_VERSION = 1
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    """
+    Atomic write via tempfile + rename. Sets mode 0o664 so the dashboard
+    (running as joystick user) can read files the bot writes (as joey).
+    """
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+        os.chmod(tmp, 0o664)
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _state_to_dict(state: ProbeState) -> dict:
+    """Serialize ProbeState to a JSON-friendly dict."""
+    d = asdict(state)
+    # Enum and int conversions for JSON compatibility
+    d["mode"] = state.mode.value
+    if state.last_arb_gibs is not None:
+        d["last_arb_gibs"] = str(state.last_arb_gibs)
+    if state.pending_sell is not None:
+        d["pending_sell"]["sell_gibs_wei"] = str(state.pending_sell.sell_gibs_wei)
+    return d
+
+
+def _state_from_dict(d: dict) -> ProbeState:
+    """Deserialize a dict back to ProbeState. Raises on invalid shape."""
+    pending_d = d.get("pending_sell")
+    pending = None
+    if pending_d is not None:
+        pending = PendingSell(
+            sell_gibs_wei=int(pending_d["sell_gibs_wei"]),
+            sell_block=int(pending_d["sell_block"]),
+            sell_tx_hash=pending_d["sell_tx_hash"],
+            impact_pct_at_sell=float(pending_d["impact_pct_at_sell"]),
+            deadline_block=int(pending_d["deadline_block"]),
+        )
+    last_arb = d.get("last_arb_gibs")
+    if last_arb is not None:
+        last_arb = int(last_arb)
+    return ProbeState(
+        mode=ProbeMode(d["mode"]),
+        probe_pct=float(d["probe_pct"]),
+        sweet_spot_pct=d.get("sweet_spot_pct"),
+        consecutive_failures=int(d["consecutive_failures"]),
+        capped_entry_block=d.get("capped_entry_block"),
+        paused_entry_block=d.get("paused_entry_block"),
+        cap_loop_count=int(d["cap_loop_count"]),
+        lp_add_failure_count=int(d["lp_add_failure_count"]),
+        pending_sell=pending,
+        last_arb_gibs=last_arb,
+        last_transition_ts=d["last_transition_ts"],
+    )
+
+
+def save_state(state: ProbeState, path: str = STATE_PATH) -> None:
+    """Persist a ProbeState atomically to disk."""
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "state": _state_to_dict(state),
+    }
+    _atomic_write_json(path, payload)
+
+
+def load_state(path: str = STATE_PATH) -> Optional[ProbeState]:
+    """
+    Load a ProbeState from disk.
+
+    Returns None if:
+      - File does not exist
+      - File is unparseable (renamed to .broken-<ts> for forensics)
+      - Schema version is unknown (treated as corrupt, also renamed)
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        if payload.get("schema_version") != SCHEMA_VERSION:
+            raise ValueError(f"unknown schema_version {payload.get('schema_version')}")
+        return _state_from_dict(payload["state"])
+    except Exception:
+        # Rename to .broken-<ts> sidecar
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        broken = f"{path}.broken-{ts}"
+        try:
+            os.rename(path, broken)
+        except OSError:
+            pass
+        return None
