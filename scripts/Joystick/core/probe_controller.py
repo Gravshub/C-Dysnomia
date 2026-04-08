@@ -264,3 +264,40 @@ class ProbeController:
             _log.warning(
                 "ProbeController._persist failed (state not saved): %s", exc
             )
+
+    def next_sell_gibs(
+        self,
+        hub_gibs_balance: int,
+        pool_reserves: tuple[int, int],
+    ) -> int:
+        """
+        Returns the GIBS amount (wei) E2 should sell this cycle.
+
+        Returns 0 in these cases:
+          - hub_gibs_balance is zero (nothing to sell)
+          - a previous sell is still within its monitoring window
+
+        In CAPPED or PAUSED modes, returns a sell sized to PROBE_BASELINE_PCT
+        (productive fallback). In PROBING/RE_PROBING modes, sized to probe_pct.
+        In LOCKED mode, sized to sweet_spot_pct.
+
+        Always capped at hub_gibs_balance.
+        """
+        if hub_gibs_balance <= 0:
+            return 0
+        if self.state.pending_sell is not None:
+            # One pending sell at a time — return 0 until window resolves
+            return 0
+
+        # Determine which impact % to use this call
+        if self.state.mode == ProbeMode.LOCKED:
+            target_pct = self.state.sweet_spot_pct or _config.PROBE_BASELINE_PCT
+        elif self.state.mode in (ProbeMode.CAPPED, ProbeMode.PAUSED):
+            target_pct = _config.PROBE_BASELINE_PCT
+        else:  # PROBING or RE_PROBING
+            target_pct = self.state.probe_pct
+
+        target_wei = solve_for_impact(target_pct, pool_reserves)
+        if target_wei > hub_gibs_balance:
+            return hub_gibs_balance
+        return target_wei
