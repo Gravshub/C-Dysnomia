@@ -474,16 +474,31 @@ class DSSEngine(EngineBase):
 
         # LADDER mode — uses mintLPAndSell with Joey's PLS as msg.value,
         # so works even when Hub WPLS=0 (floor infeasible).
-        # When floor is infeasible, force ladder regardless of oracle mode.
+        # Two cases we want to cover:
+        #   (a) Organic ladder — oracle signals should_ladder=True
+        #       (only when pair depth is sufficient for external arb to engage)
+        #   (b) Forced rescue — floor is infeasible (Hub WPLS drained),
+        #       keep E2 alive by mintLPAndSell via Joey's PLS
         try:
             signal = get_ladder_signal()
-            if signal.should_ladder or (not floor_feasible and signal.gibs_price_pls > 0):
-                mode_label = signal.mode if signal.should_ladder else f"FORCED ({signal.mode})"
+            if signal.should_ladder:
                 log.info(
                     "E2 [ladder]: mode=%s, gap=%.2f%%, disp=%.1f GIBS, price=%.1f PLS",
-                    mode_label, signal.gap_pct, signal.displacement_gibs, signal.gibs_price_pls,
+                    signal.mode, signal.gap_pct, signal.displacement_gibs, signal.gibs_price_pls,
                 )
                 return True
+            # Rescue path: floor infeasible but price known — simulate() will
+            # construct a forced ladder signal and run mintLPAndSell via Joey.
+            if (not floor_feasible) and signal.gibs_price_pls > 0:
+                joey_pls = w3_read.eth.get_balance(JOEY_WALLET)
+                # Minimum PLS needed: wpls_needed for LP side + 2 TX gas headroom
+                # (~1500 PLS worst case). 200K PLS floor already maintained by gas_guard.
+                if joey_pls >= 200_000 * 10**18:
+                    log.info(
+                        "E2 [rescue]: floor infeasible, Joey PLS=%d — will force LADDER",
+                        joey_pls // 10**18,
+                    )
+                    return True
         except Exception as exc:
             log.debug("E2: ladder oracle check failed in is_ready: %s", exc)
 
@@ -567,35 +582,47 @@ class DSSEngine(EngineBase):
                 feasible, wpls_needed, wpls_from_sell, net_wpls, lp_gibs, sell_gibs = quote
                 floor_feasible = feasible
 
-        # 3. If ladder signal fires OR floor is down, use ladder
-        force_ladder = not floor_feasible and signal and signal.gibs_price_pls > 0
-        if signal and (signal.should_ladder or force_ladder):
+        # 3. Organic ladder: oracle genuinely signals it (gap big enough for
+        # external arb bots to close). With the oracle's depth gate in place,
+        # this only fires when pair depth is sufficient — won't happen at
+        # current depths, but when GIBS/FED deepens it will.
+        if signal and signal.should_ladder:
             try:
-                # Force LADDER mode when floor is down
-                mode = signal.mode.lower() if signal.should_ladder else "ladder"
-                self._last_sim_mode = DSSMode(mode)
-                # Override signal params if forced
-                if force_ladder and not signal.should_ladder:
-                    from ..oracle.ladder_oracle import LadderSignal, HARVEST_MINT_COUNT as _HMC
-                    signal = LadderSignal(
-                        should_ladder=True, mode="LADDER",
-                        gibs_price_pls=signal.gibs_price_pls,
-                        gap_pct=signal.gap_pct,
-                        arb_threshold_pct=signal.arb_threshold_pct,
-                        displacement_gibs=max(signal.displacement_gibs, 5.0),
-                        mint_count=HARVEST_MINT_COUNT,
-                        lp_bps=3000, burn_bps=500,
-                        tvl_pls=signal.tvl_pls,
-                        notes=f"FORCED: floor infeasible, original mode={signal.mode}",
-                    )
-                    self._last_ladder_signal = signal
-                    log.info("E2: forcing LADDER — floor infeasible, GIBS=%.1f PLS",
-                             signal.gibs_price_pls)
+                self._last_sim_mode = DSSMode(signal.mode.lower())
                 return self._simulate_ladder(signal)
             except SimulationFailed:
                 raise
             except Exception as exc:
-                log.warning("E2: ladder sim failed (%s), falling through to harvest", exc)
+                log.warning("E2: ladder sim failed (%s), falling through to forced-ladder", exc)
+
+        # 4. Forced ladder RESCUE: floor is infeasible (Hub WPLS drained) and
+        # oracle says HARVEST_ONLY (not enough depth for organic ladder).
+        # _simulate_ladder uses Joey's PLS via msg.value so it works with
+        # Hub WPLS=0. Without this, E2 would silently skip every cycle until
+        # Hub was manually refilled.
+        if not floor_feasible and signal and signal.gibs_price_pls > 0:
+            try:
+                from ..oracle.ladder_oracle import LadderSignal
+                forced = LadderSignal(
+                    should_ladder=True, mode="LADDER",
+                    gibs_price_pls=signal.gibs_price_pls,
+                    gap_pct=signal.gap_pct,
+                    arb_threshold_pct=signal.arb_threshold_pct,
+                    displacement_gibs=float(HARVEST_MINT_COUNT),
+                    mint_count=HARVEST_MINT_COUNT,
+                    # burn_bps=0 — user policy: accumulate LP, do not burn
+                    lp_bps=3000, burn_bps=0,
+                    tvl_pls=signal.tvl_pls,
+                    notes=f"FORCED rescue: floor infeasible (original mode={signal.mode})",
+                )
+                self._last_ladder_signal = forced
+                self._last_sim_mode = DSSMode.LADDER
+                log.info("E2: forcing LADDER rescue — floor infeasible, using Joey PLS")
+                return self._simulate_ladder(forced)
+            except SimulationFailed:
+                raise
+            except Exception as exc:
+                log.warning("E2: forced ladder rescue failed (%s), falling through", exc)
 
         # 4. Fall through to existing HARVEST simulation
         self._last_sim_mode = DSSMode.HARVEST
@@ -636,23 +663,25 @@ class DSSEngine(EngineBase):
 
     def _execute_ladder(self, dry_run: bool = False) -> EngineResult:
         """
-        Execute LADDER mode: re-read oracle, prime if needed,
-        then mintLPAndSell with calibrated displacement.
+        Execute LADDER mode: use the signal simulate() already built,
+        prime if needed, then mintLPAndSell with calibrated displacement.
+
+        We deliberately trust self._last_ladder_signal instead of re-reading
+        the oracle. The simulate() → execute() pipeline already made this
+        decision; re-reading here would bypass the upstream decision and
+        create the "LADDER signal gone — falling back to HARVEST" flap that
+        burned money in cycle 44 of the initial run.
         """
         from ..core.event_logger import events as _events
 
         tx_hashes = []
         gas_spent = 0
 
-        # 1. Re-read oracle (state may have changed since simulate)
-        try:
-            signal = get_ladder_signal()
-        except Exception as exc:
-            return EngineResult(success=False, profit_wei=0, gas_wei=0,
-                                tx_hashes=[], notes=f"LADDER oracle re-read failed: {exc}")
-
-        if not signal.should_ladder:
-            log.info("E2: LADDER signal gone — falling back to HARVEST")
+        signal = self._last_ladder_signal
+        if signal is None or not signal.should_ladder:
+            # Should not happen in normal flow — simulate() sets this before
+            # execute() is called. Defensive fallback to harvest.
+            log.warning("E2: _execute_ladder called without prior ladder signal")
             return self._execute_harvest(dry_run=dry_run)
 
         try:
