@@ -289,13 +289,16 @@ class ProbeController:
         (productive fallback). In PROBING/RE_PROBING modes, sized to probe_pct.
         In LOCKED mode, sized to sweet_spot_pct.
 
-        Always capped at hub_gibs_balance.
+        Always capped at hub_gibs_balance. Auto-resets CAPPED/PAUSED if their
+        timers have elapsed before the sizing decision.
         """
         if hub_gibs_balance <= 0:
             return 0
         if self.state.pending_sell is not None:
-            # One pending sell at a time — return 0 until window resolves
             return 0
+
+        # Check timed auto-resets BEFORE sizing — may transition CAPPED/PAUSED → PROBING
+        self._check_timed_resets()
 
         # Determine which impact % to use this call
         if self.state.mode == ProbeMode.LOCKED:
@@ -309,6 +312,25 @@ class ProbeController:
         if target_wei > hub_gibs_balance:
             return hub_gibs_balance
         return target_wei
+
+    def _check_timed_resets(self) -> None:
+        """Check CAPPED and PAUSED auto-reset timers, transition if expired."""
+        current = self._current_block()
+        if (self.state.mode == ProbeMode.CAPPED
+                and self.state.capped_entry_block is not None
+                and current >= self.state.capped_entry_block + _config.PROBE_CAPPED_AUTO_RESET_BLOCKS):
+            self.state.mode = ProbeMode.PROBING
+            self.state.probe_pct = _config.PROBE_BASELINE_PCT
+            self.state.capped_entry_block = None
+            self._persist()
+        elif (self.state.mode == ProbeMode.PAUSED
+                and self.state.paused_entry_block is not None
+                and current >= self.state.paused_entry_block + _config.PROBE_CAP_LOOP_PAUSE_BLOCKS):
+            self.state.mode = ProbeMode.PROBING
+            self.state.probe_pct = _config.PROBE_BASELINE_PCT
+            self.state.paused_entry_block = None
+            self.state.cap_loop_count = 0
+            self._persist()
 
     def record_sell(
         self,
