@@ -60,6 +60,8 @@ def test_capped_returns_baseline_size(pc):
     pc.state.probe_pct = 11.0  # whatever
     R_gibs = 5000 * 10**18
     R_wpls = 210_000 * 10**18
-    result = pc.next_sell_gibs(1000 * 10**18, (R_gibs, R_wpls))
+    # Mock _current_block to a value within the CAPPED window (no auto-reset)
+    with patch.object(pc, "_current_block", return_value=201):
+        result = pc.next_sell_gibs(1000 * 10**18, (R_gibs, R_wpls))
     # Baseline of 0.3% on this pool ≈ 7.5 GIBS
     assert 7.0 < result / 1e18 < 8.0
