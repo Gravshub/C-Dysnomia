@@ -71,6 +71,12 @@ class ProbeState:
     pending_sell: Optional[PendingSell]
     last_arb_gibs: Optional[int]
     last_transition_ts: str
+    # Stats counters (NEW in Task 14, added with default=0 so existing call sites
+    # that don't pass them still work):
+    sells_total: int = 0
+    arbs_detected_total: int = 0
+    cap_entries_total: int = 0
+    pause_entries_total: int = 0
 
 
 def solve_for_impact(impact_pct: float, reserves: tuple[int, int]) -> int:
@@ -148,6 +154,10 @@ def _state_to_dict(state: ProbeState) -> dict:
         d["last_arb_gibs"] = str(state.last_arb_gibs)
     if state.pending_sell is not None:
         d["pending_sell"]["sell_gibs_wei"] = str(state.pending_sell.sell_gibs_wei)
+    d["sells_total"] = state.sells_total
+    d["arbs_detected_total"] = state.arbs_detected_total
+    d["cap_entries_total"] = state.cap_entries_total
+    d["pause_entries_total"] = state.pause_entries_total
     return d
 
 
@@ -178,6 +188,10 @@ def _state_from_dict(d: dict) -> ProbeState:
         pending_sell=pending,
         last_arb_gibs=last_arb,
         last_transition_ts=d["last_transition_ts"],
+        sells_total=int(d.get("sells_total", 0)),
+        arbs_detected_total=int(d.get("arbs_detected_total", 0)),
+        cap_entries_total=int(d.get("cap_entries_total", 0)),
+        pause_entries_total=int(d.get("pause_entries_total", 0)),
     )
 
 
@@ -370,6 +384,7 @@ class ProbeController:
             impact_pct_at_sell=impact,
             deadline_block=block_number + _config.PROBE_RESPONSE_WINDOW_BLOCKS,
         )
+        self.state.sells_total += 1
         self._persist()
 
     def check_arb_response(self) -> ArbResponse:
@@ -450,6 +465,7 @@ class ProbeController:
 
     def _on_arb_detected(self, gibs_size: int, block: int, tx_hash: str, sender: str) -> None:
         """State transition: arb response received."""
+        self.state.arbs_detected_total += 1
         self.state.last_arb_gibs = gibs_size
         if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
             # Lock at the current probe_pct
@@ -498,9 +514,11 @@ class ProbeController:
         self.state.probe_pct = _config.PROBE_BASELINE_PCT
         self.state.capped_entry_block = self._current_block()
         self.state.cap_loop_count += 1
+        self.state.cap_entries_total += 1
         if self.state.cap_loop_count >= _config.PROBE_CAP_LOOP_PAUSE_THRESHOLD:
             self.state.mode = ProbeMode.PAUSED
             self.state.paused_entry_block = self._current_block()
+            self.state.pause_entries_total += 1
 
     def _enter_re_probing(self) -> None:
         """Transition LOCKED → RE_PROBING starting at sweet_spot - 1."""
@@ -538,3 +556,33 @@ class ProbeController:
             self.state.last_arb_gibs = None
             self.state.lp_add_failure_count = 0
         self._persist()
+
+    def status(self) -> dict:
+        """Human-readable state snapshot for logs and dashboard routes."""
+        last_arb_gibs_human = None
+        if self.state.last_arb_gibs is not None:
+            last_arb_gibs_human = self.state.last_arb_gibs / 1e18
+        return {
+            "mode": self.state.mode.value,
+            "sweet_spot_pct": self.state.sweet_spot_pct,
+            "probe_pct": self.state.probe_pct,
+            "consecutive_failures": self.state.consecutive_failures,
+            "pending_sell": (
+                {
+                    "sell_block": self.state.pending_sell.sell_block,
+                    "deadline_block": self.state.pending_sell.deadline_block,
+                    "tx_hash": self.state.pending_sell.sell_tx_hash,
+                }
+                if self.state.pending_sell else None
+            ),
+            "last_arb_gibs": last_arb_gibs_human,
+            "cap_loop_count": self.state.cap_loop_count,
+            "lp_add_failure_count": self.state.lp_add_failure_count,
+            "last_transition_ts": self.state.last_transition_ts,
+            "stats": {
+                "sells_total": self.state.sells_total,
+                "arbs_detected_total": self.state.arbs_detected_total,
+                "cap_entries_total": self.state.cap_entries_total,
+                "pause_entries_total": self.state.pause_entries_total,
+            },
+        }
