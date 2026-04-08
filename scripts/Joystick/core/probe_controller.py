@@ -257,12 +257,22 @@ class ProbeController:
     sell size that triggers external arb bot responses on GIBS/WPLS.
     """
 
+    # Uniswap V2 Swap event topic hash:
+    # keccak256("Swap(address,uint256,uint256,uint256,uint256,address)")
+    _SWAP_TOPIC = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"
+
     # Addresses to ignore in arb-detection — our own infrastructure that
     # generates GIBS pool swaps. Lowercase for case-insensitive comparison.
+    #
+    # NOTE: PulseX V2 Router is intentionally NOT listed here. In Uniswap V2
+    # the Swap event's indexed `sender` is the address that called pair.swap()
+    # directly — which is the router for both our sells AND external arb buys.
+    # Filtering by router would cause false negatives (missed arb detections).
+    # The direction filter in check_arb_response (gibs_out>0 and wpls_in>0)
+    # already correctly distinguishes GIBS-buys (arb) from GIBS-sells (our E2).
     _SELF_ADDRESSES = {
         "0x17367877af5a8d0eb33ba5689a880f696386e24d",  # Joey wallet
         "0x7bd76a0f7e03a3ba76a621ba0988c7db0adbab14",  # JoystickHub
-        "0x165c3410fc91ef562c50559f7d2289febed552d9",  # PulseX V2 Router
     }
 
     def __init__(self, state_path: str = STATE_PATH):
@@ -439,26 +449,54 @@ class ProbeController:
 
     def _get_swap_logs(self, from_block: int, to_block: int) -> list:
         """
-        Fetch decoded Swap events on GIBS/WPLS for the given block range.
+        Fetch Swap events on GIBS/WPLS for the given block range.
 
-        Returns a list of dicts with 'blockNumber', 'transactionHash', and
-        'args' keys (matching web3.py event log shape). Returns [] on RPC error.
+        Uses eth_getLogs directly with the raw Swap topic hash rather than the
+        ABI-based event decoder. The pair_contract ABI only has view functions
+        (no event definitions), so web3.py's event filter cannot decode Swap logs.
+
+        Returns a list of dicts matching the shape expected by check_arb_response:
+            {blockNumber, transactionHash, args: {sender, amount0In, amount1In,
+                                                   amount0Out, amount1Out}}
+
+        Returns [] on RPC error (logged at WARNING).
         """
+        from eth_abi import decode
         try:
-            from .chain import pair_contract
+            from .chain import w3_read
             from .config import GIBS_WPLS_V2_PAIR
-            pair = pair_contract(GIBS_WPLS_V2_PAIR)
-            event_filter = pair.events.Swap.create_filter(
-                fromBlock=from_block, toBlock=to_block
-            )
-            return [
-                {
-                    "blockNumber": e["blockNumber"],
-                    "transactionHash": e["transactionHash"].hex() if hasattr(e["transactionHash"], "hex") else e["transactionHash"],
-                    "args": dict(e["args"]),
-                }
-                for e in event_filter.get_all_entries()
-            ]
+            logs = w3_read.eth.get_logs({
+                "fromBlock": from_block,
+                "toBlock": to_block,
+                "address": GIBS_WPLS_V2_PAIR,
+                "topics": [self._SWAP_TOPIC],
+            })
+            results = []
+            for log in logs:
+                # topics[0] = topic hash, topics[1] = indexed sender, topics[2] = indexed to
+                sender = "0x" + log["topics"][1].hex()[-40:]
+                # Non-indexed fields in data
+                a0in, a1in, a0out, a1out = decode(
+                    ["uint256", "uint256", "uint256", "uint256"],
+                    log["data"],
+                )
+                tx_hash = log["transactionHash"]
+                if hasattr(tx_hash, "hex"):
+                    tx_hash = tx_hash.hex()
+                    if not tx_hash.startswith("0x"):
+                        tx_hash = "0x" + tx_hash
+                results.append({
+                    "blockNumber": log["blockNumber"],
+                    "transactionHash": tx_hash,
+                    "args": {
+                        "sender": sender,
+                        "amount0In": a0in,
+                        "amount1In": a1in,
+                        "amount0Out": a0out,
+                        "amount1Out": a1out,
+                    },
+                })
+            return results
         except Exception as exc:
             _log.warning("_get_swap_logs failed (returning []): %s", exc)
             return []
