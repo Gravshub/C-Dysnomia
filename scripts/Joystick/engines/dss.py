@@ -98,6 +98,13 @@ class DSSEngine(EngineBase):
     _last_ladder_signal: LadderSignal | None = None
     _last_sim_mode: DSSMode = DSSMode.HARVEST
 
+    def __init__(self, probe_controller=None):
+        super().__init__()
+        # Probe controller — adaptive sell sizing for GIBS/WPLS.
+        # If not injected, create the default singleton.
+        from ..core.probe_controller import ProbeController
+        self.probe = probe_controller or ProbeController()
+
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _has_prime_and_sell(self, hub) -> bool:
@@ -196,6 +203,68 @@ class DSSEngine(EngineBase):
         # Add 2% buffer to ensure addLiquidity doesn't revert
         wpls_needed = (gibs_for_lp_wei * wpls_r) // gibs_r
         return int(wpls_needed * 102 / 100)
+
+    def _read_gibs_wpls_reserves(self) -> tuple[int, int]:
+        """Returns (R_gibs_wei, R_wpls_wei) at current block.
+
+        Thin wrapper around _gibs_wpls_reserves() that always returns a tuple.
+        Used by ProbeController.next_sell_gibs().
+        """
+        reserves = self._gibs_wpls_reserves()
+        if not reserves:
+            return (0, 0)
+        return (int(reserves[0]), int(reserves[1]))
+
+    def _execute_lp_only_add(self, gibs_wei: int) -> EngineResult:
+        """Submit a Hub mintLPAndSell with lp_bps=10000 (LP only, no sell)."""
+        gibs_r, wpls_r = self._read_gibs_wpls_reserves()
+        if gibs_r == 0 or wpls_r == 0:
+            return EngineResult(
+                success=False, profit_wei=0, gas_wei=0,
+                tx_hashes=[], notes="lp_only_add: failed to read reserves",
+            )
+        wpls_needed = int((gibs_wei * wpls_r // gibs_r) * 105 // 100)
+        mint_count = (gibs_wei + 10**18 - 1) // 10**18
+
+        try:
+            hub = self._get_hub_submit()
+        except Exception as exc:
+            return EngineResult(
+                success=False, profit_wei=0, gas_wei=0,
+                tx_hashes=[], notes=f"lp_only_add: hub init failed: {exc}",
+            )
+
+        log.info(
+            "E2: lp_only_add — mintLPAndSell(%d, lp_bps=10000, burn_bps=0) value=%.2f PLS",
+            mint_count, wpls_needed / 1e18,
+        )
+        try:
+            r = send_tx(
+                hub.functions.mintLPAndSell(
+                    mint_count, 10000, 0,  # lp_bps=10000 (all LP), burn_bps=0
+                    1,                     # lp_dex = V2
+                    0, [], 0,              # no sell
+                ),
+                f"lpOnlyAdd({mint_count})",
+                dry_run=False, value=wpls_needed,
+                skip_simulate=True, fixed_gas=750_000, gas_tier="fast",
+            )
+            if r:
+                return EngineResult(
+                    success=True, profit_wei=0,
+                    gas_wei=r["gasUsed"] * r.get("effectiveGasPrice", 0),
+                    tx_hashes=[r["transactionHash"].hex()],
+                    notes=f"LP-only add: {mint_count} GIBS",
+                )
+        except Exception as exc:
+            return EngineResult(
+                success=False, profit_wei=0, gas_wei=0,
+                tx_hashes=[], notes=f"lp_only_add: tx failed: {exc}",
+            )
+        return EngineResult(
+            success=False, profit_wei=0, gas_wei=0,
+            tx_hashes=[], notes="lp_only_add: send_tx returned None",
+        )
 
     def _best_sell_route(self, gibs_sell_wei: int) -> tuple[list[str], int, int]:
         """
@@ -832,7 +901,45 @@ class DSSEngine(EngineBase):
                                 tx_hashes=[], notes=str(exc))
 
         try:
-            mint_count = HARVEST_MINT_COUNT
+            # ── Probe controller integration ─────────────────────────────────
+            # 1. Check if a previous sell is still within its monitoring window
+            arb_response = self.probe.check_arb_response()
+            if arb_response.kind.value == "PENDING":
+                log.info("E2: probe pending — deferring this cycle")
+                return EngineResult(
+                    success=False, profit_wei=0, gas_wei=0,
+                    tx_hashes=[], notes="probe pending",
+                )
+
+            # 2. If we owe an LP-add from a recent successful arb, do it now
+            lp_target = self.probe.lp_add_target()
+            if lp_target is not None:
+                try:
+                    lp_result = self._execute_lp_only_add(lp_target)
+                    if lp_result.success:
+                        self.probe.clear_lp_add_target()
+                    else:
+                        self.probe.record_lp_add_failure()
+                        log.warning("E2: lp_add_target failed: %s", lp_result.notes)
+                except Exception as exc:
+                    self.probe.record_lp_add_failure()
+                    log.error("E2: lp_add_target exception: %s", exc)
+
+            # 3. Ask the probe controller for sell size this cycle
+            pool_reserves = self._read_gibs_wpls_reserves()
+            hub_gibs = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
+            sell_gibs_wei_probe = self.probe.next_sell_gibs(hub_gibs, pool_reserves)
+            if sell_gibs_wei_probe == 0 and hub_gibs > 0:
+                log.info("E2: probe controller returned 0 — using default mint_count")
+                probe_mint_count = HARVEST_MINT_COUNT
+            elif sell_gibs_wei_probe > 0:
+                # Convert probe's desired sell size to a mint_count (round up)
+                probe_mint_count = (sell_gibs_wei_probe + 10**18 - 1) // 10**18
+            else:
+                probe_mint_count = HARVEST_MINT_COUNT
+            # ── End probe controller integration ─────────────────────────────
+
+            mint_count = probe_mint_count
             lp_bps = 10000 - HARVEST_SELL_BPS  # e.g., 10000-4500 = 5500
             hub_addr = Web3.to_checksum_address(JOYSTICK_HUB)
             aff_cs = Web3.to_checksum_address(AFFECTION)
@@ -909,6 +1016,15 @@ class DSSEngine(EngineBase):
                             gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
                             log.info("E2: floorAndHarvest mined. Block: %d, Gas: %d",
                                      r["blockNumber"], r["gasUsed"])
+                            # Record sell with probe controller (sell_gibs from quote)
+                            try:
+                                self.probe.record_sell(
+                                    sell_gibs_wei=int(sell_gibs),
+                                    block_number=r["blockNumber"],
+                                    tx_hash=r["transactionHash"].hex(),
+                                )
+                            except Exception as _probe_exc:
+                                log.debug("E2: probe.record_sell failed: %s", _probe_exc)
 
                         # WPLS stays in Hub as working capital for LP side.
                         # Sell proceeds replenish the WPLS pool each cycle.
@@ -945,6 +1061,15 @@ class DSSEngine(EngineBase):
                 if r:
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                    # Record sell with probe controller (all minted GIBS are sold here)
+                    try:
+                        self.probe.record_sell(
+                            sell_gibs_wei=gibs_amount,
+                            block_number=r["blockNumber"],
+                            tx_hash=r["transactionHash"].hex(),
+                        )
+                    except Exception as _probe_exc:
+                        log.debug("E2: probe.record_sell failed: %s", _probe_exc)
 
                 return EngineResult(
                     success=True, profit_wei=revenue_wei, gas_wei=gas_spent,
@@ -981,6 +1106,15 @@ class DSSEngine(EngineBase):
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
                 gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                # Record sell with probe controller (sell_gibs_wei computed above)
+                try:
+                    self.probe.record_sell(
+                        sell_gibs_wei=sell_gibs_wei,
+                        block_number=r["blockNumber"],
+                        tx_hash=r["transactionHash"].hex(),
+                    )
+                except Exception as _probe_exc:
+                    log.debug("E2: probe.record_sell failed: %s", _probe_exc)
 
             return EngineResult(
                 success=True, profit_wei=revenue_wei, gas_wei=gas_spent,
