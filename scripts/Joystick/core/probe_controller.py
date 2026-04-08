@@ -509,3 +509,32 @@ class ProbeController:
         self.state.sweet_spot_pct = None
         self.state.consecutive_failures = 0
         self.state.mode = ProbeMode.RE_PROBING
+
+    def lp_add_target(self) -> Optional[int]:
+        """
+        Return the GIBS amount (wei) to LP-add this cycle, or None.
+
+        After a successful arb, last_arb_gibs is set to the arb's buy size.
+        E2 calls lp_add_target() after the response check; if non-None,
+        E2 executes a Hub LP-only TX sized to match. On success, E2 calls
+        clear_lp_add_target(). On failure, record_lp_add_failure().
+        """
+        return self.state.last_arb_gibs
+
+    def clear_lp_add_target(self) -> None:
+        """Mark the LP-add as successfully completed."""
+        self.state.last_arb_gibs = None
+        self.state.lp_add_failure_count = 0
+        self._persist()
+
+    def record_lp_add_failure(self) -> None:
+        """
+        Increment the LP-add failure counter. After PROBE_LP_ADD_RETRY_LIMIT
+        consecutive failures, force-clear the target to prevent poisoned state
+        from blocking all future probes.
+        """
+        self.state.lp_add_failure_count += 1
+        if self.state.lp_add_failure_count >= _config.PROBE_LP_ADD_RETRY_LIMIT:
+            self.state.last_arb_gibs = None
+            self.state.lp_add_failure_count = 0
+        self._persist()
