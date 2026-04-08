@@ -102,3 +102,15 @@ def test_check_arb_response_no_pending_returns_no_response(pc):
     """If no pending sell at all, check returns NO_RESPONSE no-op."""
     r = pc.check_arb_response()
     assert r.kind == ArbResponseKind.NO_RESPONSE
+
+
+def test_enter_capped_resets_probe_pct_to_baseline(pc):
+    """_enter_capped must reset probe_pct so CAPPED state is internally consistent."""
+    from scripts.Joystick.core import config
+    pc.state.probe_pct = 10.5  # over max
+    with patch.object(pc, "_current_block", return_value=500):
+        pc._enter_capped()
+    assert pc.state.mode == ProbeMode.CAPPED
+    assert pc.state.probe_pct == config.PROBE_BASELINE_PCT
+    assert pc.state.capped_entry_block is not None
+    assert pc.state.cap_loop_count == 1

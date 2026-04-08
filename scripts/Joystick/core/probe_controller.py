@@ -415,7 +415,8 @@ class ProbeController:
                 }
                 for e in event_filter.get_all_entries()
             ]
-        except Exception:
+        except Exception as exc:
+            _log.warning("_get_swap_logs failed (returning []): %s", exc)
             return []
 
     def _on_arb_detected(self, gibs_size: int, block: int, tx_hash: str, sender: str) -> None:
@@ -435,6 +436,11 @@ class ProbeController:
             self.state.consecutive_failures = 0
             self.state.capped_entry_block = None
             self.state.paused_entry_block = None
+        else:
+            _log.warning(
+                "_on_arb_detected: unhandled mode %s — clearing pending only",
+                self.state.mode,
+            )
         self.state.pending_sell = None
         self._persist()
 
@@ -453,8 +459,14 @@ class ProbeController:
         self._persist()
 
     def _enter_capped(self) -> None:
-        """Enter CAPPED state, increment cap_loop_count, possibly trigger PAUSED."""
+        """
+        Enter CAPPED state, increment cap_loop_count, possibly trigger PAUSED.
+        Also resets probe_pct back to baseline so the state file is internally
+        consistent: an over-max probe_pct paired with CAPPED mode is semantically
+        invalid even though next_sell_gibs correctly falls back to baseline.
+        """
         self.state.mode = ProbeMode.CAPPED
+        self.state.probe_pct = _config.PROBE_BASELINE_PCT
         self.state.capped_entry_block = self._current_block()
         self.state.cap_loop_count += 1
         if self.state.cap_loop_count >= _config.PROBE_CAP_LOOP_PAUSE_THRESHOLD:
