@@ -16,7 +16,9 @@ def pc(tmp_path):
 
 def _force_no_response(pc, current_block_after_deadline):
     """Helper: simulate one sell with no response, advance state."""
-    pc.record_sell(8 * 10**18, current_block_after_deadline - 6, f"0x{current_block_after_deadline:x}")
+    # Derived so it remains correct if PROBE_RESPONSE_WINDOW_BLOCKS changes
+    sell_block = current_block_after_deadline - config.PROBE_RESPONSE_WINDOW_BLOCKS - 1
+    pc.record_sell(8 * 10**18, sell_block, f"0x{sell_block:x}")
     with patch.object(pc, "_get_swap_logs", return_value=[]), \
          patch.object(pc, "_current_block", return_value=current_block_after_deadline):
         pc.check_arb_response()
