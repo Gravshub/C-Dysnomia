@@ -11,6 +11,7 @@ for the full design.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -62,3 +63,34 @@ class ProbeState:
     pending_sell: Optional[PendingSell]
     last_arb_gibs: Optional[int]
     last_transition_ts: str
+
+
+def solve_for_impact(impact_pct: float, reserves: tuple[int, int]) -> int:
+    """
+    Solve for the GIBS amount (wei) that produces a given price impact %
+    on a Uniswap v2 pool.
+
+    Args:
+        impact_pct: target price impact as a percentage (e.g. 0.3 for 0.3%)
+        reserves: (R_gibs_wei, R_wpls_wei) — the pool's GIBS and WPLS sides
+
+    Returns:
+        GIBS amount in wei to sell. Zero if impact_pct is zero.
+
+    Raises:
+        ValueError: impact_pct < 0 or any reserve is zero/negative.
+
+    Math:
+        x_gibs = R_gibs × (sqrt(1 + p) − 1) / 0.997
+        Small-impact approximation, accurate to ~5% for p in [0.003, 0.10].
+    """
+    if impact_pct < 0:
+        raise ValueError(f"impact_pct must be non-negative, got {impact_pct}")
+    if impact_pct == 0:
+        return 0
+    R_gibs, R_wpls = reserves
+    if R_gibs <= 0 or R_wpls <= 0:
+        raise ValueError(f"reserves must be positive, got {reserves}")
+    p = impact_pct / 100.0
+    x_gibs = R_gibs * (math.sqrt(1.0 + p) - 1.0) / 0.997
+    return int(x_gibs)
