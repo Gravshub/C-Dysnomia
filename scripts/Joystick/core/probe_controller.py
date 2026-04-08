@@ -314,7 +314,14 @@ class ProbeController:
         return target_wei
 
     def _check_timed_resets(self) -> None:
-        """Check CAPPED and PAUSED auto-reset timers, transition if expired."""
+        """Check CAPPED and PAUSED auto-reset timers, transition if expired.
+
+        Early-returns when not in CAPPED or PAUSED since those are the only
+        modes with timers to check. This avoids a spurious _current_block()
+        RPC call on every PROBING/LOCKED/RE_PROBING cycle.
+        """
+        if self.state.mode not in (ProbeMode.CAPPED, ProbeMode.PAUSED):
+            return
         current = self._current_block()
         if (self.state.mode == ProbeMode.CAPPED
                 and self.state.capped_entry_block is not None
