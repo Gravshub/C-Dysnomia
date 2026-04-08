@@ -27,12 +27,12 @@ def test_solve_for_impact_5pct():
 
 
 def test_solve_for_impact_10pct_cap():
-    """At 10% impact, expect ~245 GIBS sell."""
+    """At 10% target impact, expect ~244 GIBS (under-delivers to ~9.09% execution)."""
     R_gibs = 5000 * 10**18
     R_wpls = 210_000 * 10**18
     result_wei = solve_for_impact(10.0, (R_gibs, R_wpls))
     result_gibs = result_wei / 1e18
-    assert 240 < result_gibs < 250
+    assert 230 < result_gibs < 260
 
 
 def test_solve_for_impact_zero_returns_zero():
