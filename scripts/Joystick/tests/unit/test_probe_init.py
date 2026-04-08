@@ -53,3 +53,18 @@ def test_init_corrupt_file_falls_back_to_fresh(tmp_path):
     assert pc.state.probe_pct == config.PROBE_BASELINE_PCT
     # Original file is gone (renamed)
     assert not state_path.exists()
+
+
+def test_persist_swallows_save_errors(tmp_path, monkeypatch):
+    """A persist failure must not propagate — bot loop safety."""
+    state_path = str(tmp_path / "probe.json")
+    pc = ProbeController(state_path=state_path)
+
+    # Monkeypatch save_state to raise
+    from scripts.Joystick.core import probe_controller
+    def boom(*args, **kwargs):
+        raise OSError("simulated disk full")
+    monkeypatch.setattr(probe_controller, "save_state", boom)
+
+    # This should NOT raise
+    pc._persist()

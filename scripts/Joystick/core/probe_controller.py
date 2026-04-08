@@ -12,6 +12,7 @@ for the full design.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -21,6 +22,8 @@ from enum import Enum
 from typing import Optional
 
 from . import config as _config
+
+_log = logging.getLogger(__name__)
 
 
 class ProbeMode(str, Enum):
@@ -246,6 +249,18 @@ class ProbeController:
         self.state: ProbeState = loaded if loaded is not None else _fresh_state()
 
     def _persist(self) -> None:
-        """Write current state to disk. Called on every transition."""
+        """
+        Write current state to disk. Called on every transition.
+
+        Persistence failures (disk full, permission error, etc.) are logged
+        but do not raise — a missed persist is recoverable on the next
+        transition, whereas propagating the exception would crash the bot
+        main loop for a transient infrastructure issue.
+        """
         self.state.last_transition_ts = datetime.now(timezone.utc).isoformat()
-        save_state(self.state, self.state_path)
+        try:
+            save_state(self.state, self.state_path)
+        except Exception as exc:
+            _log.warning(
+                "ProbeController._persist failed (state not saved): %s", exc
+            )
