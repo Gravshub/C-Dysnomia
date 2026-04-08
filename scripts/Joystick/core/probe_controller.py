@@ -465,6 +465,15 @@ class ProbeController:
 
     def _on_arb_detected(self, gibs_size: int, block: int, tx_hash: str, sender: str) -> None:
         """State transition: arb response received."""
+        prev_mode = self.state.mode.value
+        _log.info(
+            "probe: %s → LOCKED  arb=%.2f GIBS at block=%d sender=%s... tx=%s",
+            prev_mode,
+            gibs_size / 1e18,
+            block,
+            (sender or "")[:10],
+            (tx_hash or "")[:14] if tx_hash else "?",
+        )
         self.state.arbs_detected_total += 1
         self.state.last_arb_gibs = gibs_size
         if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
@@ -491,6 +500,9 @@ class ProbeController:
 
     def _on_no_response(self) -> None:
         """State transition: window expired with no arb response."""
+        prev_mode = self.state.mode.value
+        prev_pct = self.state.probe_pct
+        prev_failures = self.state.consecutive_failures
         self.state.pending_sell = None
         if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
             self.state.probe_pct += _config.PROBE_STEP_PCT
@@ -501,6 +513,23 @@ class ProbeController:
             if self.state.consecutive_failures >= _config.PROBE_FAILURE_THRESHOLD:
                 self._enter_re_probing()
         # CAPPED / PAUSED no_response — no state change, fallback continues
+        new_mode = self.state.mode.value
+        new_pct = self.state.probe_pct
+        if prev_mode != new_mode:
+            _log.info(
+                "probe: %s → %s  (no_response, was probe_pct=%.2f%%, now probe_pct=%.2f%%)",
+                prev_mode, new_mode, prev_pct, new_pct,
+            )
+        elif prev_pct != new_pct:
+            _log.info(
+                "probe: %s  probe_pct %.2f%% → %.2f%%  (no_response, escalation)",
+                prev_mode, prev_pct, new_pct,
+            )
+        elif self.state.consecutive_failures != prev_failures:
+            _log.info(
+                "probe: %s  failures=%d  (no_response)",
+                prev_mode, self.state.consecutive_failures,
+            )
         self._persist()
 
     def _enter_capped(self) -> None:
@@ -515,6 +544,13 @@ class ProbeController:
         self.state.capped_entry_block = self._current_block()
         self.state.cap_loop_count += 1
         self.state.cap_entries_total += 1
+        # Early warning as cap_loop_count approaches the pause threshold
+        if self.state.cap_loop_count >= _config.PROBE_CAP_LOOP_WARN_THRESHOLD:
+            _log.warning(
+                "probe WARN: cap_loop_count=%d (pause at %d) — arb bots unresponsive",
+                self.state.cap_loop_count,
+                _config.PROBE_CAP_LOOP_PAUSE_THRESHOLD,
+            )
         if self.state.cap_loop_count >= _config.PROBE_CAP_LOOP_PAUSE_THRESHOLD:
             self.state.mode = ProbeMode.PAUSED
             self.state.paused_entry_block = self._current_block()
