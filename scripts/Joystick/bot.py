@@ -87,6 +87,7 @@ from .oracle.route_auditor import route_summary
 from .oracle.supply_oracle import SupplyOracle
 
 from .core.log_names import get_logger, fmt_pls as fmt_pls_comma, fmt_int, fmt_pls_short
+from .core.probe_controller import ProbeController
 log = get_logger("joystick")
 
 
@@ -117,6 +118,15 @@ class DysnomiaBot:
         if force_single_wallet and self.wallet_mgr.is_multi_wallet:
             log.info("--single-wallet: forcing single-wallet mode")
 
+        # ProbeController singleton — shared state for adaptive E2 sell sizing.
+        # Persists across restarts via scripts/Joystick/data/probe_state.json.
+        self.probe_controller = ProbeController()
+        log.info(
+            "ProbeController loaded: mode=%s, sweet_spot_pct=%s",
+            self.probe_controller.state.mode.value,
+            self.probe_controller.state.sweet_spot_pct,
+        )
+
         # Engine priority is determined by Strategist scoring each cycle.
         # ENGINE_EXCLUDE: comma-separated engine names to skip (e.g. "Beat,LAU")
         exclude = set(
@@ -124,7 +134,7 @@ class DysnomiaBot:
         )
         all_engines = [
             ArbEngine(),
-            DSSEngine(),
+            DSSEngine(probe_controller=self.probe_controller),
             BeatEngine(with_cheon=True),
             TokenFactoryEngine(),
             LAUEngine(),
