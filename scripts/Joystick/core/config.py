@@ -293,3 +293,17 @@ class AdaptiveDelay:
     @property
     def seconds(self) -> float:
         return self.current
+
+
+# ─── Probe Controller (E2 adaptive sell sizing) ──────────────────────
+# See docs/superpowers/specs/2026-04-08-adaptive-probe-controller-design.md
+PROBE_BASELINE_PCT = 0.3              # starting impact %, matches current ~8 GIBS floor sell
+PROBE_STEP_PCT = 1.0                  # linear escalation per failed probe
+PROBE_MAX_IMPACT_PCT = 10.0           # safety cap before CAPPED state
+PROBE_RESPONSE_WINDOW_BLOCKS = 5      # blocks to wait for arb response after a sell
+PROBE_FAILURE_THRESHOLD = 2           # consecutive LOCKED failures → RE_PROBING
+PROBE_CAPPED_AUTO_RESET_BLOCKS = 3    # CAPPED → PROBING after this many blocks
+PROBE_CAP_LOOP_WARN_THRESHOLD = 5     # log WARN after this many cap_loop entries
+PROBE_CAP_LOOP_PAUSE_THRESHOLD = 10   # PAUSED after this many cap_loop entries
+PROBE_CAP_LOOP_PAUSE_BLOCKS = 30      # PAUSED → PROBING after this many blocks (~5 min)
+PROBE_LP_ADD_RETRY_LIMIT = 3          # max consecutive LP-add failures before clearing target
