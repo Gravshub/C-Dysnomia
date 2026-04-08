@@ -20,22 +20,24 @@ def pc(tmp_path):
     return pc
 
 
-def _no_response_cycle(pc, sell_block, current_block):
+def _no_response_cycle(pc, sell_block):
+    """Helper: simulate one sell with no response, window elapsed by 1 block."""
     pc.record_sell(8 * 10**18, sell_block, f"0x{sell_block:x}")
+    current = sell_block + config.PROBE_RESPONSE_WINDOW_BLOCKS + 1
     with patch.object(pc, "_get_swap_logs", return_value=[]), \
-         patch.object(pc, "_current_block", return_value=current_block):
+         patch.object(pc, "_current_block", return_value=current):
         pc.check_arb_response()
 
 
 def test_locked_failure_increments_counter(pc):
-    _no_response_cycle(pc, 100, 106)
+    _no_response_cycle(pc, 100)
     assert pc.state.mode == ProbeMode.LOCKED
     assert pc.state.consecutive_failures == 1
 
 
 def test_locked_to_reprobing_after_two_failures(pc):
-    _no_response_cycle(pc, 100, 106)
-    _no_response_cycle(pc, 110, 116)
+    _no_response_cycle(pc, 100)
+    _no_response_cycle(pc, 110)
     assert pc.state.mode == ProbeMode.RE_PROBING
     assert pc.state.sweet_spot_pct is None
     assert pc.state.probe_pct == pytest.approx(3.0)  # 4.0 - 1.0
@@ -44,7 +46,7 @@ def test_locked_to_reprobing_after_two_failures(pc):
 
 def test_locked_arb_resets_failure_counter(pc):
     """A successful arb during LOCKED resets failures back to 0."""
-    _no_response_cycle(pc, 100, 106)
+    _no_response_cycle(pc, 100)
     assert pc.state.consecutive_failures == 1
 
     pc.record_sell(8 * 10**18, 110, "0xabc")
@@ -71,7 +73,7 @@ def test_locked_arb_resets_failure_counter(pc):
 def test_reprobing_floor_is_baseline(pc):
     """If sweet_spot - 1 would go below baseline, clamp to baseline."""
     pc.state.sweet_spot_pct = 0.5  # already very close to baseline 0.3
-    _no_response_cycle(pc, 200, 206)
-    _no_response_cycle(pc, 210, 216)
+    _no_response_cycle(pc, 200)
+    _no_response_cycle(pc, 210)
     assert pc.state.mode == ProbeMode.RE_PROBING
     assert pc.state.probe_pct == pytest.approx(config.PROBE_BASELINE_PCT)
