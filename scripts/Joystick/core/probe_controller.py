@@ -243,6 +243,14 @@ class ProbeController:
     sell size that triggers external arb bot responses on GIBS/WPLS.
     """
 
+    # Addresses to ignore in arb-detection — our own infrastructure that
+    # generates GIBS pool swaps. Lowercase for case-insensitive comparison.
+    _SELF_ADDRESSES = {
+        "0x17367877af5a8d0eb33ba5689a880f696386e24d",  # Joey wallet
+        "0x7bd76a0f7e03a3ba76a621ba0988c7db0adbab14",  # JoystickHub
+        "0x165c3410fc91ef562c50559f7d2289febed552d9",  # PulseX V2 Router
+    }
+
     def __init__(self, state_path: str = STATE_PATH):
         self.state_path = state_path
         loaded = load_state(state_path)
@@ -301,3 +309,162 @@ class ProbeController:
         if target_wei > hub_gibs_balance:
             return hub_gibs_balance
         return target_wei
+
+    def record_sell(
+        self,
+        sell_gibs_wei: int,
+        block_number: int,
+        tx_hash: str,
+    ) -> None:
+        """
+        Record that E2 has just submitted a sell. Starts the response window.
+
+        Block number MUST come from the TX receipt, not w3.eth.block_number,
+        to anchor the deadline correctly.
+
+        Raises RuntimeError if a pending sell is already in progress (caller
+        bug — should have called check_arb_response first).
+        """
+        if self.state.pending_sell is not None:
+            raise RuntimeError("pending sell already in progress")
+        # The probe_pct or sweet_spot_pct in effect when this sell was sized
+        if self.state.mode == ProbeMode.LOCKED:
+            impact = self.state.sweet_spot_pct or _config.PROBE_BASELINE_PCT
+        elif self.state.mode in (ProbeMode.CAPPED, ProbeMode.PAUSED):
+            impact = _config.PROBE_BASELINE_PCT
+        else:
+            impact = self.state.probe_pct
+        self.state.pending_sell = PendingSell(
+            sell_gibs_wei=sell_gibs_wei,
+            sell_block=block_number,
+            sell_tx_hash=tx_hash,
+            impact_pct_at_sell=impact,
+            deadline_block=block_number + _config.PROBE_RESPONSE_WINDOW_BLOCKS,
+        )
+        self._persist()
+
+    def check_arb_response(self) -> ArbResponse:
+        """
+        Polls Swap events on GIBS/WPLS in the pending sell's window.
+
+        Returns:
+          - PENDING: still within window, no matching swap seen
+          - ARB_DETECTED: a non-self GIBS-buy swap was found
+          - NO_RESPONSE: window expired with no match
+        """
+        if self.state.pending_sell is None:
+            return ArbResponse(kind=ArbResponseKind.NO_RESPONSE)
+
+        ps = self.state.pending_sell
+        current = self._current_block()
+
+        # Window: (sell_block, deadline_block] inclusive
+        from_block = ps.sell_block + 1
+        to_block = min(current, ps.deadline_block)
+
+        if to_block >= from_block:
+            logs = self._get_swap_logs(from_block, to_block)
+            for log in logs:
+                args = log.get("args", {})
+                sender = (args.get("sender") or "").lower()
+                if sender in self._SELF_ADDRESSES:
+                    continue
+                # GIBS-buy: WPLS in, GIBS out (token0=GIBS, token1=WPLS on V2 pair)
+                gibs_out = int(args.get("amount0Out", 0))
+                wpls_in = int(args.get("amount1In", 0))
+                if gibs_out > 0 and wpls_in > 0:
+                    self._on_arb_detected(gibs_out, log["blockNumber"], log["transactionHash"], sender)
+                    return ArbResponse(
+                        kind=ArbResponseKind.ARB_DETECTED,
+                        gibs_size_wei=gibs_out,
+                        tx_hash=log["transactionHash"],
+                        block=log["blockNumber"],
+                        sender=sender,
+                    )
+
+        if current > ps.deadline_block:
+            self._on_no_response()
+            return ArbResponse(kind=ArbResponseKind.NO_RESPONSE)
+
+        return ArbResponse(kind=ArbResponseKind.PENDING)
+
+    def _current_block(self) -> int:
+        """Return current chain head. Overridden in tests via patch."""
+        from .chain import w3_read
+        return w3_read.eth.block_number
+
+    def _get_swap_logs(self, from_block: int, to_block: int) -> list:
+        """
+        Fetch decoded Swap events on GIBS/WPLS for the given block range.
+
+        Returns a list of dicts with 'blockNumber', 'transactionHash', and
+        'args' keys (matching web3.py event log shape). Returns [] on RPC error.
+        """
+        try:
+            from .chain import pair_contract
+            from .config import GIBS_WPLS_V2_PAIR
+            pair = pair_contract(GIBS_WPLS_V2_PAIR)
+            event_filter = pair.events.Swap.create_filter(
+                fromBlock=from_block, toBlock=to_block
+            )
+            return [
+                {
+                    "blockNumber": e["blockNumber"],
+                    "transactionHash": e["transactionHash"].hex() if hasattr(e["transactionHash"], "hex") else e["transactionHash"],
+                    "args": dict(e["args"]),
+                }
+                for e in event_filter.get_all_entries()
+            ]
+        except Exception:
+            return []
+
+    def _on_arb_detected(self, gibs_size: int, block: int, tx_hash: str, sender: str) -> None:
+        """State transition: arb response received."""
+        self.state.last_arb_gibs = gibs_size
+        if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
+            # Lock at the current probe_pct
+            self.state.sweet_spot_pct = self.state.probe_pct
+            self.state.mode = ProbeMode.LOCKED
+            self.state.consecutive_failures = 0
+        elif self.state.mode == ProbeMode.LOCKED:
+            self.state.consecutive_failures = 0
+        # CAPPED / PAUSED arb_detected is treated like PROBING — promote to LOCKED
+        elif self.state.mode in (ProbeMode.CAPPED, ProbeMode.PAUSED):
+            self.state.sweet_spot_pct = _config.PROBE_BASELINE_PCT
+            self.state.mode = ProbeMode.LOCKED
+            self.state.consecutive_failures = 0
+            self.state.capped_entry_block = None
+            self.state.paused_entry_block = None
+        self.state.pending_sell = None
+        self._persist()
+
+    def _on_no_response(self) -> None:
+        """State transition: window expired with no arb response."""
+        self.state.pending_sell = None
+        if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
+            self.state.probe_pct += _config.PROBE_STEP_PCT
+            if self.state.probe_pct > _config.PROBE_MAX_IMPACT_PCT:
+                self._enter_capped()
+        elif self.state.mode == ProbeMode.LOCKED:
+            self.state.consecutive_failures += 1
+            if self.state.consecutive_failures >= _config.PROBE_FAILURE_THRESHOLD:
+                self._enter_re_probing()
+        # CAPPED / PAUSED no_response — no state change, fallback continues
+        self._persist()
+
+    def _enter_capped(self) -> None:
+        """Enter CAPPED state, increment cap_loop_count, possibly trigger PAUSED."""
+        self.state.mode = ProbeMode.CAPPED
+        self.state.capped_entry_block = self._current_block()
+        self.state.cap_loop_count += 1
+        if self.state.cap_loop_count >= _config.PROBE_CAP_LOOP_PAUSE_THRESHOLD:
+            self.state.mode = ProbeMode.PAUSED
+            self.state.paused_entry_block = self._current_block()
+
+    def _enter_re_probing(self) -> None:
+        """Transition LOCKED → RE_PROBING starting at sweet_spot - 1."""
+        prev_sweet = self.state.sweet_spot_pct or _config.PROBE_BASELINE_PCT
+        self.state.probe_pct = max(_config.PROBE_BASELINE_PCT, prev_sweet - 1.0)
+        self.state.sweet_spot_pct = None
+        self.state.consecutive_failures = 0
+        self.state.mode = ProbeMode.RE_PROBING
