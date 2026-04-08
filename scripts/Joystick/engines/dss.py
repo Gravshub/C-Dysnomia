@@ -59,6 +59,7 @@ from ..core.simulator import SimulationFailed
 from ..oracle.price import get_amounts_out, get_amounts_out_v2
 from enum import Enum
 from ..oracle.ladder_oracle import get_ladder_signal, LadderSignal
+from ..core.probe_controller import ArbResponseKind
 
 log = get_logger(__name__)
 
@@ -215,7 +216,7 @@ class DSSEngine(EngineBase):
             return (0, 0)
         return (int(reserves[0]), int(reserves[1]))
 
-    def _execute_lp_only_add(self, gibs_wei: int) -> EngineResult:
+    def _execute_lp_only_add(self, gibs_wei: int, dry_run: bool = False) -> EngineResult:
         """Submit a Hub mintLPAndSell with lp_bps=10000 (LP only, no sell)."""
         gibs_r, wpls_r = self._read_gibs_wpls_reserves()
         if gibs_r == 0 or wpls_r == 0:
@@ -246,7 +247,7 @@ class DSSEngine(EngineBase):
                     0, [], 0,              # no sell
                 ),
                 f"lpOnlyAdd({mint_count})",
-                dry_run=False, value=wpls_needed,
+                dry_run=dry_run, value=wpls_needed,
                 skip_simulate=True, fixed_gas=750_000, gas_tier="fast",
             )
             if r:
@@ -904,38 +905,25 @@ class DSSEngine(EngineBase):
             # ── Probe controller integration ─────────────────────────────────
             # 1. Check if a previous sell is still within its monitoring window
             arb_response = self.probe.check_arb_response()
-            if arb_response.kind.value == "PENDING":
+            if arb_response.kind is ArbResponseKind.PENDING:
                 log.info("E2: probe pending — deferring this cycle")
                 return EngineResult(
                     success=False, profit_wei=0, gas_wei=0,
                     tx_hashes=[], notes="probe pending",
                 )
 
-            # 2. If we owe an LP-add from a recent successful arb, do it now
-            lp_target = self.probe.lp_add_target()
-            if lp_target is not None:
-                try:
-                    lp_result = self._execute_lp_only_add(lp_target)
-                    if lp_result.success:
-                        self.probe.clear_lp_add_target()
-                    else:
-                        self.probe.record_lp_add_failure()
-                        log.warning("E2: lp_add_target failed: %s", lp_result.notes)
-                except Exception as exc:
-                    self.probe.record_lp_add_failure()
-                    log.error("E2: lp_add_target exception: %s", exc)
-
-            # 3. Ask the probe controller for sell size this cycle
+            # 2. Ask the probe controller for sell size this cycle (read-only)
             pool_reserves = self._read_gibs_wpls_reserves()
             hub_gibs = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
             sell_gibs_wei_probe = self.probe.next_sell_gibs(hub_gibs, pool_reserves)
-            if sell_gibs_wei_probe == 0 and hub_gibs > 0:
-                log.info("E2: probe controller returned 0 — using default mint_count")
-                probe_mint_count = HARVEST_MINT_COUNT
-            elif sell_gibs_wei_probe > 0:
+            if sell_gibs_wei_probe > 0:
                 # Convert probe's desired sell size to a mint_count (round up)
                 probe_mint_count = (sell_gibs_wei_probe + 10**18 - 1) // 10**18
             else:
+                # Probe returned 0 — either hub empty or reserves zero.
+                # Fall back to HARVEST_MINT_COUNT so the engine can proceed with
+                # the default mint count (the pending-sell case is already caught
+                # by the check_arb_response PENDING early return above).
                 probe_mint_count = HARVEST_MINT_COUNT
             # ── End probe controller integration ─────────────────────────────
 
@@ -982,6 +970,22 @@ class DSSEngine(EngineBase):
                 if r:
                     tx_hashes.append(r["transactionHash"].hex())
                     gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+            # 3. If we owe an LP-add from a recent successful arb, do it now
+            #    (placed AFTER AFF check so we don't spend PLS on LP if AFF is
+            #    insufficient and the cycle would exit early anyway)
+            lp_target = self.probe.lp_add_target()
+            if lp_target is not None:
+                try:
+                    lp_result = self._execute_lp_only_add(lp_target, dry_run=dry_run)
+                    if lp_result.success:
+                        self.probe.clear_lp_add_target()
+                    else:
+                        self.probe.record_lp_add_failure()
+                        log.warning("E2: lp_add_target failed: %s", lp_result.notes)
+                except Exception as exc:
+                    self.probe.record_lp_add_failure()
+                    log.error("E2: lp_add_target exception: %s", exc)
 
             # ── Step 2: Execute harvest ──
 
