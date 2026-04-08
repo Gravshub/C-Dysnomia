@@ -666,6 +666,10 @@ def main() -> None:
                         help="Force one E4 TokenFactory diagnostic cycle (bypasses ROI threshold)")
     parser.add_argument("--engine", type=str, default="",
                         help="Run a specific engine by name (e.g. --engine Arb, --engine PHR3AK)")
+    parser.add_argument("--lp-fees", action="store_true",
+                        help="Report LP fee accrual vs saved baseline (takes initial baseline on first run)")
+    parser.add_argument("--reset-baseline", action="store_true",
+                        help="With --lp-fees: overwrite baseline with current state")
     args = parser.parse_args()
 
     if args.rpc_status:
@@ -673,6 +677,56 @@ def main() -> None:
         print(f"  Joystick RPC Provider Health")
         print(f"{'━'*60}")
         rpc_health()
+        return
+
+    if args.lp_fees:
+        from .oracle import lp_fees
+        # Pairs that may not yet be in a stale registry snapshot.
+        # GIBS/PRVX: 0x89D38BfBFf92Cfc3C9ab8368E2348AaaD6c68C50 (Joey-deployed)
+        extra = [{
+            "pair_address": "0x89D38BfBFf92Cfc3C9ab8368E2348AaaD6c68C50",
+            "token_a": "0x66a08aa12da955eb63d7ac121a88b2b210a07b03",  # GIBS
+            "token_b": "0xF6f8Db0a94AC9A5F55a1f80FB7ff73AfDC3e7A0e",  # PRVX (placeholder; auto-reread from pair if mismatch)
+            "symbol_a": "GIBS",
+            "symbol_b": "PRVX",
+            "factory": "V2",
+        }]
+        # Normalize token_b from on-chain — don't trust the placeholder above
+        try:
+            from .core.chain import pair_contract, safe as _safe
+            pc = pair_contract(extra[0]["pair_address"])
+            t0 = _safe(pc, "token0"); t1 = _safe(pc, "token1")
+            if t0 and t1:
+                GIBS_LC = extra[0]["token_a"].lower()
+                if t0.lower() == GIBS_LC:
+                    extra[0]["token_a"], extra[0]["token_b"] = t0, t1
+                else:
+                    extra[0]["token_a"], extra[0]["token_b"] = t1, t0
+        except Exception as exc:
+            print(f"warn: failed to verify GIBS/PRVX token order: {exc}")
+
+        print("Scanning Joey's GIBS LP positions via multicall...")
+        positions = lp_fees.scan_joey_lp_positions(extra_pairs=extra)
+        if not positions:
+            print("No LP positions found (Joey holds 0 LP in all known GIBS pairs).")
+            return
+
+        baseline = lp_fees.load_baseline() if not args.reset_baseline else None
+
+        if baseline is None:
+            # First run (or reset) — snapshot current state as baseline
+            lp_fees.save_baseline(positions)
+            print(lp_fees.format_positions_table(positions))
+            if args.reset_baseline:
+                print("Baseline RESET to current state.")
+            else:
+                print("Initial baseline snapshot saved. Run --lp-fees again later to see delta.")
+            return
+
+        report = lp_fees.compute_fee_accrual(baseline, positions)
+        print(lp_fees.format_positions_table(positions))
+        print()
+        print(lp_fees.format_report(report, positions))
         return
 
     bot = DysnomiaBot(

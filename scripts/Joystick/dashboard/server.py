@@ -23,6 +23,7 @@ from .chain_reader import get_reader
 from .routes import wallet, engines, gas, overview, terminal, explorer, comms, canopy
 from .routes import tgsv8 as tgsv8_route
 from .routes import history_route
+from .routes import lp_fees as lp_fees_route
 
 # ─── Logging ─────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -47,7 +48,7 @@ app.add_middleware(
         "https://*.vercel.app",  # future Vercel deploy
     ],
     allow_credentials=True,
-    allow_methods=["GET"],     # read-only API
+    allow_methods=["GET", "POST"],  # GET read-only + POST /lp-fees/reset-baseline
     allow_headers=["*"],
 )
 
@@ -82,6 +83,7 @@ app.include_router(terminal.router, prefix="/api", tags=["terminal"])
 app.include_router(explorer.router, prefix="/api", tags=["explorer"])
 app.include_router(comms.router, prefix="/api", tags=["comms"])
 app.include_router(canopy.router, prefix="/api", tags=["canopy"])
+app.include_router(lp_fees_route.router, prefix="/api", tags=["lp-fees"])
 
 # ─── Static frontend ────────────────────────────────────────────────
 # Must be LAST — mount at "/" catches all unmatched routes

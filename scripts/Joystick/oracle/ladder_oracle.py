@@ -21,6 +21,12 @@ ARB_MIN_PROFIT_PLS = 300      # conservative — real bots may fire at less
 BREAK_EVEN_GIBS_PLS = 21.5    # E2 DSS profitability floor
 LADDER_CEILING_PLS = 43.0     # 2x break-even — above this, HARVEST wins
 
+# Realizable-arb model (replaces naïve `300 / TVL` threshold).
+# An external arb bot won't engage unless the max realizable profit across
+# our thinner pool exceeds their gas floor + minimum profit target.
+# ~400 PLS is an empirical floor on PulseChain for a 3-hop atomic arb.
+BOT_GAS_FLOOR_PLS = 400
+
 # Known pair addresses
 GIBS_FED_V2_PAIR = "0xA2a7a2153136b6ee075335b979fb6ac033412e4d"
 
@@ -98,7 +104,7 @@ def get_ladder_signal() -> LadderSignal:
         return LadderSignal(
             should_ladder=False, mode="NO_DATA", gibs_price_pls=0,
             gap_pct=0, arb_threshold_pct=0, displacement_gibs=0,
-            mint_count=0, lp_bps=3000, burn_bps=500, tvl_pls=0,
+            mint_count=0, lp_bps=3000, burn_bps=0, tvl_pls=0,
             notes="Failed to read GIBS/WPLS reserves",
         )
 
@@ -108,6 +114,7 @@ def get_ladder_signal() -> LadderSignal:
 
     # ── Read GIBS/FED reserves + FED/PLS price ──
     gap_pct = 0.0
+    gibs_r_fed = 0
     gfp = _get_pair_reserves_normalized(GIBS_FED_V2_PAIR, GIBS_LAU)
     fed_pls_price = _get_fed_pls_price()
 
@@ -118,7 +125,20 @@ def get_ladder_signal() -> LadderSignal:
     else:
         log.warning("LADDER oracle: FED pair read failed, using gap=0")
 
-    # ── Arb threshold ──
+    # ── Realizable-arb gate (replaces naïve arb_threshold_pct firing rule) ──
+    # An external arb bot can only extract profit bounded by the thinner pool's
+    # GIBS side. Without enough depth, a gap is structurally unclosable and
+    # LADDER displacements just leak gas.
+    thin_gibs_wei = min(gibs_r, gibs_r_fed) if gibs_r_fed > 0 else 0
+    thin_side_tvl_pls = (thin_gibs_wei / 1e18) * gibs_price_pls
+    # Empirical calibration: at thin_side_tvl ≈ 125K PLS and gap=5.75%, the
+    # max realizable 3-hop arb profit is ~44 PLS (measured on-chain). Profit
+    # scales ~linearly with thin-side TVL and ~quadratically with gap_pct for
+    # small gaps. Collapse to:  realizable ≈ thin_tvl × gap^2 × k
+    # where k ≈ 0.1 calibrates to (125000 × 0.0575^2 × 0.1) ≈ 41 PLS ✓
+    realizable_pls = thin_side_tvl_pls * ((gap_pct / 100) ** 2) * 0.1 if gap_pct > 0 else 0
+
+    # Legacy threshold kept for telemetry/display only — no longer gates firing
     arb_threshold_pct = (ARB_MIN_PROFIT_PLS / tvl_pls) * 100 if tvl_pls > 0 else 999.0
 
     # ── Decision tree ──
@@ -129,24 +149,42 @@ def get_ladder_signal() -> LadderSignal:
             should_ladder=False, mode="BELOW_BREAKEVEN",
             gibs_price_pls=gibs_pls_human, gap_pct=gap_pct,
             arb_threshold_pct=arb_threshold_pct, displacement_gibs=0,
-            mint_count=0, lp_bps=3000, burn_bps=500, tvl_pls=tvl_pls,
+            mint_count=0, lp_bps=3000, burn_bps=0, tvl_pls=tvl_pls,
             notes=f"GIBS {gibs_pls_human:.1f} PLS < break-even {BREAK_EVEN_GIBS_PLS}",
         )
 
-    if gibs_pls_human > LADDER_CEILING_PLS and gap_pct > arb_threshold_pct * 2:
+    # Depth gate: if no external arb bot could profit after gas, don't ladder.
+    # This replaces the old `gap > (300/TVL)` trigger which fired on any gap.
+    if realizable_pls < BOT_GAS_FLOOR_PLS:
         return LadderSignal(
             should_ladder=False, mode="HARVEST_ONLY",
             gibs_price_pls=gibs_pls_human, gap_pct=gap_pct,
             arb_threshold_pct=arb_threshold_pct, displacement_gibs=0,
-            mint_count=0, lp_bps=3000, burn_bps=500, tvl_pls=tvl_pls,
-            notes=f"GIBS {gibs_pls_human:.1f} > ceiling {LADDER_CEILING_PLS} and gap {gap_pct:.2f}% > 2x threshold — HARVEST richer",
+            mint_count=0, lp_bps=3000, burn_bps=0, tvl_pls=tvl_pls,
+            notes=(
+                f"Realizable arb {realizable_pls:.0f} PLS < bot gas floor "
+                f"{BOT_GAS_FLOOR_PLS} PLS (thin TVL {thin_side_tvl_pls:,.0f}, gap {gap_pct:.2f}%) "
+                f"— no ladder"
+            ),
         )
 
-    # ── LADDER_LITE: gap already hot, bots engaged, small nudge ──
-    if gap_pct > arb_threshold_pct:
+    if gibs_pls_human > LADDER_CEILING_PLS and realizable_pls < BOT_GAS_FLOOR_PLS * 2:
+        return LadderSignal(
+            should_ladder=False, mode="HARVEST_ONLY",
+            gibs_price_pls=gibs_pls_human, gap_pct=gap_pct,
+            arb_threshold_pct=arb_threshold_pct, displacement_gibs=0,
+            mint_count=0, lp_bps=3000, burn_bps=0, tvl_pls=tvl_pls,
+            notes=(
+                f"GIBS {gibs_pls_human:.1f} > ceiling {LADDER_CEILING_PLS} and "
+                f"realizable {realizable_pls:.0f} PLS < 2× gas floor — HARVEST richer"
+            ),
+        )
+
+    # ── LADDER_LITE: depth sufficient, gap already hot, small nudge ──
+    if realizable_pls >= BOT_GAS_FLOOR_PLS * 1.5:
         displacement_gibs = (ARB_MIN_PROFIT_PLS * 0.75) / gibs_pls_human
         lp_bps = 3000
-        burn_bps = 500
+        burn_bps = 0  # user policy: accumulate LP, do not burn
         mint_count = min(max(int(displacement_gibs / (1 - lp_bps / 10000) + 0.999), 1), HARVEST_MINT_COUNT)
         return LadderSignal(
             should_ladder=True, mode="LADDER_LITE",
@@ -155,13 +193,16 @@ def get_ladder_signal() -> LadderSignal:
             displacement_gibs=displacement_gibs,
             mint_count=mint_count, lp_bps=lp_bps, burn_bps=burn_bps,
             tvl_pls=tvl_pls,
-            notes=f"Gap {gap_pct:.2f}% > threshold {arb_threshold_pct:.2f}% — LITE nudge {displacement_gibs:.1f} GIBS",
+            notes=(
+                f"Realizable {realizable_pls:.0f} PLS ≥ 1.5× gas floor, "
+                f"gap {gap_pct:.2f}% — LITE nudge {displacement_gibs:.1f} GIBS"
+            ),
         )
 
-    # ── LADDER: gap flat/dead, need to wake bots up ──
+    # ── LADDER: depth sufficient but gap flat — wake bots up ──
     displacement_gibs = (ARB_MIN_PROFIT_PLS * 1.5) / gibs_pls_human
     lp_bps = 3000
-    burn_bps = 500
+    burn_bps = 0  # user policy: accumulate LP, do not burn
     mint_count = min(max(int(displacement_gibs / (1 - lp_bps / 10000) + 0.999), 1), HARVEST_MINT_COUNT)
     return LadderSignal(
         should_ladder=True, mode="LADDER",
@@ -170,5 +211,8 @@ def get_ladder_signal() -> LadderSignal:
         displacement_gibs=displacement_gibs,
         mint_count=mint_count, lp_bps=lp_bps, burn_bps=burn_bps,
         tvl_pls=tvl_pls,
-        notes=f"Gap {gap_pct:.2f}% <= threshold {arb_threshold_pct:.2f}% — FULL ladder {displacement_gibs:.1f} GIBS",
+        notes=(
+            f"Realizable {realizable_pls:.0f} PLS borderline "
+            f"(gap {gap_pct:.2f}%) — FULL ladder {displacement_gibs:.1f} GIBS"
+        ),
     )

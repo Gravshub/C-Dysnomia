@@ -289,6 +289,33 @@ class CanopyResponse(BaseModel):
     cached: bool = False
 
 
+# ─── LP Fees ────────────────────────────────────────────────────────
+
+class LPPositionsResponse(BaseModel):
+    positions: list[dict] = []
+    total_value_pls: float = 0.0
+    count: int = 0
+
+
+class LPFeeReportResponse(BaseModel):
+    has_baseline: bool = False
+    report: Optional[dict] = None
+    il: list[dict] = []
+    positions: list[dict] = []
+
+
+class LPFeeHistoryResponse(BaseModel):
+    snapshots: list[dict] = []
+    deltas: list[dict] = []
+    count: int = 0
+
+
+class LPFeeResetResponse(BaseModel):
+    ok: bool = False
+    pairs: int = 0
+    total_value_pls: float = 0.0
+
+
 class OverviewResponse(BaseModel):
     """Single endpoint that returns everything the dashboard needs.
     Reduces frontend polling to one call per interval."""
