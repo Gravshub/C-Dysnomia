@@ -328,12 +328,20 @@ def scan_joey_lp_positions(extra_pairs: Optional[list[dict]] = None) -> list[LPP
 
 # ─── Baseline persistence ────────────────────────────────────────────────────
 def _atomic_write_json(path: str, data: dict) -> None:
-    """Atomic write via tempfile + rename."""
+    """
+    Atomic write via tempfile + rename. tempfile.mkstemp creates files
+    with mode 600 regardless of umask — fine for one-user processes but
+    breaks cross-user reads (e.g. bot writes as joey, dashboard reads as
+    joystick). chmod to 0o664 before rename so the group can read/write.
+    The parent dir should have setgid + joystick group so the new file
+    inherits the right group.
+    """
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, default=str)
+        os.chmod(tmp, 0o664)
         os.replace(tmp, path)
     except Exception:
         if os.path.exists(tmp):

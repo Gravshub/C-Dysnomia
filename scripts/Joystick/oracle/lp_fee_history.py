@@ -47,12 +47,15 @@ MAX_SNAPSHOTS = 10_000
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
+    # mkstemp creates files with mode 600 — chmod to 664 so the dashboard
+    # (running as the joystick user) can read files the bot writes (as joey).
     d = os.path.dirname(path) or "."
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2, default=str)
+        os.chmod(tmp, 0o664)
         os.replace(tmp, path)
     except Exception:
         if os.path.exists(tmp):
