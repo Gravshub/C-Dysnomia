@@ -3,8 +3,18 @@
 #  File: /etc/systemd/system/joystick-api.service
 #
 #  Runs the FastAPI dashboard server on port 8369.
-#  Reads bot state from /opt/joystick/data/ (written by the bot process).
-#  This is the ONLY port you need to expose to the internet.
+#  Loaded as the `scripts.Joystick.dashboard.server` package from the repo
+#  root — server.py uses relative imports, so the working directory must
+#  be /opt/joystick/repo, NOT the dashboard subdirectory.
+#
+#  Pre-reqs (easy to forget, have bitten us before):
+#    - /opt/joystick/.env.pulse must be mode 640 (or 644) so the
+#      joystick group can read it. Mode 600 (owner-only) breaks
+#      ExecStart's `source` at line 1.
+#    - scripts/Joystick/dashboard/data and scripts/Joystick/data must be
+#      writable by the joystick group (setgid + group-write), so the
+#      dashboard can persist balance_history.json, lp_baselines.json,
+#      and lp_fee_history.json without violating ProtectSystem=strict.
 #
 #  Commands:
 #    sudo systemctl start joystick-api
@@ -21,18 +31,28 @@ Wants=network-online.target
 Type=simple
 User=joystick
 Group=joystick
-WorkingDirectory=/opt/joystick/repo/scripts/Joystick/dashboard
 
-ExecStart=/bin/bash -c 'set -a && source /opt/joystick/.env.pulse && set +a && exec /opt/joystick/venv/bin/uvicorn api.server:app --host 0.0.0.0 --port 8369'
+# Repo root as cwd so `scripts.Joystick.dashboard.server:app` resolves
+# as a proper Python package. server.py uses relative imports which
+# REQUIRE this — loading it as `server:app` or `api.server:app` (the
+# previous broken config) fails with ImportError / ModuleNotFoundError.
+WorkingDirectory=/opt/joystick/repo
+
+ExecStart=/bin/bash -c 'set -a && source /opt/joystick/.env.pulse && set +a && exec /opt/joystick/venv/bin/uvicorn scripts.Joystick.dashboard.server:app --host 0.0.0.0 --port 8369'
 
 Restart=on-failure
 RestartSec=10
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
+# ── Security hardening ───────────────────────────────────────────────
+# ProtectSystem=strict makes the entire filesystem read-only except for
+# PrivateTmp, /dev, /proc, /sys, and anything in ReadWritePaths.
 ProtectSystem=strict
-ReadWritePaths=/opt/joystick/data /opt/joystick/logs
-ReadOnlyPaths=/opt/joystick/repo
+# The dashboard persists history (balance_history, canopy_tokens) and
+# the LP fee accounting module persists baselines + history. Both dirs
+# must be in ReadWritePaths or writes fail with Errno 13.
+ReadWritePaths=/opt/joystick/repo/scripts/Joystick/dashboard/data /opt/joystick/repo/scripts/Joystick/data
 NoNewPrivileges=true
 PrivateTmp=true
 MemoryMax=256M
