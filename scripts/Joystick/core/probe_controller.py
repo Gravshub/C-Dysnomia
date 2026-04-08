@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+from . import config as _config
+
 
 class ProbeMode(str, Enum):
     PROBING = "PROBING"
@@ -212,3 +214,38 @@ def load_state(path: str = STATE_PATH) -> Optional[ProbeState]:
         except OSError:
             pass
         return None
+
+
+def _fresh_state() -> ProbeState:
+    return ProbeState(
+        mode=ProbeMode.PROBING,
+        probe_pct=_config.PROBE_BASELINE_PCT,
+        sweet_spot_pct=None,
+        consecutive_failures=0,
+        capped_entry_block=None,
+        paused_entry_block=None,
+        cap_loop_count=0,
+        lp_add_failure_count=0,
+        pending_sell=None,
+        last_arb_gibs=None,
+        last_transition_ts=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+class ProbeController:
+    """
+    Adaptive sell-sizing advisor for E2 CEREAL.
+
+    Holds the state machine that finds, locks, and re-discovers the minimum
+    sell size that triggers external arb bot responses on GIBS/WPLS.
+    """
+
+    def __init__(self, state_path: str = STATE_PATH):
+        self.state_path = state_path
+        loaded = load_state(state_path)
+        self.state: ProbeState = loaded if loaded is not None else _fresh_state()
+
+    def _persist(self) -> None:
+        """Write current state to disk. Called on every transition."""
+        self.state.last_transition_ts = datetime.now(timezone.utc).isoformat()
+        save_state(self.state, self.state_path)
