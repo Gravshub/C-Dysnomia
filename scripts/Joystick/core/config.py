@@ -253,6 +253,21 @@ CROSS_TREASURY_MIN_IMPROVEMENT = float(os.getenv("CROSS_TREASURY_MIN_IMPROVE", "
 SPINE_ALLOW_SELF_BURN  = os.getenv("SPINE_ALLOW_SELF_BURN", "false").lower() == "true"
 SPINE_DISCOVERY_TTL    = int(os.getenv("SPINE_DISCOVERY_TTL", "1800"))
 
+# ── Probe Controller (E2 adaptive sell sizing) ───────────────────────────────
+# See docs/superpowers/specs/2026-04-08-adaptive-probe-controller-design.md
+# All values are env-overridable. Defaults are calibrated from the 2000-block
+# measurement in the design spec; change at your own risk.
+PROBE_BASELINE_PCT              = float(os.getenv("PROBE_BASELINE_PCT", "0.3"))
+PROBE_STEP_PCT                  = float(os.getenv("PROBE_STEP_PCT", "1.0"))
+PROBE_MAX_IMPACT_PCT            = float(os.getenv("PROBE_MAX_IMPACT_PCT", "10.0"))
+PROBE_RESPONSE_WINDOW_BLOCKS    = int(os.getenv("PROBE_RESPONSE_WINDOW_BLOCKS", "5"))
+PROBE_FAILURE_THRESHOLD         = int(os.getenv("PROBE_FAILURE_THRESHOLD", "2"))
+PROBE_CAPPED_AUTO_RESET_BLOCKS  = int(os.getenv("PROBE_CAPPED_AUTO_RESET_BLOCKS", "3"))
+PROBE_CAP_LOOP_WARN_THRESHOLD   = int(os.getenv("PROBE_CAP_LOOP_WARN_THRESHOLD", "5"))
+PROBE_CAP_LOOP_PAUSE_THRESHOLD  = int(os.getenv("PROBE_CAP_LOOP_PAUSE_THRESHOLD", "10"))
+PROBE_CAP_LOOP_PAUSE_BLOCKS     = int(os.getenv("PROBE_CAP_LOOP_PAUSE_BLOCKS", "30"))
+PROBE_LP_ADD_RETRY_LIMIT        = int(os.getenv("PROBE_LP_ADD_RETRY_LIMIT", "3"))
+
 
 class AdaptiveDelay:
     """Exponential backoff when idle, tighten when profitable."""
@@ -294,16 +309,3 @@ class AdaptiveDelay:
     def seconds(self) -> float:
         return self.current
 
-
-# ─── Probe Controller (E2 adaptive sell sizing) ──────────────────────
-# See docs/superpowers/specs/2026-04-08-adaptive-probe-controller-design.md
-PROBE_BASELINE_PCT = 0.3              # starting impact %, matches current ~8 GIBS floor sell
-PROBE_STEP_PCT = 1.0                  # linear escalation per failed probe
-PROBE_MAX_IMPACT_PCT = 10.0           # safety cap before CAPPED state
-PROBE_RESPONSE_WINDOW_BLOCKS = 5      # blocks to wait for arb response after a sell
-PROBE_FAILURE_THRESHOLD = 2           # consecutive LOCKED failures → RE_PROBING
-PROBE_CAPPED_AUTO_RESET_BLOCKS = 3    # CAPPED → PROBING after this many blocks
-PROBE_CAP_LOOP_WARN_THRESHOLD = 5     # log WARN after this many cap_loop entries
-PROBE_CAP_LOOP_PAUSE_THRESHOLD = 10   # PAUSED after this many cap_loop entries
-PROBE_CAP_LOOP_PAUSE_BLOCKS = 30      # PAUSED → PROBING after this many blocks (~5 min)
-PROBE_LP_ADD_RETRY_LIMIT = 3          # max consecutive LP-add failures before clearing target
