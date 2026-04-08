@@ -82,7 +82,17 @@ def solve_for_impact(impact_pct: float, reserves: tuple[int, int]) -> int:
 
     Math:
         x_gibs = R_gibs × (sqrt(1 + p) − 1) / 0.997
-        Small-impact approximation, accurate to ~5% for p in [0.003, 0.10].
+
+        This is the exact algebraic inverse of the squared reserve-ratio
+        impact definition: p = 1 − (R_gibs / (R_gibs + x·0.997))²
+
+        The formula consistently under-delivers vs execution-price impact
+        by p/(1+p): at 5% target it produces ~4.76% execution impact, at
+        10% target ~9.09%. For our arb-attraction use case this is in the
+        safe direction — we sell slightly smaller than requested.
+
+        Only R_gibs enters the formula; R_wpls is validated for pool sanity
+        but does not affect the output.
     """
     if impact_pct < 0:
         raise ValueError(f"impact_pct must be non-negative, got {impact_pct}")
