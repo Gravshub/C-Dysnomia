@@ -7,11 +7,11 @@
       "name": "FDIC",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "14330675472146828378010103048209",
-      "pls_per_token": 1.2114159329e-08
+      "pls_per_token": 1.1085538269e-08
     },
     {
       "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
@@ -19,11 +19,11 @@
       "name": "Dysnomia Federal Monat",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
-      "pls_per_token": 3.82315712e-10
+      "pls_per_token": 3.82316265e-10
     },
     {
       "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
@@ -31,7 +31,7 @@
       "name": "PARADE",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -43,7 +43,7 @@
       "name": "Tellerz",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -55,11 +55,11 @@
       "name": "JOB",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
-      "pls_per_token": 1.1494868e-11
+      "pls_per_token": 1.1496677e-11
     },
     {
       "address": "0x1c27Fd7Ab4FAA8141119484E00D2455851639C2b",
@@ -67,11 +67,11 @@
       "name": "Social Security Administration",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
-      "pls_per_token": 9.645714e-12
+      "pls_per_token": 9.676445e-12
     },
     {
       "address": "0xDb4eBEAfb23eCA5275821aB0D87c7f6fa5514EA4",
@@ -79,11 +79,11 @@
       "name": "Teh Fdeeralist Scoiety",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "148845497327331202308530623753000",
-      "pls_per_token": 1.1906142e-11
+      "pls_per_token": 1.2174049e-11
     },
     {
       "address": "0xD33358F1B3130e2E9715C5992028D9de384544E8",
@@ -91,7 +91,7 @@
       "name": "US Presidential Campaign",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -103,11 +103,11 @@
       "name": "OPIUM",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
-      "pls_per_token": 1.5250607e-11
+      "pls_per_token": 1.5260592e-11
     },
     {
       "address": "0xf5f1E1B45524cf6919e7Ce3EdDB83569eC452aeA",
@@ -115,7 +115,7 @@
       "name": "BGDHTZ",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -127,7 +127,7 @@
       "name": "TEHATER",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -139,7 +139,7 @@
       "name": "ARMS",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
@@ -151,7 +151,7 @@
       "name": "Cheat On Teh Bar Exam",
       "parent_expected": "FED/BAR chain",
       "debenture": false,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "11288175104634213601485937494956206",
@@ -163,7 +163,7 @@
       "name": "OZZY",
       "parent_expected": "FED/BAR chain",
       "debenture": true,
-      "last_checked": "2026-04-05T05:03:41Z",
+      "last_checked": "2026-04-08T17:29:12Z",
       "claimable": null,
       "notes": "Needs on-chain Debenture() check",
       "selfBalance": "0",
