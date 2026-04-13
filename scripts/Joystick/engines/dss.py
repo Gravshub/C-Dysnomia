@@ -267,6 +267,132 @@ class DSSEngine(EngineBase):
             tx_hashes=[], notes="lp_only_add: send_tx returned None",
         )
 
+    def _execute_lp_add_via_tgsv8(self, gibs_wei: int, pair_addr: str,
+                                    dry_run: bool = False) -> EngineResult:
+        """Add LP to an arbitrary GIBS pair via TGSv8.addLiquidity.
+
+        Used after arb detection on non-WPLS pairs (e.g., GIBS/AFF).
+        Flow: primeGibs → Purchase → deposit to TGSv8 → addLiquidity.
+        """
+        from ..core.chain import tgsv8_contract, pair_contract, w3_read
+        tx_hashes = []
+        gas_spent = 0
+
+        # Determine the other token in the pair
+        pc = pair_contract(Web3.to_checksum_address(pair_addr))
+        t0 = safe(pc, "token0")
+        reserves = safe(pc, "getReserves")
+        if not t0 or not reserves:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes="lp_add_tgsv8: failed to read pair")
+
+        if t0.lower() == GIBS_LAU.lower():
+            other_token = safe(pc, "token1")
+            gibs_r, other_r = reserves[0], reserves[1]
+        else:
+            other_token = t0
+            gibs_r, other_r = reserves[1], reserves[0]
+
+        if not other_token or gibs_r == 0:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes="lp_add_tgsv8: invalid pair state")
+
+        # Calculate matching amount of other token
+        ratio = other_r / gibs_r  # unitless
+        other_needed = int(gibs_wei * ratio)
+
+        mint_count = (gibs_wei + 10**18 - 1) // 10**18
+        aff_for_mint = mint_count * 10**18  # 1 AFF per GIBS
+        total_aff = aff_for_mint + other_needed  # assumes other_token is AFF
+
+        log.info("E2: LP-add via TGSv8 on %s — %d GIBS + %d other, needs %d AFF total",
+                 pair_addr[-8:], mint_count, other_needed // 10**18, total_aff // 10**18)
+
+        # Ensure Joey has enough AFF (acquire if needed)
+        aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+        if aff_joey < total_aff:
+            hub = self._get_hub_submit()
+            shortfall = total_aff - aff_joey
+            acq_hashes, acq_gas = self._acquire_aff(shortfall, hub, dry_run)
+            tx_hashes.extend(acq_hashes)
+            gas_spent += acq_gas
+
+        # Prime + Purchase GIBS
+        hub = self._get_hub_submit()
+        r = send_tx(hub.functions.primeGibs(mint_count),
+                    f"primeGibs({mint_count}) [lp-add]",
+                    dry_run=dry_run, gas_tier="fast")
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+        PURCHASE_ABI = [{"inputs": [{"name": "_t", "type": "address"},
+                         {"name": "_a", "type": "uint256"}],
+                         "name": "Purchase", "outputs": [], "type": "function"}]
+        gibs_c = w3_submit.eth.contract(
+            address=Web3.to_checksum_address(GIBS_LAU), abi=PURCHASE_ABI)
+        aff_cs = Web3.to_checksum_address(AFFECTION)
+
+        # Approve AFF → GIBS_LAU for Purchase
+        MAX_UINT = 2**256 - 1
+        approve_if_needed(
+            w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+            Web3.to_checksum_address(GIBS_LAU), MAX_UINT,
+            "AFF→GIBS_LAU", dry_run=dry_run)
+
+        r = send_tx(gibs_c.functions.Purchase(aff_cs, gibs_wei),
+                    f"Purchase({gibs_wei//10**18} GIBS) [lp-add]",
+                    dry_run=dry_run, skip_simulate=True, fixed_gas=200_000)
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+        # Deposit to TGSv8 + addLiquidity
+        tgs = tgsv8_contract(w3=w3_submit)
+        tgs_addr = tgs.address
+        gibs_cs = Web3.to_checksum_address(GIBS_LAU)
+        other_cs = Web3.to_checksum_address(other_token)
+
+        approve_if_needed(
+            w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+            tgs_addr, MAX_UINT, "GIBS→TGSv8", dry_run=dry_run)
+        approve_if_needed(
+            w3_submit.eth.contract(address=other_cs, abi=erc20(other_token).abi),
+            tgs_addr, MAX_UINT, "other→TGSv8", dry_run=dry_run)
+
+        gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        other_bal = safe(erc20(other_token), "balanceOf", JOEY_WALLET) or 0
+        # Re-match ratio
+        g_deposit = min(gibs_bal, gibs_wei)
+        o_deposit = min(other_bal, int(g_deposit * ratio))
+
+        send_tx(tgs.functions.deposit(gibs_cs, g_deposit),
+                "deposit GIBS [lp-add]",
+                dry_run=dry_run, skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+        send_tx(tgs.functions.deposit(other_cs, o_deposit),
+                "deposit other [lp-add]",
+                dry_run=dry_run, skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+
+        r = send_tx(tgs.functions.addLiquidity(
+                        gibs_cs, other_cs, g_deposit, o_deposit,
+                        1500, JOEY_WALLET, 1),
+                    f"addLiquidity({g_deposit//10**18} GIBS + {o_deposit//10**18} other) [lp-add]",
+                    dry_run=dry_run, skip_simulate=True, fixed_gas=500_000)
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            log.info("E2: LP-add on %s mined! Block: %d", pair_addr[-8:], r["blockNumber"])
+            return EngineResult(
+                success=True, profit_wei=0, gas_wei=gas_spent,
+                tx_hashes=tx_hashes,
+                notes=f"LP-add via TGSv8: {g_deposit//10**18} GIBS on {pair_addr[-8:]}",
+            )
+
+        return EngineResult(
+            success=False, profit_wei=0, gas_wei=gas_spent,
+            tx_hashes=tx_hashes, notes="lp_add_tgsv8: addLiquidity failed",
+        )
+
     def _best_sell_route(self, gibs_sell_wei: int) -> tuple[list[str], int, int]:
         """
         Find the best sell route for GIBS among candidate paths.
@@ -590,14 +716,25 @@ class DSSEngine(EngineBase):
         """
         gas_price = w3_read.eth.gas_price
 
-        # Check AFF availability (Hub + Joey wallet)
+        # Check AFF availability (Hub + Joey wallet, or acquirable via DEX)
+        gas_cost_extra = 0  # extra gas if AFF acquisition needed
         aff_needed = signal.mint_count * 10**18
         aff_in_hub = self._aff_in_hub()
         aff_in_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
         if aff_in_hub + aff_in_joey < aff_needed:
-            raise SimulationFailed(
-                f"LADDER: AFF {(aff_in_hub + aff_in_joey) // 10**18} < needed {signal.mint_count}"
-            )
+            # AFF insufficient — check if we can acquire with Joey's PLS
+            shortfall = aff_needed - (aff_in_hub + aff_in_joey)
+            _, acquire_cost = self._cheapest_aff_route(shortfall)
+            joey_pls = w3_read.eth.get_balance(JOEY_WALLET)
+            if joey_pls < acquire_cost + 200_000 * 10**18:
+                raise SimulationFailed(
+                    f"LADDER: AFF {(aff_in_hub + aff_in_joey) // 10**18} < needed {signal.mint_count}, "
+                    f"PLS too low to acquire"
+                )
+            # AFF acquirable — include acquisition gas in cost estimate
+            gas_cost_extra = AFF_ACQUIRE_GAS_ESTIMATE * w3_read.eth.gas_price
+            log.info("E2 sim: AFF acquirable (%d AFF for ~%d PLS)",
+                     shortfall // 10**18, acquire_cost // 10**18)
 
         # Estimate sell output: sell_gibs = total * (1 - lp_bps/10000)
         total_gibs_wei = signal.mint_count * 10**18
@@ -618,7 +755,7 @@ class DSSEngine(EngineBase):
         if gibs_self_balance < total_gibs_wei:
             gas_cost_wei += PRIME_GAS_ESTIMATE * gas_price
 
-        return pls_out, gas_cost_wei
+        return pls_out, gas_cost_wei + gas_cost_extra
 
     def simulate(self) -> tuple[int, int]:
         """
@@ -770,27 +907,47 @@ class DSSEngine(EngineBase):
             if aff_in_hub < aff_needed:
                 AFF_BATCH_CYCLES = 30
                 aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-                deposit_amount = min(signal.mint_count * AFF_BATCH_CYCLES * 10**18, aff_joey)
+                desired_deposit = signal.mint_count * AFF_BATCH_CYCLES * 10**18
+                deposit_amount = min(desired_deposit, aff_joey)
                 if deposit_amount < aff_needed:
-                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
-                                        tx_hashes=tx_hashes,
-                                        notes=f"LADDER: insufficient AFF (Joey={aff_joey//10**18})")
+                    # Joey wallet AFF insufficient — acquire from DEX
+                    acquire_amount = desired_deposit - aff_joey
+                    log.info("E2 LADDER: AFF shortfall — acquiring %d AFF from DEX",
+                             acquire_amount // 10**18)
+                    acq_hashes, acq_gas = self._acquire_aff(acquire_amount, hub, dry_run)
+                    tx_hashes.extend(acq_hashes)
+                    gas_spent += acq_gas
 
-                MAX_UINT256 = 2**256 - 1
-                aff_c = w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi)
-                r = approve_if_needed(aff_c, hub_addr, MAX_UINT256, "AFF→Hub", dry_run=dry_run)
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                    # _acquire_aff deposits directly into Hub (both routes).
+                    # Re-check Hub balance — if sufficient, skip manual deposit.
+                    aff_in_hub = self._aff_in_hub()
+                    if aff_in_hub >= aff_needed:
+                        log.info("E2 LADDER: AFF acquired — Hub now has %d, skipping deposit",
+                                 aff_in_hub // 10**18)
+                    else:
+                        aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+                        if aff_joey + aff_in_hub < aff_needed:
+                            return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                                tx_hashes=tx_hashes,
+                                                notes=f"LADDER: insufficient AFF after acquire (hub={aff_in_hub//10**18} joey={aff_joey//10**18})")
+                        deposit_amount = aff_joey
 
-                r = send_tx(
-                    hub.functions.deposit(aff_cs, deposit_amount),
-                    f"Deposit {deposit_amount//10**18} AFF → Hub",
-                    dry_run=dry_run, skip_simulate=True, fixed_gas=200_000,
-                )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                if aff_in_hub < aff_needed and deposit_amount > 0:
+                    MAX_UINT256 = 2**256 - 1
+                    aff_c = w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi)
+                    r = approve_if_needed(aff_c, hub_addr, MAX_UINT256, "AFF→Hub", dry_run=dry_run)
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                    r = send_tx(
+                        hub.functions.deposit(aff_cs, deposit_amount),
+                        f"Deposit {deposit_amount//10**18} AFF → Hub",
+                        dry_run=dry_run, skip_simulate=True, fixed_gas=200_000,
+                    )
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
             # 3. Prime GIBS if Hub self-balance is low
             gibs_needed = signal.mint_count * 10**18
@@ -942,42 +1099,69 @@ class DSSEngine(EngineBase):
                 deposit_amount = min(desired_deposit, aff_joey)
 
                 if deposit_amount < aff_needed:
-                    return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
-                                        tx_hashes=tx_hashes,
-                                        notes=f"Insufficient AFF: Joey has {aff_joey//10**18}, need {aff_needed//10**18}")
+                    # Joey wallet AFF insufficient — acquire from DEX
+                    acquire_amount = desired_deposit - aff_joey
+                    log.info("E2: AFF shortfall — acquiring %d AFF from DEX",
+                             acquire_amount // 10**18)
+                    acq_hashes, acq_gas = self._acquire_aff(acquire_amount, hub, dry_run)
+                    tx_hashes.extend(acq_hashes)
+                    gas_spent += acq_gas
 
-                log.info("E2: Hub needs AFF (has %d, needs %d) — batch depositing %d (~%d cycles)",
-                         aff_in_hub // 10**18, mint_count,
-                         deposit_amount // 10**18, deposit_amount // aff_needed)
+                    # _acquire_aff deposits directly into Hub (both routes).
+                    # Re-check Hub balance — if sufficient, skip manual deposit.
+                    aff_in_hub = self._aff_in_hub()
+                    if aff_in_hub >= aff_needed:
+                        log.info("E2: AFF acquired — Hub now has %d (need %d), skipping deposit",
+                                 aff_in_hub // 10**18, aff_needed // 10**18)
+                    else:
+                        # Check if any AFF landed in Joey wallet (partial DEX path)
+                        aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+                        if aff_joey + aff_in_hub < aff_needed:
+                            return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                                tx_hashes=tx_hashes,
+                                                notes=f"Insufficient AFF after acquire: hub={aff_in_hub//10**18} joey={aff_joey//10**18} need={aff_needed//10**18}")
+                        deposit_amount = aff_joey  # deposit whatever Joey has
 
-                MAX_UINT256 = 2**256 - 1
-                aff_c_submit = w3_submit.eth.contract(
-                    address=aff_cs, abi=erc20(AFFECTION).abi,
-                )
-                r = approve_if_needed(aff_c_submit, hub_addr, MAX_UINT256,
-                                      "AFF→Hub", dry_run=dry_run)
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                if aff_in_hub < aff_needed and deposit_amount > 0:
+                    log.info("E2: Hub needs AFF (has %d, needs %d) — depositing %d",
+                             aff_in_hub // 10**18, aff_needed // 10**18,
+                             deposit_amount // 10**18)
 
-                r = send_tx(
-                    hub.functions.deposit(aff_cs, deposit_amount),
-                    f"Deposit {deposit_amount//10**18} AFF → Hub",
-                    dry_run=dry_run,
-                    skip_simulate=True,
-                    fixed_gas=200_000,
-                )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+                    MAX_UINT256 = 2**256 - 1
+                    aff_c_submit = w3_submit.eth.contract(
+                        address=aff_cs, abi=erc20(AFFECTION).abi,
+                    )
+                    r = approve_if_needed(aff_c_submit, hub_addr, MAX_UINT256,
+                                          "AFF→Hub", dry_run=dry_run)
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                    r = send_tx(
+                        hub.functions.deposit(aff_cs, deposit_amount),
+                        f"Deposit {deposit_amount//10**18} AFF → Hub",
+                        dry_run=dry_run,
+                        skip_simulate=True,
+                        fixed_gas=200_000,
+                    )
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
             # 3. If we owe an LP-add from a recent successful arb, do it now
             #    (placed AFTER AFF check so we don't spend PLS on LP if AFF is
             #    insufficient and the cycle would exit early anyway)
             lp_target = self.probe.lp_add_target()
             if lp_target is not None:
+                lp_pair = self.probe.lp_add_pair()
                 try:
-                    lp_result = self._execute_lp_only_add(lp_target, dry_run=dry_run)
+                    if lp_pair:
+                        # Arb was on a non-default pair (e.g., GIBS/AFF) → LP via TGSv8
+                        lp_result = self._execute_lp_add_via_tgsv8(
+                            lp_target, lp_pair, dry_run=dry_run)
+                    else:
+                        # Default: LP via Hub on GIBS/WPLS
+                        lp_result = self._execute_lp_only_add(lp_target, dry_run=dry_run)
                     if lp_result.success:
                         self.probe.clear_lp_add_target()
                     else:

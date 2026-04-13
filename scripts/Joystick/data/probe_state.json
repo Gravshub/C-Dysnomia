@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-13T19:24:27.314296+00:00",
+  "state": {
+    "mode": "CAPPED",
+    "probe_pct": 0.3,
+    "sweet_spot_pct": null,
+    "consecutive_failures": 0,
+    "capped_entry_block": 26275341,
+    "paused_entry_block": null,
+    "cap_loop_count": 4,
+    "lp_add_failure_count": 0,
+    "pending_sell": {
+      "sell_gibs_wei": "5000000000000000000",
+      "sell_block": 26275551,
+      "sell_tx_hash": "6a70730c6b92c46a0d750a032812dc3a3a8282e74cf1462b876466528cdd17a4",
+      "impact_pct_at_sell": 0.3,
+      "deadline_block": 26275556,
+      "pair_address": "0x1E2fAeF811b8eA8dC5E0dEEe2c3b0E355A7d7EA0",
+      "gibs_is_token0": false
+    },
+    "last_arb_gibs": null,
+    "last_arb_pair": "",
+    "last_transition_ts": "2026-04-13T19:24:27.314281+00:00",
+    "sells_total": 74,
+    "arbs_detected_total": 6,
+    "cap_entries_total": 4,
+    "pause_entries_total": 0
+  }
+}

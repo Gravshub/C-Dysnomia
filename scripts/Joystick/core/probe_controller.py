@@ -56,6 +56,8 @@ class PendingSell:
     sell_tx_hash: str
     impact_pct_at_sell: float
     deadline_block: int
+    pair_address: str = ""       # pair the sell targeted (empty = GIBS/WPLS default)
+    gibs_is_token0: bool = True  # token ordering on the target pair
 
 
 @dataclass
@@ -70,7 +72,8 @@ class ProbeState:
     lp_add_failure_count: int
     pending_sell: Optional[PendingSell]
     last_arb_gibs: Optional[int]
-    last_transition_ts: str
+    last_arb_pair: str = ""      # pair where arb was detected (for LP-add targeting)
+    last_transition_ts: str = ""
     # Stats counters (NEW in Task 14, added with default=0 so existing call sites
     # that don't pass them still work):
     sells_total: int = 0
@@ -172,6 +175,8 @@ def _state_from_dict(d: dict) -> ProbeState:
             sell_tx_hash=pending_d["sell_tx_hash"],
             impact_pct_at_sell=float(pending_d["impact_pct_at_sell"]),
             deadline_block=int(pending_d["deadline_block"]),
+            pair_address=pending_d.get("pair_address", ""),
+            gibs_is_token0=pending_d.get("gibs_is_token0", True),
         )
     last_arb = d.get("last_arb_gibs")
     if last_arb is not None:
@@ -368,12 +373,17 @@ class ProbeController:
         sell_gibs_wei: int,
         block_number: int,
         tx_hash: str,
+        pair_address: str = "",
+        gibs_is_token0: bool = True,
     ) -> None:
         """
         Record that E2 has just submitted a sell. Starts the response window.
 
         Block number MUST come from the TX receipt, not w3.eth.block_number,
         to anchor the deadline correctly.
+
+        pair_address: if set, watch this pair for arb (otherwise GIBS/WPLS).
+        gibs_is_token0: token ordering on the target pair.
 
         Raises RuntimeError if a pending sell is already in progress (caller
         bug — should have called check_arb_response first).
@@ -393,13 +403,19 @@ class ProbeController:
             sell_tx_hash=tx_hash,
             impact_pct_at_sell=impact,
             deadline_block=block_number + _config.PROBE_RESPONSE_WINDOW_BLOCKS,
+            pair_address=pair_address,
+            gibs_is_token0=gibs_is_token0,
         )
         self.state.sells_total += 1
         self._persist()
 
     def check_arb_response(self) -> ArbResponse:
         """
-        Polls Swap events on GIBS/WPLS in the pending sell's window.
+        Polls Swap events on the pending sell's target pair.
+
+        Detects arb bots buying GIBS (the opposite direction to our sell).
+        Pair-aware: uses stored pair_address + gibs_is_token0 to determine
+        which swap direction constitutes an arb buy.
 
         Returns:
           - PENDING: still within window, no matching swap seen
@@ -417,16 +433,24 @@ class ProbeController:
         to_block = min(current, ps.deadline_block)
 
         if to_block >= from_block:
-            logs = self._get_swap_logs(from_block, to_block)
+            logs = self._get_swap_logs(from_block, to_block,
+                                        pair_address=ps.pair_address)
             for log in logs:
                 args = log.get("args", {})
                 sender = (args.get("sender") or "").lower()
                 if sender in self._SELF_ADDRESSES:
                     continue
-                # GIBS-buy: WPLS in, GIBS out (token0=GIBS, token1=WPLS on V2 pair)
-                gibs_out = int(args.get("amount0Out", 0))
-                wpls_in = int(args.get("amount1In", 0))
-                if gibs_out > 0 and wpls_in > 0:
+                # Arb = someone BUYING GIBS (opposite of our sell).
+                # If gibs_is_token0: arb buy → amount0Out > 0 (GIBS out)
+                # If not token0:     arb buy → amount1Out > 0 (GIBS out)
+                gibs_is_t0 = getattr(ps, "gibs_is_token0", True)
+                if gibs_is_t0:
+                    gibs_out = int(args.get("amount0Out", 0))
+                    other_in = int(args.get("amount1In", 0))
+                else:
+                    gibs_out = int(args.get("amount1Out", 0))
+                    other_in = int(args.get("amount0In", 0))
+                if gibs_out > 0 and other_in > 0:
                     self._on_arb_detected(gibs_out, log["blockNumber"], log["transactionHash"], sender)
                     return ArbResponse(
                         kind=ArbResponseKind.ARB_DETECTED,
@@ -447,13 +471,12 @@ class ProbeController:
         from .chain import w3_read
         return w3_read.eth.block_number
 
-    def _get_swap_logs(self, from_block: int, to_block: int) -> list:
+    def _get_swap_logs(self, from_block: int, to_block: int,
+                        pair_address: str = "") -> list:
         """
-        Fetch Swap events on GIBS/WPLS for the given block range.
+        Fetch Swap events on a V2 pair for the given block range.
 
-        Uses eth_getLogs directly with the raw Swap topic hash rather than the
-        ABI-based event decoder. The pair_contract ABI only has view functions
-        (no event definitions), so web3.py's event filter cannot decode Swap logs.
+        pair_address: if empty, defaults to GIBS/WPLS V2.
 
         Returns a list of dicts matching the shape expected by check_arb_response:
             {blockNumber, transactionHash, args: {sender, amount0In, amount1In,
@@ -464,11 +487,13 @@ class ProbeController:
         from eth_abi import decode
         try:
             from .chain import w3_read
-            from .config import GIBS_WPLS_V2_PAIR
+            if not pair_address:
+                from .config import GIBS_WPLS_V2_PAIR
+                pair_address = GIBS_WPLS_V2_PAIR
             logs = w3_read.eth.get_logs({
                 "fromBlock": from_block,
                 "toBlock": to_block,
-                "address": GIBS_WPLS_V2_PAIR,
+                "address": pair_address,
                 "topics": [self._SWAP_TOPIC],
             })
             results = []
@@ -514,6 +539,9 @@ class ProbeController:
         )
         self.state.arbs_detected_total += 1
         self.state.last_arb_gibs = gibs_size
+        # Remember which pair the arb was on so LP-add targets the right pool
+        if self.state.pending_sell:
+            self.state.last_arb_pair = self.state.pending_sell.pair_address
         if self.state.mode in (ProbeMode.PROBING, ProbeMode.RE_PROBING):
             # Lock at the current probe_pct
             self.state.sweet_spot_pct = self.state.probe_pct
@@ -608,14 +636,19 @@ class ProbeController:
 
         After a successful arb, last_arb_gibs is set to the arb's buy size.
         E2 calls lp_add_target() after the response check; if non-None,
-        E2 executes a Hub LP-only TX sized to match. On success, E2 calls
+        E2 executes an LP-only TX sized to match. On success, E2 calls
         clear_lp_add_target(). On failure, record_lp_add_failure().
         """
         return self.state.last_arb_gibs
 
+    def lp_add_pair(self) -> str:
+        """Return the pair address the LP-add should target (empty = GIBS/WPLS)."""
+        return self.state.last_arb_pair or ""
+
     def clear_lp_add_target(self) -> None:
         """Mark the LP-add as successfully completed."""
         self.state.last_arb_gibs = None
+        self.state.last_arb_pair = ""
         self.state.lp_add_failure_count = 0
         self._persist()
 
