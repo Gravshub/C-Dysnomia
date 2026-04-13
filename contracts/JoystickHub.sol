@@ -484,6 +484,142 @@ contract HarvestModule is HubStorage {
         emit HarvestExecuted(gibsMinted, lpMinted, plsReceived, lpBurned);
     }
 
+    /// @notice Universal harvest: prime → purchase → LP → sell for ANY LAU + ANY pair.
+    ///
+    ///   Works with GIBS today, next LAU tomorrow — same function, different addresses.
+    ///   All Dysnomia LAU tokens share the same interface: mintToCap() + Purchase().
+    ///
+    ///   @param lau          LAU token to mint (has mintToCap + Purchase)
+    ///   @param paymentToken Token to pay for Purchase (usually AFFECTION, 1:1)
+    ///   @param lpPartner    LP partner token (AFF, WPLS, FED, etc.)
+    ///   @param primeCount   How many mintToCap() calls (0 = skip prime, use existing balance)
+    ///   @param purchaseAmt  How many LAU tokens to Purchase (in whole tokens, scaled to 1e18)
+    ///   @param lpBps        Basis points of minted tokens to LP (7000 = 70%)
+    ///   @param burnBps      Basis points of LP tokens to burn (0 = keep all)
+    ///   @param lpDex        0 = V1, 1 = V2
+    ///   @param minSellOut   Minimum output from sell leg (slippage protection)
+    ///   @param sellPath     DEX swap path for sell leg (sellPath[0] must be lau)
+    ///   @param sellDex      0 = V1, 1 = V2 for sell
+    function mintLPAndSellPair(
+        address lau,
+        address paymentToken,
+        address lpPartner,
+        uint256 primeCount,
+        uint256 purchaseAmt,
+        uint256 lpBps,
+        uint256 burnBps,
+        uint8   lpDex,
+        uint256 minSellOut,
+        address[] calldata sellPath,
+        uint8   sellDex
+    )
+        external payable onlyAuth whenNotPaused nonReentrant
+        returns (uint256 tokensMinted, uint256 lpMinted, uint256 sellReceived)
+    {
+        require(lau != address(0), "harv:lau zero");
+        require(paymentToken != address(0), "harv:payment zero");
+        require(lpPartner != address(0), "harv:lpPartner zero");
+
+        // Step 0 — Wrap PLS if sent
+        if (msg.value > 0) {
+            IWPLS(_wpls).deposit{value: msg.value}();
+        }
+
+        // Step 1 — Prime: call mintToCap() on the LAU to build self-balance
+        if (primeCount > 0) {
+            for (uint256 i; i < primeCount; ++i) {
+                IDysnomiaToken(lau).mintToCap();
+            }
+        }
+
+        // Step 2 — Purchase: pay paymentToken, receive LAU tokens
+        if (purchaseAmt > 0) {
+            uint256 payNeeded = purchaseAmt * 1e18;
+            require(IERC20(paymentToken).balanceOf(address(this)) >= payNeeded,
+                    "harv:insufficient payment token");
+
+            _approve(paymentToken, lau, payNeeded);
+            uint256 before = IERC20(lau).balanceOf(address(this));
+            IDysnomiaToken(lau).Purchase(paymentToken, payNeeded);
+            tokensMinted = IERC20(lau).balanceOf(address(this)) - before;
+            require(tokensMinted > 0, "harv:purchase got zero");
+        } else {
+            // Use existing LAU balance in Hub
+            tokensMinted = IERC20(lau).balanceOf(address(this));
+            require(tokensMinted > 0, "harv:no tokens in hub");
+        }
+
+        uint256 tokensForLP;
+        uint256 lpBurned;
+
+        // Step 3 — LP: pair LAU with lpPartner
+        if (lpBps > 0) {
+            tokensForLP = tokensMinted * lpBps / 10000;
+
+            IPulseXFactory factory = IPulseXFactory(lpDex == 0 ? _factoryV1 : _factoryV2);
+            address pair = factory.getPair(lau, lpPartner);
+            require(pair != address(0), "harv:no LP pair");
+
+            (uint112 r0, uint112 r1,) = IUniswapV2Pair(pair).getReserves();
+            address token0 = IUniswapV2Pair(pair).token0();
+
+            uint256 reserveA;
+            uint256 reserveB;
+            if (token0 == lau) {
+                reserveA = uint256(r0);
+                reserveB = uint256(r1);
+            } else {
+                reserveA = uint256(r1);
+                reserveB = uint256(r0);
+            }
+
+            uint256 partnerForLP = (tokensForLP * reserveB) / reserveA;
+            require(IERC20(lpPartner).balanceOf(address(this)) >= partnerForLP,
+                    "harv:insufficient partner for LP");
+
+            IPulseXRouter router = IPulseXRouter(lpDex == 0 ? _routerV1 : _routerV2);
+            _approve(lau, address(router), tokensForLP);
+            _approve(lpPartner, address(router), partnerForLP);
+
+            (,, lpMinted) = router.addLiquidity(
+                lau, lpPartner,
+                tokensForLP, partnerForLP,
+                tokensForLP * 9500 / 10000,
+                partnerForLP * 9500 / 10000,
+                address(this),
+                block.timestamp
+            );
+
+            if (burnBps > 0 && lpMinted > 0) {
+                lpBurned = lpMinted * burnBps / 10000;
+                if (lpBurned > 0) {
+                    _safeTransfer(pair, 0x000000000000000000000000000000000000dEaD, lpBurned);
+                }
+            }
+        }
+
+        // Step 4 — Sell remainder via flexible path
+        uint256 tokensToSell = tokensMinted - tokensForLP;
+        if (tokensToSell > 0 && sellPath.length >= 2) {
+            require(sellPath[0] == lau, "harv:sellPath[0] != lau");
+
+            IPulseXRouter sellRouter = IPulseXRouter(sellDex == 0 ? _routerV1 : _routerV2);
+            _approve(lau, address(sellRouter), tokensToSell);
+
+            uint256[] memory amounts = sellRouter.swapExactTokensForTokens(
+                tokensToSell,
+                minSellOut,
+                sellPath,
+                address(this),
+                block.timestamp
+            );
+            sellReceived = amounts[amounts.length - 1];
+        }
+
+        _opNonce++;
+        emit HarvestExecuted(tokensMinted, lpMinted, sellReceived, lpBurned);
+    }
+
     /// @notice Batch-reseed drained LP pairs with GIBS from hub working balance.
     function batchReseed(
         address[] calldata pairs,

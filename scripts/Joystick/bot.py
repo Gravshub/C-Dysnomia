@@ -642,6 +642,1107 @@ def _setup_logging() -> None:
     root.addHandler(file_handler)
 
 
+def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
+    """
+    Balanced GIBS uptrend: mint cheap → small sell (displacement) → arb correction
+    → LP ratchet (floor lock) → periodic buy (directional nudge).
+
+    Cost: ~1,100 PLS/cycle (vs 10K for pure pump). Arb bots do the heavy lifting.
+    """
+    import time
+    from web3 import Web3
+    from .core.config import (
+        GIBS_LAU, AFFECTION, WPLS, JOYSTICK_HUB, JOEY_WALLET,
+        PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, GIBS_WPLS_V2_PAIR,
+    )
+    from .core.chain import (
+        safe, erc20, joystick_hub, tgsv8_contract, router_contract,
+        w3_submit, w3_read, pair_contract,
+    )
+    from .core.executor import send_tx, approve_if_needed
+    from .core.probe_controller import ProbeController, ArbResponseKind
+    from .oracle.price import get_amounts_out_v2
+
+    cs = Web3.to_checksum_address
+    GIBS_AFF_V2 = "0x1E2fAeF811b8eA8dC5E0dEEe2c3b0E355A7d7EA0"
+    PLS_FLOOR = 200_000
+    MAX_UINT = 2**256 - 1
+
+    MINT_COUNT = 17          # GIBS per cycle (same as E2 harvest)
+    SELL_COUNT = 5           # small sell for displacement
+    LP_COUNT = 12            # rest goes to LP
+    BUY_EVERY_N = 5          # buy GIBS every Nth cycle
+    BUY_PLS = 3_000          # PLS to spend on buy cycles
+
+    probe = ProbeController()
+    hub = joystick_hub(w3=w3_submit)
+    tgs = tgsv8_contract(w3=w3_submit)
+    gibs_cs = cs(GIBS_LAU)
+    aff_cs = cs(AFFECTION)
+    wpls_cs = cs(WPLS)
+    tgs_addr = tgs.address
+
+    pair_abi = [
+        {"constant": True, "inputs": [], "name": "getReserves",
+         "outputs": [{"name": "", "type": "uint112"}, {"name": "", "type": "uint112"},
+                     {"name": "", "type": "uint32"}], "type": "function"},
+        {"constant": True, "inputs": [], "name": "token0",
+         "outputs": [{"name": "", "type": "address"}], "type": "function"},
+    ]
+
+    def _gibs_prices():
+        """Return (wpls_price, aff_price) in PLS."""
+        # WPLS pair
+        pc1 = w3_read.eth.contract(address=cs(GIBS_WPLS_V2_PAIR), abi=pair_abi)
+        r1 = pc1.functions.getReserves().call()
+        t0 = pc1.functions.token0().call()
+        if t0.lower() == GIBS_LAU.lower():
+            p_wpls = r1[1] / r1[0]
+        else:
+            p_wpls = r1[0] / r1[1]
+        # AFF pair
+        pc2 = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
+        r2 = pc2.functions.getReserves().call()
+        t0b = pc2.functions.token0().call()
+        if t0b.lower() == AFFECTION.lower():
+            aff_ratio = r2[0] / r2[1]  # AFF per GIBS
+        else:
+            aff_ratio = r2[1] / r2[0]
+        aff_pls = get_amounts_out_v2(10**18, [aff_cs, wpls_cs])
+        aff_price_pls = aff_pls[-1] / 1e18 if aff_pls else 38.0
+        p_aff = aff_ratio * aff_price_pls
+        return p_wpls, p_aff
+
+    def _aff_ratio():
+        """AFF per GIBS in GIBS/AFF pool (unitless)."""
+        pc = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
+        r = pc.functions.getReserves().call()
+        t0 = pc.functions.token0().call()
+        if t0.lower() == AFFECTION.lower():
+            return r[0] / r[1]
+        return r[1] / r[0]
+
+    # One-time approvals
+    PURCHASE_ABI = [{"inputs": [{"name": "_t", "type": "address"},
+                     {"name": "_a", "type": "uint256"}],
+                     "name": "Purchase", "outputs": [], "type": "function"}]
+    gibs_contract = w3_submit.eth.contract(address=gibs_cs, abi=PURCHASE_ABI)
+
+    approve_if_needed(
+        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+        gibs_cs, MAX_UINT, "AFF→GIBS_LAU")
+    approve_if_needed(
+        w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+        tgs_addr, MAX_UINT, "GIBS→TGSv8")
+    approve_if_needed(
+        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+        tgs_addr, MAX_UINT, "AFF→TGSv8")
+
+    TRANSFER_ABI = [{"inputs": [{"name": "to", "type": "address"},
+                     {"name": "amount", "type": "uint256"}],
+                     "name": "transfer", "outputs": [{"name": "", "type": "bool"}],
+                     "type": "function"}]
+    SWAP_ABI = [{"inputs": [{"name": "amount0Out", "type": "uint256"},
+                 {"name": "amount1Out", "type": "uint256"},
+                 {"name": "to", "type": "address"},
+                 {"name": "data", "type": "bytes"}],
+                 "name": "swap", "outputs": [], "type": "function"}]
+
+    start_wpls, start_aff = _gibs_prices()
+    arb_count = 0
+    sells = 0
+    buys = 0
+
+    for batch in range(1, max_batches + 1):
+        p_wpls, p_aff = _gibs_prices()
+        joey_pls = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+        is_buy_cycle = (batch % BUY_EVERY_N == 0)
+        mode = "BUY+LP" if is_buy_cycle else "SELL+LP"
+
+        print(f"\n{'━'*60}")
+        print(f"  Cycle {batch}/{max_batches}  [{mode}]")
+        print(f"  GIBS: WPLS={p_wpls:.2f}  AFF={p_aff:.2f}  "
+              f"Δ: WPLS {p_wpls-start_wpls:+.2f}  AFF {p_aff-start_aff:+.2f}")
+        print(f"  PLS: {joey_pls:,.0f}  Arbs: {arb_count}  Sells: {sells}  Buys: {buys}")
+        print(f"{'━'*60}")
+
+        if joey_pls < PLS_FLOOR:
+            print(f"  PLS floor hit"); break
+        if dry_run:
+            print(f"  [dry-run]"); continue
+
+        # ── Check arb from previous sell ──
+        arb_resp = probe.check_arb_response()
+        if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
+            arb_count += 1
+            print(f"  ★ ARB! {arb_resp.gibs_size_wei/1e18:.1f} GIBS by {arb_resp.sender[:10]}")
+            # LP ratchet at corrected price
+            lp_target = probe.lp_add_target()
+            if lp_target and lp_target > 10**18:
+                from .engines.dss import DSSEngine
+                e2 = DSSEngine(probe_controller=probe)
+                lp_result = e2._execute_lp_add_via_tgsv8(lp_target, GIBS_AFF_V2, dry_run=dry_run)
+                if lp_result.success:
+                    probe.clear_lp_add_target()
+                    print(f"  ↑ Floor locked at new price!")
+                else:
+                    probe.record_lp_add_failure()
+                    print(f"  ↑ Ratchet failed: {lp_result.notes}")
+            else:
+                probe.clear_lp_add_target()
+        elif arb_resp.kind is ArbResponseKind.PENDING:
+            print(f"  ⏳ Arb pending — waiting 12s")
+            time.sleep(12)
+            arb_resp = probe.check_arb_response()
+            if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
+                arb_count += 1
+                print(f"  ★ ARB (delayed)! {arb_resp.gibs_size_wei/1e18:.1f} GIBS")
+                probe.clear_lp_add_target()
+
+        if is_buy_cycle:
+            # ── BUY cycle: small buy from cheapest pair (upward nudge) ──
+            buys += 1
+            cheapest = "WPLS" if p_wpls <= p_aff else "AFF"
+            print(f"  ▲ BUY {BUY_PLS:,} PLS of GIBS from {cheapest} pair")
+
+            WPLS_DEP_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                             "outputs": [], "payable": True, "type": "function"}]
+            wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_DEP_ABI)
+            send_tx(wpls_c.functions.deposit(),
+                    f"wrap {BUY_PLS} PLS", value=BUY_PLS * 10**18,
+                    skip_simulate=True, fixed_gas=50_000)
+
+            v2_router_addr = cs(PULSEX_V2_ROUTER)
+            approve_if_needed(
+                w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+                v2_router_addr, MAX_UINT, "WPLS→V2Router")
+
+            ROUTER_SWAP = [{"inputs": [
+                {"name": "amountIn", "type": "uint256"},
+                {"name": "amountOutMin", "type": "uint256"},
+                {"name": "path", "type": "address[]"},
+                {"name": "to", "type": "address"},
+                {"name": "deadline", "type": "uint256"}],
+                "name": "swapExactTokensForTokens",
+                "outputs": [{"name": "", "type": "uint256[]"}],
+                "type": "function"}]
+            v2_router = w3_submit.eth.contract(address=v2_router_addr, abi=ROUTER_SWAP)
+
+            path = [wpls_cs, aff_cs, gibs_cs]
+            r = send_tx(v2_router.functions.swapExactTokensForTokens(
+                            BUY_PLS * 10**18, 0, path,
+                            JOEY_WALLET, int(time.time()) + 300),
+                        f"buy GIBS ({BUY_PLS} PLS)",
+                        skip_simulate=True, fixed_gas=350_000, gas_tier="fast")
+            if r:
+                print(f"     TX: 0x{r['transactionHash'].hex()}")
+
+            # LP the bought GIBS + matching AFF
+            gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+            aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+            ratio = _aff_ratio()
+            lp_g = gibs_bal
+            lp_a = int(lp_g * ratio)
+            if lp_a > aff_bal:
+                lp_a = aff_bal
+                lp_g = int(lp_a / ratio)
+            if lp_g > 10**18 and lp_a > 10**18:
+                send_tx(tgs.functions.deposit(gibs_cs, lp_g),
+                        "deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+                send_tx(tgs.functions.deposit(aff_cs, lp_a),
+                        "deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+                r = send_tx(tgs.functions.addLiquidity(
+                                gibs_cs, aff_cs, lp_g, lp_a,
+                                1500, cs(JOEY_WALLET), 1),
+                            f"LP {lp_g//10**18} GIBS + {lp_a//10**18} AFF",
+                            skip_simulate=True, fixed_gas=500_000)
+                if r:
+                    print(f"     LP: 0x{r['transactionHash'].hex()}")
+
+        else:
+            # ── SELL+LP cycle: mint → small sell → LP rest ──
+            sells += 1
+
+            # Acquire AFF for minting (from Hub or buy)
+            aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+            aff_hub = safe(erc20(AFFECTION), "balanceOf", cs(JOYSTICK_HUB)) or 0
+            aff_needed = MINT_COUNT * 10**18
+            if aff_joey + aff_hub < aff_needed:
+                # Quick AFF buy
+                deficit_aff = int((aff_needed - aff_joey - aff_hub) / 10**18) + 5
+                pls_cost = deficit_aff * 42
+                WPLS_DEP_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                                 "outputs": [], "payable": True, "type": "function"}]
+                wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_DEP_ABI)
+                send_tx(wpls_c.functions.deposit(),
+                        f"wrap {pls_cost} PLS", value=pls_cost * 10**18,
+                        skip_simulate=True, fixed_gas=50_000)
+                v1_router = router_contract(w3=w3_submit)
+                approve_if_needed(
+                    w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+                    cs(PULSEX_V1_ROUTER), MAX_UINT, "WPLS→V1Router")
+                send_tx(v1_router.functions.swapExactTokensForTokens(
+                            pls_cost * 10**18, 0, [wpls_cs, aff_cs],
+                            JOEY_WALLET, int(time.time()) + 300),
+                        f"buy {deficit_aff} AFF",
+                        skip_simulate=True, fixed_gas=300_000)
+
+            # Prime + Purchase GIBS
+            print(f"  ▼ Mint {MINT_COUNT} GIBS → sell {SELL_COUNT} + LP {LP_COUNT}")
+            send_tx(hub.functions.primeGibs(MINT_COUNT),
+                    f"primeGibs({MINT_COUNT})", gas_tier="fast")
+            send_tx(gibs_contract.functions.Purchase(aff_cs, MINT_COUNT * 10**18),
+                    f"Purchase({MINT_COUNT} GIBS)",
+                    skip_simulate=True, fixed_gas=200_000)
+
+            # Sell SELL_COUNT GIBS into GIBS/AFF pair
+            pair_cs = cs(GIBS_AFF_V2)
+            pc = w3_submit.eth.contract(address=pair_cs, abi=pair_abi)
+            res = pc.functions.getReserves().call()
+            t0 = pc.functions.token0().call()
+            if t0.lower() == AFFECTION.lower():
+                r_aff, r_gibs = res[0], res[1]
+            else:
+                r_gibs, r_aff = res[0], res[1]
+
+            sell_wei = SELL_COUNT * 10**18
+            aff_out = (sell_wei * 997 * r_aff) // (r_gibs * 1000 + sell_wei * 997)
+
+            gibs_token = w3_submit.eth.contract(address=gibs_cs, abi=TRANSFER_ABI)
+            send_tx(gibs_token.functions.transfer(pair_cs, sell_wei),
+                    f"transfer {SELL_COUNT} GIBS → pair",
+                    skip_simulate=True, fixed_gas=150_000, gas_tier="fast")
+
+            pair_swap = w3_submit.eth.contract(address=pair_cs, abi=SWAP_ABI)
+            # token0=AFF, token1=GIBS → GIBS in, AFF out = amount0Out
+            r = send_tx(pair_swap.functions.swap(aff_out, 0, JOEY_WALLET, b""),
+                        f"swap {SELL_COUNT} GIBS → {aff_out//10**18} AFF",
+                        skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+            if r:
+                print(f"     Sold: 0x{r['transactionHash'].hex()}")
+                try:
+                    probe.record_sell(
+                        sell_gibs_wei=sell_wei,
+                        block_number=r["blockNumber"],
+                        tx_hash=r["transactionHash"].hex(),
+                        pair_address=GIBS_AFF_V2,
+                        gibs_is_token0=False,
+                    )
+                except Exception as exc:
+                    print(f"     probe: {exc}")
+
+            # LP remaining GIBS + AFF
+            gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+            aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+            ratio = _aff_ratio()
+            lp_g = gibs_bal
+            lp_a = int(lp_g * ratio)
+            if lp_a > aff_bal:
+                lp_a = aff_bal
+                lp_g = int(lp_a / ratio)
+            if lp_g > 10**18 and lp_a > 10**18:
+                send_tx(tgs.functions.deposit(gibs_cs, lp_g),
+                        "deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+                send_tx(tgs.functions.deposit(aff_cs, lp_a),
+                        "deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+                r = send_tx(tgs.functions.addLiquidity(
+                                gibs_cs, aff_cs, lp_g, lp_a,
+                                1500, cs(JOEY_WALLET), 1),
+                            f"LP {lp_g//10**18} GIBS + {lp_a//10**18} AFF",
+                            skip_simulate=True, fixed_gas=500_000)
+                if r:
+                    print(f"     LP: 0x{r['transactionHash'].hex()}")
+
+        # Post-cycle prices
+        new_wpls, new_aff = _gibs_prices()
+        print(f"  → WPLS={new_wpls:.2f} ({new_wpls-p_wpls:+.2f})  "
+              f"AFF={new_aff:.2f} ({new_aff-p_aff:+.2f})")
+
+        if batch < max_batches:
+            wait = 20 if not is_buy_cycle else 10
+            time.sleep(wait)
+
+    # Summary
+    final_wpls, final_aff = _gibs_prices()
+    joey_final = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+    print(f"\n{'━'*60}")
+    print(f"  LADDER-UP COMPLETE  ({max_batches} cycles)")
+    print(f"  GIBS/WPLS: {start_wpls:.2f} → {final_wpls:.2f} ({final_wpls-start_wpls:+.2f})")
+    print(f"  GIBS/AFF:  {start_aff:.2f} → {final_aff:.2f} ({final_aff-start_aff:+.2f})")
+    print(f"  Arb detections: {arb_count}  Sells: {sells}  Buys: {buys}")
+    print(f"  Joey PLS: {joey_final:,.0f}")
+    print(f"{'━'*60}")
+
+
+def _buy_and_lp(pls_per_batch: int = 10_000, max_batches: int = 20,
+                 dry_run: bool = False) -> None:
+    """
+    Buy GIBS from cheapest pair (upward pressure) + LP at new price (floor lock).
+    Each cycle: PLS → buy GIBS → LP with matching AFF → price ratchets up.
+    """
+    import time
+    from web3 import Web3
+    from .core.config import (
+        GIBS_LAU, AFFECTION, WPLS, JOEY_WALLET,
+        PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, GIBS_WPLS_V2_PAIR,
+    )
+    from .core.chain import (
+        safe, erc20, tgsv8_contract, router_contract,
+        w3_submit, w3_read, pair_contract,
+    )
+    from .core.executor import send_tx, approve_if_needed
+    from .core.probe_controller import ProbeController, ArbResponseKind
+
+    cs = Web3.to_checksum_address
+    GIBS_AFF_V2 = "0x1E2fAeF811b8eA8dC5E0dEEe2c3b0E355A7d7EA0"
+    PLS_FLOOR = 200_000
+    MAX_UINT = 2**256 - 1
+
+    probe = ProbeController()
+    tgs = tgsv8_contract(w3=w3_submit)
+    tgs_addr = tgs.address
+    gibs_cs = cs(GIBS_LAU)
+    aff_cs = cs(AFFECTION)
+    wpls_cs = cs(WPLS)
+
+    pair_abi = [
+        {"constant": True, "inputs": [], "name": "getReserves",
+         "outputs": [{"name": "", "type": "uint112"}, {"name": "", "type": "uint112"},
+                     {"name": "", "type": "uint32"}], "type": "function"},
+        {"constant": True, "inputs": [], "name": "token0",
+         "outputs": [{"name": "", "type": "address"}], "type": "function"},
+    ]
+
+    def _gibs_price_on(pair_addr, other_token):
+        """Return GIBS price in PLS for a given pair."""
+        from .oracle.price import get_amounts_out_v2
+        pc = w3_read.eth.contract(address=cs(pair_addr), abi=pair_abi)
+        r = pc.functions.getReserves().call()
+        t0 = pc.functions.token0().call()
+        if t0.lower() == GIBS_LAU.lower():
+            gibs_r, other_r = r[0], r[1]
+        else:
+            gibs_r, other_r = r[1], r[0]
+        ratio = other_r / gibs_r  # other per GIBS
+        if other_token == WPLS:
+            return ratio, gibs_r
+        # Convert to PLS
+        pls_out = get_amounts_out_v2(10**18, [cs(other_token), wpls_cs])
+        if pls_out and pls_out[-1] > 0:
+            return ratio * (pls_out[-1] / 1e18), gibs_r
+        return 0, gibs_r
+
+    # One-time approvals
+    approve_if_needed(
+        w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+        cs(PULSEX_V1_ROUTER), MAX_UINT, "WPLS→V1Router")
+    approve_if_needed(
+        w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+        tgs_addr, MAX_UINT, "GIBS→TGSv8")
+    approve_if_needed(
+        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+        tgs_addr, MAX_UINT, "AFF→TGSv8")
+
+    start_price_wpls, _ = _gibs_price_on(GIBS_WPLS_V2_PAIR, WPLS)
+    start_price_aff, _ = _gibs_price_on(GIBS_AFF_V2, AFFECTION)
+
+    for batch in range(1, max_batches + 1):
+        price_wpls, gibs_r_wpls = _gibs_price_on(GIBS_WPLS_V2_PAIR, WPLS)
+        price_aff, gibs_r_aff = _gibs_price_on(GIBS_AFF_V2, AFFECTION)
+        joey_pls = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+
+        # Find cheapest pair
+        cheapest = "AFF" if price_aff < price_wpls else "WPLS"
+        cheap_price = min(price_aff, price_wpls)
+
+        print(f"\n{'━'*60}")
+        print(f"  Batch {batch}/{max_batches}  |  GIBS prices: WPLS={price_wpls:.2f}  AFF={price_aff:.2f}")
+        print(f"  Cheapest: {cheapest} pair  |  Joey PLS: {joey_pls:,.0f}")
+        delta_wpls = price_wpls - start_price_wpls
+        delta_aff = price_aff - start_price_aff
+        print(f"  Δ since start: WPLS {delta_wpls:+.2f}  AFF {delta_aff:+.2f}")
+        print(f"{'━'*60}")
+
+        if joey_pls < PLS_FLOOR:
+            print(f"  PLS floor hit"); break
+
+        if dry_run:
+            print(f"  [dry-run] would buy ~{pls_per_batch/cheap_price:.0f} GIBS"); continue
+
+        # ── Check arb response from previous buy ──
+        arb_resp = probe.check_arb_response()
+        if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
+            print(f"  ★ ARB: {arb_resp.gibs_size_wei/1e18:.1f} GIBS by {arb_resp.sender[:10]}")
+            probe.clear_lp_add_target()  # acknowledged
+        elif arb_resp.kind is ArbResponseKind.PENDING:
+            print(f"  ⏳ Arb pending — waiting...")
+            time.sleep(12)
+            arb_resp = probe.check_arb_response()
+            if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
+                print(f"  ★ ARB: {arb_resp.gibs_size_wei/1e18:.1f} GIBS detected after wait")
+                probe.clear_lp_add_target()
+
+        # ── Step 1: Buy GIBS from cheapest pair ──
+        # Split: 60% to buy GIBS (upward pressure), 40% to buy AFF (for LP pairing)
+        buy_pls = int(pls_per_batch * 60 / 100)
+        lp_pls = pls_per_batch - buy_pls
+
+        # Wrap all PLS
+        WPLS_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                     "outputs": [], "payable": True, "type": "function"}]
+        wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_ABI)
+
+        print(f"  1. Wrap {pls_per_batch:,} PLS")
+        r = send_tx(wpls_c.functions.deposit(),
+                    f"wrap {pls_per_batch} PLS",
+                    value=pls_per_batch * 10**18,
+                    skip_simulate=True, fixed_gas=50_000)
+        if not r:
+            print("     FAILED"); break
+
+        # Buy GIBS: WPLS → AFF → GIBS (cheapest route, multi-hop via V2 router)
+        v2_router_addr = cs(PULSEX_V2_ROUTER)
+        approve_if_needed(
+            w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+            v2_router_addr, MAX_UINT, "WPLS→V2Router")
+
+        ROUTER_SWAP_ABI = [{"inputs": [
+            {"name": "amountIn", "type": "uint256"},
+            {"name": "amountOutMin", "type": "uint256"},
+            {"name": "path", "type": "address[]"},
+            {"name": "to", "type": "address"},
+            {"name": "deadline", "type": "uint256"}],
+            "name": "swapExactTokensForTokens",
+            "outputs": [{"name": "", "type": "uint256[]"}],
+            "type": "function"}]
+        v2_router = w3_submit.eth.contract(address=v2_router_addr, abi=ROUTER_SWAP_ABI)
+
+        buy_amount = buy_pls * 10**18
+        est_gibs = int(buy_pls / cheap_price * 0.9)  # 10% slippage buffer
+        print(f"  2. BUY ~{buy_pls/cheap_price:.0f} GIBS (WPLS→AFF→GIBS, {buy_pls:,} PLS)")
+        r = send_tx(
+            v2_router.functions.swapExactTokensForTokens(
+                buy_amount, est_gibs * 10**18,
+                [wpls_cs, aff_cs, gibs_cs],
+                JOEY_WALLET, int(time.time()) + 300),
+            f"buy GIBS ({buy_pls} PLS)",
+            skip_simulate=True, fixed_gas=350_000, gas_tier="fast")
+        if not r:
+            print("     BUY FAILED"); break
+        print(f"     TX: 0x{r['transactionHash'].hex()}")
+
+        # Record the buy with probe (on AFF pair — we bought GIBS FROM it)
+        try:
+            probe.record_sell(  # "sell" from the pair's perspective = our buy
+                sell_gibs_wei=est_gibs * 10**18,
+                block_number=r["blockNumber"],
+                tx_hash=r["transactionHash"].hex(),
+                pair_address=GIBS_AFF_V2,
+                gibs_is_token0=False,  # token0=AFF, token1=GIBS
+            )
+        except Exception as exc:
+            print(f"     probe: {exc}")
+
+        # ── Step 2: Buy AFF for LP pairing ──
+        lp_amount = lp_pls * 10**18
+        print(f"  3. Buy AFF for LP ({lp_pls:,} PLS)")
+        v1_router = router_contract(w3=w3_submit)
+        r = send_tx(
+            v1_router.functions.swapExactTokensForTokens(
+                lp_amount, 0, [wpls_cs, aff_cs],
+                JOEY_WALLET, int(time.time()) + 300),
+            f"buy AFF ({lp_pls} PLS)",
+            skip_simulate=True, fixed_gas=300_000)
+        if not r:
+            print("     FAILED"); break
+
+        # ── Step 3: LP bought GIBS + AFF at new higher price ──
+        gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+
+        # Read current ratio from pair
+        pc = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
+        res = pc.functions.getReserves().call()
+        t0 = pc.functions.token0().call()
+        if t0.lower() == AFFECTION.lower():
+            ratio = res[0] / res[1]  # AFF/GIBS
+        else:
+            ratio = res[1] / res[0]
+
+        lp_gibs = gibs_bal
+        lp_aff = int(lp_gibs * ratio)
+        if lp_aff > aff_bal:
+            lp_aff = aff_bal
+            lp_gibs = int(lp_aff / ratio)
+
+        if lp_gibs > 10**18 and lp_aff > 10**18:
+            print(f"  4. LP {lp_gibs/1e18:.0f} GIBS + {lp_aff/1e18:.0f} AFF (floor lock)")
+            send_tx(tgs.functions.deposit(gibs_cs, lp_gibs),
+                    "deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+            send_tx(tgs.functions.deposit(aff_cs, lp_aff),
+                    "deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+
+            r = send_tx(tgs.functions.addLiquidity(
+                            gibs_cs, aff_cs, lp_gibs, lp_aff,
+                            1500, cs(JOEY_WALLET), 1),
+                        f"addLiquidity({lp_gibs//10**18} GIBS + {lp_aff//10**18} AFF)",
+                        skip_simulate=True, fixed_gas=500_000)
+            if r:
+                print(f"     LP TX: 0x{r['transactionHash'].hex()}")
+            else:
+                print("     LP FAILED (non-fatal)")
+
+        # Post-batch prices
+        new_wpls, _ = _gibs_price_on(GIBS_WPLS_V2_PAIR, WPLS)
+        new_aff, _ = _gibs_price_on(GIBS_AFF_V2, AFFECTION)
+        print(f"  ✓ Prices: WPLS={new_wpls:.2f} ({new_wpls-price_wpls:+.2f})  "
+              f"AFF={new_aff:.2f} ({new_aff-price_aff:+.2f})")
+
+        if batch < max_batches:
+            print(f"  Waiting 15s for arb bots...")
+            time.sleep(15)
+
+    # Final summary
+    final_wpls, _ = _gibs_price_on(GIBS_WPLS_V2_PAIR, WPLS)
+    final_aff, _ = _gibs_price_on(GIBS_AFF_V2, AFFECTION)
+    joey_pls_final = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+
+    print(f"\n{'━'*60}")
+    print(f"  BUY & LP COMPLETE")
+    print(f"  GIBS/WPLS: {start_price_wpls:.2f} → {final_wpls:.2f} PLS ({final_wpls-start_price_wpls:+.2f})")
+    print(f"  GIBS/AFF:  {start_price_aff:.2f} → {final_aff:.2f} PLS ({final_aff-start_price_aff:+.2f})")
+    print(f"  Joey PLS:  {joey_pls_final:,.0f}")
+    print(f"{'━'*60}")
+
+
+def _grow_gibs_aff(target_pool: str = "GIBS_AFF", batch_gibs: int = 500,
+                    max_batches: int = 15, dry_run: bool = False) -> None:
+    """
+    Grow GIBS/AFF LP pool by repeatedly buying AFF, minting GIBS, and adding LP.
+    Runs until GIBS/AFF GIBS reserve exceeds GIBS/WPLS, or max_batches reached.
+    """
+    import time
+    from web3 import Web3
+    from .core.config import (
+        GIBS_LAU, AFFECTION, WPLS, JOYSTICK_HUB, JOEY_WALLET,
+        PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, GIBS_WPLS_V2_PAIR,
+    )
+    from .core.chain import (
+        safe, erc20, joystick_hub, tgsv8_contract,
+        w3_submit, w3_read, pair_contract, router_contract,
+    )
+    from .core.executor import send_tx, approve_if_needed
+
+    from .core.probe_controller import ProbeController, ArbResponseKind
+
+    cs = Web3.to_checksum_address
+    GIBS_AFF_V2 = "0x1E2fAeF811b8eA8dC5E0dEEe2c3b0E355A7d7EA0"
+    PLS_FLOOR = 200_000  # stop if Joey PLS drops below this
+    # GIBS/AFF: token0=AFF, token1=GIBS → gibs_is_token0=False
+    GIBS_IS_TOKEN0_AFF_PAIR = False
+
+    probe = ProbeController()
+
+    pair_abi = [
+        {"constant": True, "inputs": [], "name": "getReserves",
+         "outputs": [{"name": "", "type": "uint112"}, {"name": "", "type": "uint112"},
+                     {"name": "", "type": "uint32"}], "type": "function"},
+        {"constant": True, "inputs": [], "name": "token0",
+         "outputs": [{"name": "", "type": "address"}], "type": "function"},
+    ]
+
+    def _read_gibs_reserve(pair_addr):
+        pc = w3_read.eth.contract(address=cs(pair_addr), abi=pair_abi)
+        r = pc.functions.getReserves().call()
+        t0 = pc.functions.token0().call()
+        if t0.lower() == GIBS_LAU.lower():
+            return r[0] / 1e18, r[1] / 1e18  # gibs, other
+        return r[1] / 1e18, r[0] / 1e18
+
+    def _read_aff_ratio():
+        """AFF per GIBS in GIBS/AFF pool"""
+        pc = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
+        r = pc.functions.getReserves().call()
+        t0 = pc.functions.token0().call()
+        if t0.lower() == AFFECTION.lower():
+            return r[0] / r[1]  # AFF / GIBS in wei
+        return r[1] / r[0]
+
+    hub = joystick_hub(w3=w3_submit)
+    tgs = tgsv8_contract(w3=w3_submit)
+    gibs_cs = cs(GIBS_LAU)
+    aff_cs = cs(AFFECTION)
+    wpls_cs = cs(WPLS)
+    tgs_addr = tgs.address
+    MAX_UINT = 2**256 - 1
+
+    # One-time approvals
+    approve_if_needed(
+        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+        gibs_cs, MAX_UINT, "AFF→GIBS_LAU")
+    approve_if_needed(
+        w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+        tgs_addr, MAX_UINT, "GIBS→TGSv8")
+    approve_if_needed(
+        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+        tgs_addr, MAX_UINT, "AFF→TGSv8")
+
+    PURCHASE_ABI = [{"inputs": [{"name": "_t", "type": "address"},
+                     {"name": "_a", "type": "uint256"}],
+                     "name": "Purchase", "outputs": [], "type": "function"}]
+    gibs_contract = w3_submit.eth.contract(address=gibs_cs, abi=PURCHASE_ABI)
+
+    for batch in range(1, max_batches + 1):
+        # ── Status check ──
+        gibs_aff_r, _ = _read_gibs_reserve(GIBS_AFF_V2)
+        gibs_wpls_r, _ = _read_gibs_reserve(GIBS_WPLS_V2_PAIR)
+        joey_pls = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+        ratio = _read_aff_ratio()
+
+        print(f"\n{'━'*60}")
+        print(f"  Batch {batch}/{max_batches}")
+        print(f"  GIBS/AFF:  {gibs_aff_r:,.0f} GIBS   GIBS/WPLS: {gibs_wpls_r:,.0f} GIBS")
+        print(f"  Gap: {gibs_wpls_r - gibs_aff_r:,.0f}   Joey PLS: {joey_pls:,.0f}")
+        print(f"{'━'*60}")
+
+        if gibs_aff_r >= gibs_wpls_r:
+            print(f"  TARGET REACHED! GIBS/AFF ({gibs_aff_r:,.0f}) ≥ GIBS/WPLS ({gibs_wpls_r:,.0f})")
+            break
+
+        if joey_pls < PLS_FLOOR:
+            print(f"  PLS floor hit ({joey_pls:,.0f} < {PLS_FLOOR:,})")
+            break
+
+        # ── Check arb response from previous sell → LP ratchet ──
+        arb_resp = probe.check_arb_response()
+        if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
+            print(f"  ★ ARB DETECTED! {arb_resp.gibs_size_wei/1e18:.1f} GIBS bought by {arb_resp.sender[:10]}...")
+            lp_target = probe.lp_add_target()
+            if lp_target:
+                print(f"    → LP ratchet: adding {lp_target/1e18:.0f} GIBS at new price")
+                from .engines.dss import DSSEngine
+                e2 = DSSEngine(probe_controller=probe)
+                lp_result = e2._execute_lp_add_via_tgsv8(
+                    lp_target, GIBS_AFF_V2, dry_run=dry_run)
+                if lp_result.success:
+                    probe.clear_lp_add_target()
+                    print(f"    → LP ratchet OK: {lp_result.notes}")
+                else:
+                    probe.record_lp_add_failure()
+                    print(f"    → LP ratchet failed: {lp_result.notes}")
+        elif arb_resp.kind is ArbResponseKind.PENDING:
+            print(f"  ⏳ Arb pending (waiting for response window)")
+        elif arb_resp.kind is ArbResponseKind.NO_RESPONSE and batch > 1:
+            print(f"  — No arb response from previous sell")
+
+        if dry_run:
+            print(f"  [dry-run] would add {batch_gibs} GIBS")
+            continue
+
+        # ── Step 1: Buy AFF from DEX ──
+        aff_for_mint = batch_gibs
+        aff_for_lp = int(batch_gibs * ratio)  # ratio is unitless (AFF/GIBS)
+        total_aff = aff_for_mint + aff_for_lp
+        total_aff_wei = total_aff * 10**18
+
+        # Wrap PLS → WPLS
+        WPLS_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                     "outputs": [], "payable": True, "type": "function"}]
+        wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_ABI)
+
+        # Get quote for AFF buy
+        from .oracle.price import get_amounts_out
+        est_pls = int(total_aff * 42)  # ~42 PLS/AFF estimate with buffer
+        quote = get_amounts_out(est_pls * 10**18, [wpls_cs, aff_cs])
+        if not quote or quote[-1] < total_aff_wei:
+            est_pls = int(est_pls * 1.2)  # bump estimate
+
+        pls_cost = est_pls * 10**18
+        print(f"  1. Buy ~{total_aff} AFF from DEX (~{est_pls:,} PLS)")
+
+        try:
+            r = send_tx(wpls_c.functions.deposit(),
+                        f"wrap {est_pls} PLS", value=pls_cost, skip_simulate=True, fixed_gas=50_000)
+        except Exception as exc:
+            print(f"     wrap FAILED: {exc}"); break
+        if not r:
+            print("     wrap FAILED"); break
+
+        # Approve WPLS → V1 Router
+        approve_if_needed(
+            w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+            cs(PULSEX_V1_ROUTER), MAX_UINT, "WPLS→Router")
+
+        v1_router = router_contract(w3=w3_submit)
+        min_aff = int(total_aff_wei * 90 / 100)
+        r = send_tx(
+            v1_router.functions.swapExactTokensForTokens(
+                pls_cost, min_aff, [wpls_cs, aff_cs],
+                JOEY_WALLET, int(time.time()) + 300),
+            f"swap WPLS → {total_aff} AFF",
+            skip_simulate=True, fixed_gas=300_000)
+        if not r:
+            print("     swap FAILED"); break
+        print(f"     TX: 0x{r['transactionHash'].hex()}")
+
+        # ── Step 2: Prime GIBS ──
+        print(f"  2. primeGibs({batch_gibs})")
+        r = send_tx(hub.functions.primeGibs(batch_gibs),
+                    f"primeGibs({batch_gibs})", gas_tier="fast")
+        if not r:
+            print("     FAILED"); break
+        print(f"     TX: 0x{r['transactionHash'].hex()}")
+
+        # ── Step 3: Purchase GIBS ──
+        print(f"  3. Purchase({batch_gibs} GIBS)")
+        r = send_tx(gibs_contract.functions.Purchase(aff_cs, batch_gibs * 10**18),
+                    f"Purchase({batch_gibs} GIBS)",
+                    skip_simulate=True, fixed_gas=200_000)
+        if not r:
+            print("     FAILED"); break
+        print(f"     TX: 0x{r['transactionHash'].hex()}")
+
+        # ── Step 4: Split — 70% LP + 30% SELL into pair ──
+        gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+
+        sell_gibs = int(gibs_bal * 30 / 100)   # 30% for displacement
+        lp_gibs = gibs_bal - sell_gibs          # 70% for LP floor
+
+        # Match LP side to pool ratio
+        lp_aff = int(lp_gibs * ratio)
+        if lp_aff > aff_bal:
+            lp_aff = aff_bal
+            lp_gibs = int(lp_aff / ratio)
+            sell_gibs = gibs_bal - lp_gibs  # rest goes to sell
+
+        # ── 4a. Sell GIBS into GIBS/AFF pair (creates displacement) ──
+        # Low-level: transfer GIBS → pair, call pair.swap()
+        # This pushes GIBS price down on AFF pair → arb bots buy cheap
+        pair_cs = cs(GIBS_AFF_V2)
+
+        # Read pair to determine swap output
+        _pair_abi = [{"constant": True, "inputs": [], "name": "getReserves",
+                      "outputs": [{"name": "", "type": "uint112"}, {"name": "", "type": "uint112"},
+                                  {"name": "", "type": "uint32"}], "type": "function"},
+                     {"constant": True, "inputs": [], "name": "token0",
+                      "outputs": [{"name": "", "type": "address"}], "type": "function"}]
+        _pc = w3_submit.eth.contract(address=pair_cs, abi=_pair_abi)
+        _res = _pc.functions.getReserves().call()
+        _t0 = _pc.functions.token0().call()
+
+        if _t0.lower() == AFFECTION.lower():
+            r_aff_now, r_gibs_now = _res[0], _res[1]
+            gibs_is_token1 = True
+        else:
+            r_gibs_now, r_aff_now = _res[0], _res[1]
+            gibs_is_token1 = False
+
+        # Constant product: amountOut = (amountIn * 997 * reserveOut) / (reserveIn * 1000 + amountIn * 997)
+        aff_out = (sell_gibs * 997 * r_aff_now) // (r_gibs_now * 1000 + sell_gibs * 997)
+
+        print(f"  4a. SELL {sell_gibs/1e18:.0f} GIBS → {aff_out/1e18:.1f} AFF (displacement)")
+
+        # Transfer GIBS to pair
+        TRANSFER_ABI = [{"inputs": [{"name": "to", "type": "address"},
+                         {"name": "amount", "type": "uint256"}],
+                         "name": "transfer", "outputs": [{"name": "", "type": "bool"}],
+                         "type": "function"}]
+        gibs_token = w3_submit.eth.contract(address=gibs_cs, abi=TRANSFER_ABI)
+        r = send_tx(gibs_token.functions.transfer(pair_cs, sell_gibs),
+                    f"transfer({sell_gibs//10**18} GIBS → pair)",
+                    skip_simulate=True, fixed_gas=150_000, gas_tier="fast")
+        if not r:
+            print("     transfer FAILED"); break
+
+        # Call pair.swap — send AFF out to Joey
+        SWAP_ABI = [{"inputs": [{"name": "amount0Out", "type": "uint256"},
+                     {"name": "amount1Out", "type": "uint256"},
+                     {"name": "to", "type": "address"},
+                     {"name": "data", "type": "bytes"}],
+                     "name": "swap", "outputs": [], "type": "function"}]
+        pair_swap = w3_submit.eth.contract(address=pair_cs, abi=SWAP_ABI)
+
+        if gibs_is_token1:
+            # GIBS is token1, AFF is token0 → we want AFF out (amount0Out)
+            r = send_tx(pair_swap.functions.swap(aff_out, 0, JOEY_WALLET, b""),
+                        f"swap({aff_out//10**18} AFF out)",
+                        skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+        else:
+            # GIBS is token0, AFF is token1 → we want AFF out (amount1Out)
+            r = send_tx(pair_swap.functions.swap(0, aff_out, JOEY_WALLET, b""),
+                        f"swap({aff_out//10**18} AFF out)",
+                        skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+        if r:
+            print(f"     SOLD! TX: 0x{r['transactionHash'].hex()}")
+            # Record sell with probe for arb detection
+            try:
+                probe.record_sell(
+                    sell_gibs_wei=sell_gibs,
+                    block_number=r["blockNumber"],
+                    tx_hash=r["transactionHash"].hex(),
+                    pair_address=GIBS_AFF_V2,
+                    gibs_is_token0=GIBS_IS_TOKEN0_AFF_PAIR,
+                )
+            except Exception as exc:
+                print(f"     probe.record_sell: {exc}")
+        else:
+            print("     swap FAILED"); break
+
+        # ── 4b. LP remaining 70% GIBS + AFF via TGSv8 ──
+        # Re-read balances (sell changed AFF balance)
+        gibs_bal2 = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        aff_bal2 = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+
+        # Re-read ratio (sell changed it)
+        ratio = _read_aff_ratio()
+        lp_gibs = gibs_bal2
+        lp_aff = int(lp_gibs * ratio)
+        if lp_aff > aff_bal2:
+            lp_aff = aff_bal2
+            lp_gibs = int(lp_aff / ratio)
+
+        if lp_gibs > 0 and lp_aff > 0:
+            print(f"  4b. LP {lp_gibs/1e18:.0f} GIBS + {lp_aff/1e18:.0f} AFF (floor)")
+            send_tx(tgs.functions.deposit(gibs_cs, lp_gibs),
+                    f"deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+            send_tx(tgs.functions.deposit(aff_cs, lp_aff),
+                    f"deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
+
+            # TGSv8 may have leftover tokens from prior batches — use total balance
+            tgs_gibs = safe(erc20(GIBS_LAU), "balanceOf", tgs_addr) or 0
+            tgs_aff = safe(erc20(AFFECTION), "balanceOf", tgs_addr) or 0
+            lp_g = min(tgs_gibs, lp_gibs)
+            lp_a = min(tgs_aff, int(lp_g * ratio))
+
+            r = send_tx(tgs.functions.addLiquidity(
+                            gibs_cs, aff_cs, lp_g, lp_a,
+                            1500, cs(JOEY_WALLET), 1),  # 15% slippage for post-sell ratio shift
+                        f"addLiquidity({lp_g//10**18} GIBS + {lp_a//10**18} AFF)",
+                        skip_simulate=True, fixed_gas=500_000)
+            if r:
+                print(f"     LP TX: 0x{r['transactionHash'].hex()}")
+            else:
+                print("     addLiquidity FAILED (non-fatal)")
+
+        # ── Post-batch status ──
+        gibs_aff_new, aff_new = _read_gibs_reserve(GIBS_AFF_V2)
+        new_ratio = aff_new / gibs_aff_new if gibs_aff_new > 0 else 0
+        print(f"  ✓ GIBS/AFF pool: {gibs_aff_new:,.0f} GIBS / {aff_new:,.0f} AFF (ratio {new_ratio:.4f})")
+
+        # Brief pause between batches
+        if batch < max_batches:
+            print(f"  Waiting 10s...")
+            time.sleep(10)
+
+    # Final summary
+    gibs_aff_final, aff_final = _read_gibs_reserve(GIBS_AFF_V2)
+    gibs_wpls_final, _ = _read_gibs_reserve(GIBS_WPLS_V2_PAIR)
+    joey_pls_final = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
+
+    print(f"\n{'━'*60}")
+    print(f"  GROWTH COMPLETE")
+    print(f"  GIBS/AFF:   {gibs_aff_final:,.0f} GIBS / {aff_final:,.0f} AFF")
+    print(f"  GIBS/WPLS:  {gibs_wpls_final:,.0f} GIBS")
+    winner = "GIBS/AFF 🏆" if gibs_aff_final >= gibs_wpls_final else f"GIBS/WPLS (gap: {gibs_wpls_final - gibs_aff_final:,.0f})"
+    print(f"  Largest:    {winner}")
+    print(f"  Joey PLS:   {joey_pls_final:,.0f}")
+    print(f"{'━'*60}")
+
+
+def _run_seed_lp(pair_name: str, dry_run: bool = False) -> None:
+    """Seed a GIBS LP pair with liquidity from Hub reserves."""
+    import time
+    from web3 import Web3
+    from .core.config import (
+        GIBS_LAU, AFFECTION, JOYSTICK_HUB, JOEY_WALLET,
+        PULSEX_V2_ROUTER, PULSEX_V2_FACTORY,
+    )
+    from .core.chain import safe, erc20, joystick_hub, w3_submit, w3_read, pair_contract
+    from .core.executor import send_tx, approve_if_needed
+
+    cs = Web3.to_checksum_address
+
+    # ── Pair registry ──
+    PAIRS = {
+        "GIBS_AFF": {"other": AFFECTION, "other_name": "AFF"},
+    }
+    if pair_name not in PAIRS:
+        print(f"Unknown pair: {pair_name}. Available: {', '.join(PAIRS)}")
+        return
+
+    other_token = PAIRS[pair_name]["other"]
+    other_name = PAIRS[pair_name]["other_name"]
+
+    # ── Discover or verify pair exists ──
+    factory_abi = [{"constant": True, "inputs": [{"name": "", "type": "address"},
+                    {"name": "", "type": "address"}], "name": "getPair",
+                    "outputs": [{"name": "", "type": "address"}], "type": "function"}]
+    factory = w3_read.eth.contract(address=cs(PULSEX_V2_FACTORY), abi=factory_abi)
+    pair_addr = factory.functions.getPair(cs(GIBS_LAU), cs(other_token)).call()
+    if pair_addr == "0x" + "0" * 40:
+        print(f"GIBS/{other_name} V2 pair does not exist. Create it first.")
+        return
+
+    # ── Read current pool ratio ──
+    pair_abi = [
+        {"constant": True, "inputs": [], "name": "getReserves",
+         "outputs": [{"name": "", "type": "uint112"}, {"name": "", "type": "uint112"},
+                     {"name": "", "type": "uint32"}], "type": "function"},
+        {"constant": True, "inputs": [], "name": "token0",
+         "outputs": [{"name": "", "type": "address"}], "type": "function"},
+    ]
+    pc = w3_read.eth.contract(address=cs(pair_addr), abi=pair_abi)
+    reserves = pc.functions.getReserves().call()
+    t0 = pc.functions.token0().call()
+    if t0.lower() == GIBS_LAU.lower():
+        gibs_r, other_r = reserves[0], reserves[1]
+    else:
+        gibs_r, other_r = reserves[1], reserves[0]
+
+    if gibs_r == 0:
+        print("Pool is empty — needs initial seeding with manual amounts.")
+        return
+
+    ratio = other_r / gibs_r  # other-per-GIBS in pool
+
+    # ── Calculate seeding amounts ──
+    hub_other = (safe(erc20(other_token), "balanceOf", JOYSTICK_HUB) or 0)
+    hub_other_human = hub_other / 1e18
+
+    # Use up to 50% of Hub's other-token for LP, rest stays for operations
+    seed_other = int(hub_other_human * 0.5)
+    seed_gibs = int(seed_other / ratio)
+    prime_cost = seed_gibs  # 1 AFF per GIBS minted
+
+    if seed_other < 10:
+        print(f"Hub {other_name} balance too low ({hub_other_human:.2f}). Acquire more first.")
+        return
+
+    total_other_needed = seed_other + prime_cost
+    if total_other_needed > hub_other_human:
+        # Scale down to what Hub can afford
+        seed_other = int(hub_other_human / (1 + ratio))
+        seed_gibs = int(seed_other / ratio)
+        prime_cost = seed_gibs
+        total_other_needed = seed_other + prime_cost
+
+    print(f"{'━'*60}")
+    print(f"  Seed LP: GIBS/{other_name} V2")
+    print(f"{'━'*60}")
+    print(f"  Pair:      {pair_addr}")
+    print(f"  Current:   {gibs_r/1e18:.2f} GIBS / {other_r/1e18:.2f} {other_name}")
+    print(f"  Ratio:     1 GIBS = {ratio:.4f} {other_name}")
+    print(f"  Seed:      {seed_gibs} GIBS + {seed_other} {other_name}")
+    print(f"  Prime:     {prime_cost} {other_name} (to mint {seed_gibs} GIBS)")
+    print(f"  Hub after: ~{hub_other_human - total_other_needed:.0f} {other_name}")
+    print(f"{'━'*60}")
+
+    if dry_run:
+        print("  [dry-run] — no TXs sent")
+        return
+
+    hub = joystick_hub(w3=w3_submit)
+    gibs_cs = cs(GIBS_LAU)
+    other_cs = cs(other_token)
+    router_addr = cs(PULSEX_V2_ROUTER)
+
+    # Step 1: Withdraw other token from Hub → Joey
+    print(f"\n  Step 1: withdraw({seed_other + seed_gibs} {other_name} from Hub)")
+    total_withdraw = (seed_other + seed_gibs) * 10**18  # seed_gibs AFF for Purchase + seed_other for LP
+    r = send_tx(hub.functions.withdraw(other_cs, total_withdraw),
+                f"withdraw({seed_other + seed_gibs} {other_name})",
+                skip_simulate=True, fixed_gas=100_000)
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}")
+
+    # Step 2: Prime GIBS_LAU self-balance (free — no AFF cost here)
+    print(f"  Step 2: primeGibs({seed_gibs}) — primes GIBS_LAU self-balance")
+    r = send_tx(hub.functions.primeGibs(seed_gibs),
+                f"primeGibs({seed_gibs}) [seed-lp]", gas_tier="fast")
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}  Block: {r['blockNumber']}")
+
+    # Step 3: Joey calls GIBS_LAU.Purchase(AFF, seed_gibs) to extract GIBS
+    # Purchase costs 1 AFF per GIBS (market rate set at LAU birth)
+    print(f"  Step 3: Purchase({seed_gibs} GIBS for {seed_gibs} AFF)")
+    PURCHASE_ABI = [{"inputs": [{"name": "_t", "type": "address"},
+                     {"name": "_a", "type": "uint256"}],
+                     "name": "Purchase", "outputs": [], "type": "function"}]
+    gibs_contract = w3_submit.eth.contract(address=gibs_cs, abi=PURCHASE_ABI)
+    # Approve AFF → GIBS_LAU for Purchase payment
+    approve_if_needed(
+        w3_submit.eth.contract(address=other_cs, abi=erc20(other_token).abi),
+        gibs_cs, 2**256 - 1, f"{other_name}→GIBS_LAU")
+    r = send_tx(gibs_contract.functions.Purchase(other_cs, seed_gibs * 10**18),
+                f"Purchase({seed_gibs} GIBS)")
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}")
+
+    # Step 4: Low-level LP — transfer tokens to pair + mint
+    # (Bypasses router safeTransferFrom which reverts on GIBS LAU)
+    pair_cs = cs(pair_addr)
+
+    # Use actual Joey balances (may differ from seed targets due to rounding)
+    joey_gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+    joey_other_bal = safe(erc20(other_token), "balanceOf", JOEY_WALLET) or 0
+
+    # Match pool ratio using the smaller side
+    gibs_for_lp = min(joey_gibs_bal, int(joey_other_bal / ratio))
+    other_for_lp = int(gibs_for_lp * ratio)
+
+    print(f"  Step 4: transfer {gibs_for_lp/1e18:.2f} GIBS → pair")
+    TRANSFER_ABI = [{"inputs": [{"name": "to", "type": "address"},
+                     {"name": "amount", "type": "uint256"}],
+                     "name": "transfer", "outputs": [{"name": "", "type": "bool"}],
+                     "type": "function"}]
+    gibs_token = w3_submit.eth.contract(address=gibs_cs, abi=TRANSFER_ABI)
+    r = send_tx(gibs_token.functions.transfer(pair_cs, gibs_for_lp),
+                f"transfer({gibs_for_lp//10**18} GIBS → pair)",
+                skip_simulate=True, fixed_gas=150_000)
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}")
+
+    print(f"  Step 5: transfer {other_for_lp/1e18:.2f} {other_name} → pair")
+    other_token_c = w3_submit.eth.contract(address=other_cs, abi=TRANSFER_ABI)
+    r = send_tx(other_token_c.functions.transfer(pair_cs, other_for_lp),
+                f"transfer({other_for_lp//10**18} {other_name} → pair)",
+                skip_simulate=True, fixed_gas=150_000)
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}")
+
+    print(f"  Step 6: pair.mint(Joey) — mint LP tokens")
+    MINT_ABI = [{"inputs": [{"name": "to", "type": "address"}],
+                 "name": "mint", "outputs": [{"name": "liquidity", "type": "uint256"}],
+                 "type": "function"}]
+    pair_c = w3_submit.eth.contract(address=pair_cs, abi=MINT_ABI)
+    r = send_tx(pair_c.functions.mint(JOEY_WALLET),
+                f"pair.mint(Joey)", skip_simulate=True, fixed_gas=300_000)
+    if not r:
+        print("  FAILED"); return
+    print(f"    TX: 0x{r['transactionHash'].hex()}  Block: {r['blockNumber']}")
+
+    # Final state
+    reserves2 = pc.functions.getReserves().call()
+    if t0.lower() == GIBS_LAU.lower():
+        g2, o2 = reserves2[0], reserves2[1]
+    else:
+        g2, o2 = reserves2[1], reserves2[0]
+    hub_remaining = (safe(erc20(other_token), "balanceOf", JOYSTICK_HUB) or 0) / 1e18
+
+    print(f"\n{'━'*60}")
+    print(f"  DONE — GIBS/{other_name} V2 seeded")
+    print(f"  Before: {gibs_r/1e18:.2f} GIBS / {other_r/1e18:.2f} {other_name}")
+    print(f"  After:  {g2/1e18:.2f} GIBS / {o2/1e18:.2f} {other_name}")
+    print(f"  Hub {other_name}: {hub_remaining:.2f}")
+    print(f"{'━'*60}")
+
+
 def main() -> None:
     _setup_logging()
 
@@ -680,6 +1781,18 @@ def main() -> None:
                         help="Report LP fee accrual vs saved baseline (takes initial baseline on first run)")
     parser.add_argument("--reset-baseline", action="store_true",
                         help="With --lp-fees: overwrite baseline with current state")
+    parser.add_argument("--seed-lp", type=str, default="",
+                        help="Seed LP pair (e.g. --seed-lp GIBS_AFF). "
+                             "Primes GIBS via Hub, withdraws, adds liquidity to V2 pair.")
+    parser.add_argument("--mint-lp", type=str, default="",
+                        help="Mint LP from tokens already deposited in a pair "
+                             "(e.g. --mint-lp 0x1E2f...)")
+    parser.add_argument("--grow-pair", action="store_true",
+                        help="Grow GIBS/AFF LP pool until it exceeds GIBS/WPLS. "
+                             "Buys AFF from DEX, mints GIBS, adds LP in batches of 500.")
+    parser.add_argument("--pump", action="store_true",
+                        help="Buy GIBS from cheapest pair + LP at new price. "
+                             "Creates upward pressure. Arb bots equalize across pairs.")
     args = parser.parse_args()
 
     if args.rpc_status:
@@ -737,6 +1850,133 @@ def main() -> None:
         print(lp_fees.format_positions_table(positions))
         print()
         print(lp_fees.format_report(report, positions))
+        return
+
+    if args.pump:
+        _ladder_up(dry_run=args.dry_run)
+        return
+
+    if args.grow_pair:
+        _grow_gibs_aff(dry_run=args.dry_run)
+        return
+
+    if args.mint_lp:
+        # Skim excess tokens from pair back to Joey, then add via TGSv8
+        from web3 import Web3
+        from .core.executor import send_tx, approve_if_needed
+        from .core.config import JOEY_WALLET, GIBS_LAU, AFFECTION
+        from .core.chain import w3_submit, safe, erc20, tgsv8_contract
+        cs = Web3.to_checksum_address
+        pair_addr = cs(args.mint_lp)
+
+        # Step 1: Skim excess tokens from pair → Joey
+        skim_abi = [{"inputs": [{"name": "to", "type": "address"}],
+                     "name": "skim", "outputs": [], "type": "function"}]
+        pair_c = w3_submit.eth.contract(address=pair_addr, abi=skim_abi)
+        print(f"Step 1: skim({pair_addr}) → Joey")
+        r = send_tx(pair_c.functions.skim(JOEY_WALLET),
+                    "pair.skim(Joey)", skip_simulate=True, fixed_gas=200_000)
+        if r:
+            print(f"  TX: 0x{r['transactionHash'].hex()}")
+        else:
+            print("  skim FAILED"); return
+
+        joey_gibs = (safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0) / 1e18
+        joey_aff = (safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0) / 1e18
+        print(f"  Joey: {joey_gibs:.2f} GIBS, {joey_aff:.2f} AFF")
+
+        # Step 2: Compute ratio-matched amounts then deposit into TGSv8
+        tgs = tgsv8_contract(w3=w3_submit)
+        tgs_addr = tgs.address
+        gibs_cs = cs(GIBS_LAU)
+        aff_cs = cs(AFFECTION)
+        MAX_UINT = 2**256 - 1
+
+        # Read pool ratio and match amounts
+        pair_abi_r = [{"constant":True,"inputs":[],"name":"getReserves",
+                       "outputs":[{"name":"","type":"uint112"},{"name":"","type":"uint112"},
+                                  {"name":"","type":"uint32"}],"type":"function"},
+                      {"constant":True,"inputs":[],"name":"token0",
+                       "outputs":[{"name":"","type":"address"}],"type":"function"}]
+        from .core.chain import w3_read
+        pc_r = w3_read.eth.contract(address=pair_addr, abi=pair_abi_r)
+        res = pc_r.functions.getReserves().call()
+        tok0 = pc_r.functions.token0().call()
+        if tok0.lower() == AFFECTION.lower():
+            r_aff, r_gibs = res[0], res[1]
+        else:
+            r_gibs, r_aff = res[0], res[1]
+        ratio = r_aff / r_gibs
+
+        joey_gibs_wei = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        joey_aff_wei = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
+
+        # Use GIBS as base, compute matching AFF
+        gibs_amt = joey_gibs_wei
+        aff_needed = int(gibs_amt * ratio)
+        if aff_needed > joey_aff_wei:
+            # Scale down to what AFF allows
+            aff_amt = joey_aff_wei
+            gibs_amt = int(aff_amt / ratio)
+        else:
+            aff_amt = aff_needed
+
+        joey_gibs = gibs_amt / 1e18
+        joey_aff = aff_amt / 1e18
+        print(f"  Ratio-matched: {joey_gibs:.2f} GIBS + {joey_aff:.2f} AFF")
+
+        print(f"Step 2: deposit {joey_gibs:.0f} GIBS + {joey_aff:.0f} AFF → TGSv8")
+        # Approve + deposit GIBS
+        approve_if_needed(
+            w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+            tgs_addr, MAX_UINT, "GIBS→TGSv8")
+        r = send_tx(tgs.functions.deposit(gibs_cs, gibs_amt),
+                    f"deposit({int(joey_gibs)} GIBS)", skip_simulate=True, fixed_gas=200_000)
+        if r:
+            print(f"  GIBS deposited: 0x{r['transactionHash'].hex()}")
+
+        # Approve + deposit AFF
+        approve_if_needed(
+            w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
+            tgs_addr, MAX_UINT, "AFF→TGSv8")
+        r = send_tx(tgs.functions.deposit(aff_cs, aff_amt),
+                    f"deposit({int(joey_aff)} AFF)", skip_simulate=True, fixed_gas=200_000)
+        if r:
+            print(f"  AFF deposited: 0x{r['transactionHash'].hex()}")
+
+        # Step 3: TGSv8.addLiquidity → LP to Joey
+        # Re-read TGSv8 balances (may have tokens from prior failed runs)
+        tgs_gibs = safe(erc20(GIBS_LAU), "balanceOf", tgs_addr) or 0
+        tgs_aff = safe(erc20(AFFECTION), "balanceOf", tgs_addr) or 0
+        if tgs_gibs > gibs_amt:
+            gibs_amt = tgs_gibs
+            aff_amt = int(gibs_amt * ratio)
+            if aff_amt > tgs_aff:
+                aff_amt = tgs_aff
+                gibs_amt = int(aff_amt / ratio)
+            joey_gibs = gibs_amt / 1e18
+            joey_aff = aff_amt / 1e18
+            print(f"  Using TGSv8 balances: {joey_gibs:.2f} GIBS + {joey_aff:.2f} AFF")
+
+        if gibs_amt == 0 or aff_amt == 0:
+            print(f"  No tokens to LP (TGSv8 GIBS={tgs_gibs/1e18:.2f}, AFF={tgs_aff/1e18:.2f})")
+            return
+
+        print(f"Step 3: TGSv8.addLiquidity({joey_gibs:.0f} GIBS, {joey_aff:.0f} AFF) → Joey")
+        r = send_tx(tgs.functions.addLiquidity(
+                        gibs_cs, aff_cs, gibs_amt, aff_amt,
+                        1000,  # 10% slippage in bps
+                        JOEY_WALLET,
+                        1),   # DEX.V2
+                    f"addLiquidity({int(joey_gibs)} GIBS + {int(joey_aff)} AFF)")
+        if r:
+            print(f"  SUCCESS! TX: 0x{r['transactionHash'].hex()}  Block: {r['blockNumber']}")
+        else:
+            print("  addLiquidity FAILED")
+        return
+
+    if args.seed_lp:
+        _run_seed_lp(args.seed_lp, dry_run=args.dry_run)
         return
 
     bot = DysnomiaBot(
