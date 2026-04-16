@@ -18,7 +18,7 @@ from .config import (
     JOEY_WALLET, GIBS_LAU, AFFECTION, WPLS,
     PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, PLS_GAS_FLOOR, PLS_REPLENISH, MAX_SLIPPAGE,
 )
-from .chain import erc20, router_contract, safe, ROUTER_ABI, w3_submit
+from .chain import erc20, router_contract, safe, ROUTER_ABI, w3_submit, get_read_pool
 from .wallet import pls_balance, fmt_pls, account
 from .executor import send_tx, approve_if_needed
 from .simulator import SimulationFailed
@@ -45,6 +45,45 @@ class GasGuard:
                 "🚨 GAS LOW: %s < floor %s",
                 fmt_pls(bal), fmt_pls(PLS_GAS_FLOOR)
             )
+        return ok
+
+    def check_wallet(self, address: str, floor_wei: int, label: str = "") -> bool:
+        """True if the given wallet's PLS ≥ floor. Warns when below.
+
+        Used to enforce per-wallet floors for Minter/Seller in multi-wallet
+        mode. Emergency refill is NOT attempted — only Joey has an auto-refill
+        path. Call sites should route around the depleted wallet or skip
+        engines that depend on it.
+        """
+        try:
+            bal = get_read_pool().call(lambda w3: w3.eth.get_balance(address))
+        except Exception as exc:
+            log.warning("check_wallet(%s): balance read failed: %s",
+                        label or address[:10], exc)
+            return True  # fail-open on RPC blip — Joey-level check still runs
+        ok = bal >= floor_wei
+        if not ok:
+            log.warning(
+                "🚨 %s GAS LOW: %s < floor %s",
+                label or address[:10], fmt_pls(bal), fmt_pls(floor_wei)
+            )
+        return ok
+
+    def check_multi(self, wallet_mgr) -> bool:
+        """Run check() for Joey + each configured Minter/Seller wallet.
+
+        Returns True only if every configured wallet is at or above its floor.
+        Joey failures still go through the existing emergency-refill path in
+        the caller; this just surfaces Minter/Seller shortfalls so the cycle
+        can skip engines routed to a depleted wallet (or pause altogether).
+        """
+        joey_ok = self.check()
+        ok = joey_ok
+        for role_name, cfg in (("minter", wallet_mgr.minter),
+                               ("seller", wallet_mgr.seller)):
+            if cfg is None:
+                continue
+            ok = self.check_wallet(cfg.address, cfg.gas_floor, role_name) and ok
         return ok
 
     def status(self) -> dict:

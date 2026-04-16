@@ -146,13 +146,21 @@ class SpineRunnerEngine(EngineBase):
             tgsv8 = tgsv8_contract()
             for spine in active:
                 parent_bal = safe(tgsv8, "bal", Web3.to_checksum_address(spine.parent)) or 0
-                if parent_bal > 0:
-                    return True
+                if parent_bal <= 0:
+                    continue
+                # Live Debenture check — cached flag can lag an on-chain flip,
+                # and running once against a flipped spine wastes a whole cycle.
+                if not self._live_debenture_check(spine):
+                    spine.active = False
+                    log.info("E7: %s Debenture flipped to False — deactivated",
+                             spine.label)
+                    continue
+                return True
         except Exception as e:
             log.debug("E7: TGSv8 check failed: %s", e)
             return False
 
-        log.debug("E7: active spines exist but no parent token balance in TGSv8")
+        log.debug("E7: no spine passes balance + live Debenture check")
         return False
 
     def simulate(self) -> tuple[int, int]:

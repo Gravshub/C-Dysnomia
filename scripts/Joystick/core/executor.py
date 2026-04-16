@@ -346,8 +346,13 @@ def send_tx(
                 receipt = _w3_check.eth.get_transaction_receipt(tx_hash_bytes)
                 if receipt:
                     break
-            except Exception:
-                pass
+            except Exception as _poll_exc:
+                # Receipt not yet mined is a normal case on PulseChain; log
+                # at debug so the loop stays quiet under normal load but
+                # persistent RPC errors show up when DEBUG is enabled.
+                log.debug("Receipt poll %d on %s: %s",
+                          _poll, getattr(_w3_check.provider, "endpoint_uri", "?"),
+                          _poll_exc)
         if receipt:
             break
 

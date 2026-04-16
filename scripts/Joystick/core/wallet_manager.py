@@ -13,6 +13,7 @@ Graceful degradation: If MINTER_PRIVATE_KEY or SELLER_PRIVATE_KEY is not set,
 that wallet is disabled. Bot falls back to single-wallet mode (Joey only).
 """
 import logging
+import threading
 
 from .log_names import get_logger
 import os
@@ -52,27 +53,31 @@ class WalletNonce:
         self.address = address
         self._submit_pool = submit_pool
         self._nonce: int | None = None
+        self._lock = threading.Lock()
 
     def reset(self) -> None:
         """Force a fresh nonce fetch from chain next call."""
-        self._nonce = None
+        with self._lock:
+            self._nonce = None
 
     def next(self) -> int:
         """Return next nonce, incrementing local counter. Fetches from chain on first call."""
-        if self._nonce is None:
-            self._nonce = self._submit_pool.call(
-                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
-            log.debug("Nonce fetched for %s: %d", self.address[:10], self._nonce)
-        n = self._nonce
-        self._nonce += 1
-        return n
+        with self._lock:
+            if self._nonce is None:
+                self._nonce = self._submit_pool.call(
+                    lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+                log.debug("Nonce fetched for %s: %d", self.address[:10], self._nonce)
+            n = self._nonce
+            self._nonce += 1
+            return n
 
     def peek(self) -> int:
         """Read current nonce without incrementing."""
-        if self._nonce is None:
-            self._nonce = self._submit_pool.call(
-                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
-        return self._nonce
+        with self._lock:
+            if self._nonce is None:
+                self._nonce = self._submit_pool.call(
+                    lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+            return self._nonce
 
 
 class WalletManager:

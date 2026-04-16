@@ -353,6 +353,11 @@ class DysnomiaBot:
                 log.warning("[dry-run] Gas below floor — would trigger emergency refill")
                 return "failure"
 
+        # 1b. Multi-wallet floor check — Minter/Seller have no auto-refill path
+        if self.multi_wallet and not self.gas_guard.check_multi(self.wallet_mgr):
+            _events.log("bot.gas_guard.multi_low", success=False)
+            log.warning("Minter/Seller below floor — engines on those wallets will skip this cycle")
+
         # 2. Reset nonces for all wallets
         reset_nonce()
         if self.multi_wallet:
@@ -1924,8 +1929,8 @@ def main() -> None:
     if args.e2_only:
         engine = next((e for e in bot.engines if e.name == "DSS"), None)
         if not engine:
-            print("E2 DSS engine not found (excluded?)")
-            return
+            print("E2 DSS engine not found (excluded?)", file=sys.stderr)
+            sys.exit(1)
         print(f"Running E2 CEREAL ({'dry-run' if args.dry_run else 'LIVE'})...")
         print(f"  Ready: {engine.is_ready()}")
         try:
@@ -1942,8 +1947,8 @@ def main() -> None:
     if args.e6_only:
         engine = next((e for e in bot.engines if e.name == "TreasurySniper"), None)
         if not engine:
-            print("E6 TreasurySniper engine not found (excluded?)")
-            return
+            print("E6 TreasurySniper engine not found (excluded?)", file=sys.stderr)
+            sys.exit(1)
         print(f"Running E6 DaVINCI ({'dry-run' if args.dry_run else 'LIVE'})...")
         print(f"  Ready: {engine.is_ready()}")
         try:
@@ -1965,9 +1970,9 @@ def main() -> None:
                 engine = e
                 break
         if not engine:
-            print(f"Unknown engine: {target}")
-            print(f"Available: {', '.join(e.name for e in bot.engines)}")
-            return
+            print(f"Unknown engine: {target}", file=sys.stderr)
+            print(f"Available: {', '.join(e.name for e in bot.engines)}", file=sys.stderr)
+            sys.exit(1)
         print(f"Running {engine.display_name} ({'dry-run' if args.dry_run else 'LIVE'})...")
         print(f"  Ready: {engine.is_ready()}")
         try:

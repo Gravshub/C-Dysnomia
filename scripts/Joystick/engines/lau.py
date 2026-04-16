@@ -140,7 +140,7 @@ MOTZKIN_PRIME: int = 953_467_954_114_363
 
 # Minimum PLS to run a full ABUPRU round (~600K gas * ~2 Gwei ≈ 1.2K PLS + safety buffer)
 # Uses its own floor instead of the global PLS_GAS_FLOOR (which is for the whole bot)
-LAU_MIN_PLS: int = int(os.environ.get("LAU_MIN_PLS", "5000")) * 10**18
+LAU_MIN_PLS: int = int(os.environ.get("LAU_MIN_PLS", "150000")) * 10**18
 
 # Conservative gas estimate for full 6-step canonical round
 FULL_ROUND_GAS_EST: int = 600_000

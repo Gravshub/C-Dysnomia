@@ -108,8 +108,12 @@ except Exception as e:
         pass "RPC connected — block $(printf "%'d" "$BLOCK")"
         pass "Gas price: ${GAS} Beats"
 
-        if (( $(echo "$GAS > 50" | bc -l 2>/dev/null || echo 0) )); then
-            warn "Gas above ceiling (50 Beats) — bot would SKIP"
+        # Matches GAS_PRICE_CEIL default in core/config.py (2_000_000 Beats).
+        # Override with GAS_CEILING_BEATS in the environment if the bot is
+        # running with a different ceiling.
+        GAS_CEIL_BEATS="${GAS_CEILING_BEATS:-2000000}"
+        if (( $(echo "$GAS > $GAS_CEIL_BEATS" | bc -l 2>/dev/null || echo 0) )); then
+            warn "Gas above ceiling (${GAS_CEIL_BEATS} Beats) — bot would SKIP"
         fi
 
         pass "Joey PLS balance: $(printf "%'.2f" "$PLS")"
