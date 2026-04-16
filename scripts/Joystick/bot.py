@@ -725,18 +725,22 @@ def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
     cumulative_pls = 0.0
     arb_count = 0
     cycle_count = 0
+    consecutive_fails = 0
 
     for batch in range(1, max_batches + 1):
         p_wpls, p_aff = _gibs_prices()
         joey_pls = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
 
-        # Size the sell to trigger arb bots (displacement on AFF pair, ref WPLS pair)
-        trigger_gibs = e2._arb_trigger_size(GIBS_AFF_V2, GIBS_WPLS_V2_PAIR)
-        if trigger_gibs < 1:
-            trigger_gibs = 5  # fallback
-        # sell_amount is 30% of total mint (LP_BPS=7000 → sell=3000)
+        # Size the cycle: small batches that grow the pool steadily.
+        # Cap by Hub AFF (1 AFF per GIBS) and a per-cycle ceiling.
+        hub_aff = (safe(erc20(AFFECTION), "balanceOf", cs(JOYSTICK_HUB)) or 0) / 1e18
+        CYCLE_CAP = 17  # match E2 harvest size — small, frequent cycles
+        if hub_aff < CYCLE_CAP:
+            print(f"  Hub AFF depleted ({hub_aff:.0f} < {CYCLE_CAP}). Stopping.")
+            break
+        mint_count = min(CYCLE_CAP, int(hub_aff))
+
         sell_pct = (10000 - LP_BPS) / 10000
-        mint_count = max(1, int(trigger_gibs / sell_pct))
 
         # Estimate mint cost (1 AFF per GIBS)
         aff_pls_quote = get_amounts_out_v2(10**18, [aff_cs, wpls_cs])
@@ -789,21 +793,36 @@ def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
         # ── Execute atomic cycle ──
         min_sell_out = int(expected_sell * 85 / 100) if expected_sell else 0
 
-        result = e2._execute_harvest_pair(
-            lau=GIBS_LAU,
-            payment_token=AFFECTION,
-            lp_partner=AFFECTION,
-            prime_count=mint_count,
-            purchase_amt=mint_count,
-            lp_bps=LP_BPS,
-            sell_path=sell_path,
-            sell_dex=sell_dex,
-            min_sell_out=min_sell_out,
-            dry_run=dry_run,
-            sell_pair_address=GIBS_AFF_V2,
-        )
+        # Reset nonce from chain before each cycle to avoid stale-nonce crashes
+        from .core.wallet import reset_nonce
+        reset_nonce()
+
+        try:
+            result = e2._execute_harvest_pair(
+                lau=GIBS_LAU,
+                payment_token=AFFECTION,
+                lp_partner=AFFECTION,
+                prime_count=mint_count,
+                purchase_amt=mint_count,
+                lp_bps=LP_BPS,
+                sell_path=sell_path,
+                sell_dex=sell_dex,
+                min_sell_out=min_sell_out,
+                dry_run=dry_run,
+                sell_pair_address=GIBS_AFF_V2,
+            )
+        except Exception as exc:
+            print(f"  TX ERROR: {exc}")
+            reset_nonce()
+            consecutive_fails += 1
+            if consecutive_fails >= 3:
+                print(f"  3 consecutive failures. Stopping.")
+                break
+            time.sleep(15)
+            continue
 
         if result.success:
+            consecutive_fails = 0
             cycle_count += 1
             gas_pls = result.gas_wei / 1e18 if result.gas_wei else 0
             net_pls = est_sell_pls - mint_cost_pls - gas_pls
