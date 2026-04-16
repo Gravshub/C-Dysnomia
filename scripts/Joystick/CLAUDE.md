@@ -191,7 +191,7 @@ scripts/Joystick/
 
 Non-negotiable across all engines and core modules:
 
-1. **Always simulate via `eth_call` before sending any TX** — use `simulator.py`
+1. **Simulate via `eth_call` before sending any TX** — use `simulator.py`. **Exception**: trusted hot paths (E2 `primeGibs` / `mintLPAndSell`) may pass `skip_simulate=True` when simulation latency is net-negative on fill rate. Any new `skip_simulate=True` usage must be justified in the call-site comment.
 2. **Always `estimate_gas()` with `GAS_MULT` (2.5x) multiplier** — abort if it fails, never send blind
 3. **EIP-1559 Type 2 transactions** — all TXs use `maxFeePerGas` + `maxPriorityFeePerGas`
 4. **Dual RPC**: `rpc-pulsechain.g4mm4.io` for reads, `rpc.pulsechain.com` for TX submit
