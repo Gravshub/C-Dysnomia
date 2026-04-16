@@ -9,6 +9,7 @@ Usage:
 """
 import os
 import logging
+import threading
 
 from .log_names import get_logger
 from web3 import Web3
@@ -43,11 +44,15 @@ except EnvironmentError:
 
 # ── Local nonce tracker ───────────────────────────────────────────────────────
 _nonce: int | None = None
+# Lock protects fetch-or-increment races when multi-wallet execution runs TXs
+# concurrently via asyncio.gather() / ThreadPoolExecutor.
+_nonce_lock = threading.Lock()
 
 def reset_nonce() -> None:
     """Force a fresh nonce fetch from chain. Call at start of each cycle."""
     global _nonce
-    _nonce = None
+    with _nonce_lock:
+        _nonce = None
 
 def next_nonce() -> int:
     """
@@ -56,21 +61,23 @@ def next_nonce() -> int:
     Never re-fetches mid-cycle — safe for back-to-back TXs.
     """
     global _nonce
-    if _nonce is None:
-        _nonce = get_submit_pool().call(
-            lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
-        log.debug("Nonce fetched from chain: %d", _nonce)
-    n = _nonce
-    _nonce += 1
-    return n
+    with _nonce_lock:
+        if _nonce is None:
+            _nonce = get_submit_pool().call(
+                lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
+            log.debug("Nonce fetched from chain: %d", _nonce)
+        n = _nonce
+        _nonce += 1
+        return n
 
 def peek_nonce() -> int:
     """Read current nonce without incrementing."""
     global _nonce
-    if _nonce is None:
-        _nonce = get_submit_pool().call(
-            lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
-    return _nonce
+    with _nonce_lock:
+        if _nonce is None:
+            _nonce = get_submit_pool().call(
+                lambda w3: w3.eth.get_transaction_count(JOEY_WALLET, "pending"))
+        return _nonce
 
 # ── Balance helpers ───────────────────────────────────────────────────────────
 def pls_balance() -> int:
@@ -94,21 +101,25 @@ class WalletNonce:
         self.address = address
         self._submit_pool = submit_pool or get_submit_pool()
         self._nonce: int | None = None
+        self._lock = threading.Lock()
 
     def reset(self) -> None:
-        self._nonce = None
+        with self._lock:
+            self._nonce = None
 
     def next(self) -> int:
-        if self._nonce is None:
-            self._nonce = self._submit_pool.call(
-                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
-            log.debug("WalletNonce(%s) fetched: %d", self.address[:10], self._nonce)
-        n = self._nonce
-        self._nonce += 1
-        return n
+        with self._lock:
+            if self._nonce is None:
+                self._nonce = self._submit_pool.call(
+                    lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+                log.debug("WalletNonce(%s) fetched: %d", self.address[:10], self._nonce)
+            n = self._nonce
+            self._nonce += 1
+            return n
 
     def peek(self) -> int:
-        if self._nonce is None:
-            self._nonce = self._submit_pool.call(
-                lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
-        return self._nonce
+        with self._lock:
+            if self._nonce is None:
+                self._nonce = self._submit_pool.call(
+                    lambda w3: w3.eth.get_transaction_count(self.address, "pending"))
+            return self._nonce
