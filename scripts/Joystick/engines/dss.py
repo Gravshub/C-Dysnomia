@@ -132,6 +132,19 @@ class DSSEngine(EngineBase):
             pass
         return False
 
+    def _has_mint_lp_sell_pair(self, hub) -> bool:
+        """Check if mintLPAndSellPair selector is registered in Hub."""
+        try:
+            sig = "mintLPAndSellPair(address,address,address,uint256,uint256,uint256,uint256,uint8,uint256,address[],uint8)"
+            selector = Web3.keccak(text=sig)[:4]
+            from ..core.chain import safe as _safe
+            impl = _safe(hub, "module", selector)
+            if impl and impl != "0x" + "0" * 40:
+                return True
+        except Exception:
+            pass
+        return False
+
     def _quote_floor_cycle(self, hub, prime_count: int, lp_bps: int) -> tuple | None:
         """Call quoteFloorCycle on Hub. Returns (feasible, wplsNeeded, wplsFromSell, netWpls, lpGibs, sellGibs) or None."""
         try:
@@ -391,6 +404,406 @@ class DSSEngine(EngineBase):
         return EngineResult(
             success=False, profit_wei=0, gas_wei=gas_spent,
             tx_hashes=tx_hashes, notes="lp_add_tgsv8: addLiquidity failed",
+        )
+
+    def _execute_harvest_pair(
+        self,
+        lau: str,
+        payment_token: str,
+        lp_partner: str,
+        prime_count: int,
+        purchase_amt: int,
+        lp_bps: int,
+        sell_path: list[str],
+        sell_dex: int,
+        min_sell_out: int = 0,
+        dry_run: bool = False,
+        sell_pair_address: str = "",
+    ) -> EngineResult:
+        """Atomic harvest on any LAU/pair via Hub mintLPAndSellPair.
+
+        Single TX: prime → purchase → LP → sell.  Replaces the multi-TX
+        primeGibs + Purchase + deposit + addLiquidity pipeline.
+        """
+        hub = self._get_hub_submit()
+        tx_hashes = []
+        gas_spent = 0
+
+        lau_cs = Web3.to_checksum_address(lau)
+        payment_cs = Web3.to_checksum_address(payment_token)
+        lp_partner_cs = Web3.to_checksum_address(lp_partner)
+        sell_path_cs = [Web3.to_checksum_address(a) for a in sell_path]
+
+        log.info(
+            "E2: mintLPAndSellPair(lau=%s, payment=%s, lp=%s, prime=%d, "
+            "purchase=%d, lpBps=%d, sell=%s, minOut=%.1f PLS) [ATOMIC-PAIR]",
+            lau_cs[-8:], payment_cs[-8:], lp_partner_cs[-8:],
+            prime_count, purchase_amt, lp_bps,
+            [a[-6:] for a in sell_path_cs],
+            min_sell_out / 1e18,
+        )
+
+        r = send_tx(
+            hub.functions.mintLPAndSellPair(
+                lau_cs,
+                payment_cs,
+                lp_partner_cs,
+                prime_count,
+                purchase_amt,
+                lp_bps,
+                0,           # burnBps = 0
+                1,           # lpDex = V2
+                min_sell_out,
+                sell_path_cs,
+                sell_dex,
+            ),
+            f"mintLPAndSellPair({purchase_amt} {lau_cs[-6:]}/{lp_partner_cs[-6:]})",
+            dry_run=dry_run,
+            gas_tier="fast",
+        )
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+            log.info(
+                "E2: mintLPAndSellPair mined. Block: %d, Gas: %d",
+                r["blockNumber"], r["gasUsed"],
+            )
+
+            # Record sell for probe controller (sell portion = (10000-lpBps)/10000)
+            sell_gibs_wei = purchase_amt * 10**18 * (10000 - lp_bps) // 10000
+            try:
+                self.probe.record_sell(
+                    sell_gibs_wei=sell_gibs_wei,
+                    block_number=r["blockNumber"],
+                    tx_hash=r["transactionHash"].hex(),
+                    pair_address=sell_pair_address or "",
+                )
+            except Exception as _probe_exc:
+                log.debug("E2: probe.record_sell failed: %s", _probe_exc)
+
+            return EngineResult(
+                success=True,
+                profit_wei=0,  # calculated by caller
+                gas_wei=gas_spent,
+                tx_hashes=tx_hashes,
+                notes=f"AtomicPair: {purchase_amt} {lau_cs[-6:]}, "
+                      f"{lp_bps/100:.0f}% LP on {lp_partner_cs[-6:]}, "
+                      f"sell via {'→'.join(a[-6:] for a in sell_path_cs)}",
+            )
+
+        return EngineResult(
+            success=False, profit_wei=0, gas_wei=gas_spent,
+            tx_hashes=tx_hashes,
+            notes="mintLPAndSellPair: send_tx returned None",
+        )
+
+    def _arb_trigger_size(self, sell_pair: str, ref_pair: str,
+                          arb_gas_pls: float = 227.0) -> int:
+        """GIBS that must be sold into sell_pair so a cross-pool arb vs ref_pair
+        is profitable after arb_gas_pls gas cost.
+
+        Uses binary search over sell sizes, simulating the optimal arb bot
+        trade across both constant-product pools.  Returns whole-token count.
+        """
+        from ..core.chain import pair_contract as _pair_c
+
+        def _read_pair(addr):
+            pc = _pair_c(Web3.to_checksum_address(addr))
+            res = safe(pc, "getReserves")
+            t0 = safe(pc, "token0")
+            if not res or not t0:
+                return None
+            if t0.lower() == GIBS_LAU.lower():
+                return res[0] / 1e18, res[1] / 1e18   # (gibs, other)
+            return res[1] / 1e18, res[0] / 1e18
+
+        sell_pool = _read_pair(sell_pair)
+        ref_pool = _read_pair(ref_pair)
+        if not sell_pool or not ref_pool:
+            return 17  # fallback
+
+        Rg_sell, Ro_sell = sell_pool   # GIBS/AFF
+        Rg_ref, Ro_ref = ref_pool     # GIBS/WPLS
+        gibs_pls = Ro_ref / Rg_ref    # PLS per GIBS
+
+        def _arb_profit_after_sell(sell_gibs):
+            """Simulate: we sell sell_gibs into sell_pair, arb bot finds optimal trade."""
+            # Our sell into sell_pair
+            out = (sell_gibs * 0.997 * Ro_sell) / (Rg_sell + sell_gibs * 0.997)
+            nRg = Rg_sell + sell_gibs
+            nRo = Ro_sell - out
+
+            # Cross-rate: AFF/PLS ≈ (Rg_sell/Ro_sell) * (Ro_ref/Rg_ref)
+            aff_pls = gibs_pls * (Rg_sell / Ro_sell)
+
+            best = 0.0
+            # Arb: buy GIBS from depressed sell_pair, sell on ref_pair
+            for arb_x10 in range(1, 3000):
+                arb = arb_x10 / 10.0
+                if arb >= nRg * 0.3:
+                    break
+                aff_cost = (arb * 1000 * nRo) / ((nRg - arb) * 997)
+                pls_out = (arb * 0.997 * Ro_ref) / (Rg_ref + arb * 0.997)
+                profit = pls_out - aff_cost * aff_pls
+                if profit > best:
+                    best = profit
+            return best
+
+        # Binary search for minimum sell size that triggers arb
+        lo, hi = 1, 2000
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if _arb_profit_after_sell(mid) >= arb_gas_pls:
+                hi = mid
+            else:
+                lo = mid + 1
+
+        return lo
+
+    # Known GIBS LP pairs and their partner tokens (address, dex: 0=V1,1=V2)
+    _GIBS_PAIRS = [
+        ("0xa152659B651b89b1895Edfb6544bDB82ff3E9c25", "0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6", 0),  # GIBS/ATROPA V1
+        ("0xB07760241467931aDCd8f9f4A5704099a9A7e416", "0x965B0d74591bF30327075A247C47dBf487dCff08", 1),  # GIBS/VOID V2
+        ("0xA2a7a2153136B6eE075335b979Fb6ac033412e4d", "0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff", 1),  # GIBS/FED V2
+        ("0xc23Cf1aF3C44FA61Dc79C7DF5ccA241f26d29207", "0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29", 1),  # GIBS/WM V2
+    ]
+
+    def _find_thinnest_pair(self) -> tuple[str, str, float, int]:
+        """Find the GIBS pair with the lowest GIBS reserve (max displacement).
+
+        Returns (pair_addr, other_token, gibs_reserve, dex) or (None,None,0,1).
+        Skips pairs where the other token has no WPLS route (can't sell to PLS).
+        """
+        from ..core.chain import pair_contract as _pair_c
+        from ..oracle.price import get_amounts_out_v2, get_amounts_out
+
+        best = (None, None, float("inf"), 1)
+        wpls_cs = Web3.to_checksum_address(WPLS)
+        gibs_cs = Web3.to_checksum_address(GIBS_LAU)
+
+        for pair_addr, other_token, dex in self._GIBS_PAIRS:
+            try:
+                pc = _pair_c(Web3.to_checksum_address(pair_addr))
+                res = safe(pc, "getReserves")
+                t0 = safe(pc, "token0")
+                if not res or not t0:
+                    continue
+                if t0.lower() == GIBS_LAU.lower():
+                    rg = res[0] / 1e18
+                else:
+                    rg = res[1] / 1e18
+                if rg < 1:  # skip empty pairs
+                    continue
+
+                # Verify the sell route works: other_token → WPLS
+                other_cs = Web3.to_checksum_address(other_token)
+                if other_cs.lower() != wpls_cs.lower():
+                    try:
+                        test_path = [other_cs, wpls_cs]
+                        if dex == 1:
+                            amt = get_amounts_out_v2(10**18, test_path)
+                        else:
+                            amt = get_amounts_out(10**18, test_path)
+                        if not amt or amt[-1] == 0:
+                            continue
+                    except Exception:
+                        continue
+
+                if rg < best[2]:
+                    best = (pair_addr, other_token, rg, dex)
+            except Exception:
+                continue
+
+        if best[0] is None:
+            return (None, None, 0, 1)
+        return best
+
+    def _self_arb_thin_pool(
+        self, thin_pair: str, thin_other: str, thin_dex: int,
+        dry_run: bool = False,
+    ) -> EngineResult:
+        """After displacing a thin GIBS pool, buy cheap GIBS and sell on deep pool.
+
+        Buy leg:  WPLS → thin_other → GIBS  (via thin_dex router, cheap GIBS)
+        Sell leg: GIBS → WPLS               (via V2 router, fair price)
+
+        Returns EngineResult with profit = sell_pls - buy_pls.
+        Skips if estimated profit < gas cost.
+        """
+        from ..core.chain import pair_contract as _pair_c, router_contract, w3_read
+        from ..oracle.price import get_amounts_out_v2, get_amounts_out
+        from ..core.config import (
+            PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, GIBS_WPLS_V2_PAIR,
+        )
+        import time
+
+        cs = Web3.to_checksum_address
+        gibs_cs = cs(GIBS_LAU)
+        wpls_cs = cs(WPLS)
+        other_cs = cs(thin_other)
+        thin_pair_cs = cs(thin_pair)
+
+        # Read displaced thin pool
+        pc = _pair_c(thin_pair_cs)
+        res = safe(pc, "getReserves")
+        t0 = safe(pc, "token0")
+        if not res or not t0:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes="self_arb: can't read thin pair")
+        if t0.lower() == GIBS_LAU.lower():
+            rg_thin, ro_thin = res[0] / 1e18, res[1] / 1e18
+        else:
+            ro_thin, rg_thin = res[0] / 1e18, res[1] / 1e18
+
+        # Read GIBS/WPLS (deep, undisturbed)
+        pw = _pair_c(cs(GIBS_WPLS_V2_PAIR))
+        rw = safe(pw, "getReserves")
+        tw = safe(pw, "token0")
+        if not rw or not tw:
+            return EngineResult(success=False, profit_wei=0, gas_wei=0,
+                                tx_hashes=[], notes="self_arb: can't read WPLS pair")
+        if tw.lower() == GIBS_LAU.lower():
+            rg_w, ro_w = rw[0] / 1e18, rw[1] / 1e18
+        else:
+            ro_w, rg_w = rw[0] / 1e18, rw[1] / 1e18
+
+        gibs_pls = ro_w / rg_w  # fair GIBS price in PLS
+
+        # Find optimal arb size (maximize profit)
+        # Buy route: WPLS → other → GIBS (on thin_dex)
+        # Sell route: GIBS → WPLS (on V2)
+        buy_path = [wpls_cs, other_cs, gibs_cs] if other_cs.lower() != wpls_cs.lower() else [wpls_cs, gibs_cs]
+        sell_path = [gibs_cs, wpls_cs]
+
+        best_profit = 0
+        best_buy_pls = 0
+        best_gibs = 0
+
+        for pls_in in range(100, 8001, 100):  # test 100-8000 PLS buy sizes
+            pls_wei = pls_in * 10**18
+            try:
+                if thin_dex == 0:
+                    buy_out = get_amounts_out(pls_wei, buy_path)
+                else:
+                    buy_out = get_amounts_out_v2(pls_wei, buy_path)
+                gibs_bought_wei = buy_out[-1] if buy_out else 0
+                if gibs_bought_wei == 0:
+                    continue
+
+                sell_out = get_amounts_out_v2(gibs_bought_wei, sell_path)
+                pls_out = sell_out[-1] if sell_out else 0
+
+                profit = (pls_out - pls_wei) / 1e18
+                if profit > best_profit:
+                    best_profit = profit
+                    best_buy_pls = pls_in
+                    best_gibs = gibs_bought_wei / 1e18
+            except Exception:
+                continue
+
+        # Estimate gas for 2 router swaps + wrap
+        ARB_GAS_EST = 350_000
+        gas_price = w3_submit.eth.gas_price
+        gas_cost_pls = ARB_GAS_EST * gas_price / 1e18
+
+        log.info(
+            "E2: self-arb check — buy %d PLS → %.1f GIBS (thin %s), "
+            "sell → profit %.0f PLS, gas ~%.0f PLS",
+            best_buy_pls, best_gibs, thin_pair_cs[-8:],
+            best_profit, gas_cost_pls,
+        )
+
+        if best_profit <= gas_cost_pls or best_buy_pls == 0:
+            log.info("E2: self-arb skipped — profit %.0f < gas %.0f", best_profit, gas_cost_pls)
+            return EngineResult(success=True, profit_wei=0, gas_wei=0,
+                                tx_hashes=[],
+                                notes=f"self_arb: skipped (profit {best_profit:.0f} < gas {gas_cost_pls:.0f})")
+
+        # Execute: wrap PLS → buy via thin_dex router → sell via V2 router
+        tx_hashes = []
+        gas_spent = 0
+        buy_wei = best_buy_pls * 10**18
+        MAX_UINT = 2**256 - 1
+
+        # Wrap PLS
+        WPLS_DEP_ABI = [{"constant": False, "inputs": [], "name": "deposit",
+                         "outputs": [], "payable": True, "type": "function"}]
+        wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_DEP_ABI)
+        r = send_tx(wpls_c.functions.deposit(),
+                    f"wrap {best_buy_pls} PLS [self-arb]",
+                    value=buy_wei, skip_simulate=True, fixed_gas=50_000,
+                    dry_run=dry_run)
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", gas_price)
+
+        # Buy: WPLS → other → GIBS via thin_dex router
+        buy_router_addr = cs(PULSEX_V1_ROUTER if thin_dex == 0 else PULSEX_V2_ROUTER)
+        approve_if_needed(
+            w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
+            buy_router_addr, MAX_UINT,
+            f"WPLS→{'V1' if thin_dex == 0 else 'V2'}Router [arb]",
+            dry_run=dry_run)
+
+        SWAP_ABI = [{"inputs": [
+            {"name": "amountIn", "type": "uint256"},
+            {"name": "amountOutMin", "type": "uint256"},
+            {"name": "path", "type": "address[]"},
+            {"name": "to", "type": "address"},
+            {"name": "deadline", "type": "uint256"}],
+            "name": "swapExactTokensForTokens",
+            "outputs": [{"name": "", "type": "uint256[]"}],
+            "type": "function"}]
+        buy_router = w3_submit.eth.contract(address=buy_router_addr, abi=SWAP_ABI)
+        min_gibs = int(best_gibs * 0.85 * 1e18)
+
+        gibs_before = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+        r = send_tx(buy_router.functions.swapExactTokensForTokens(
+                        buy_wei, min_gibs, buy_path,
+                        JOEY_WALLET, int(time.time()) + 300),
+                    f"buy {best_gibs:.0f} GIBS from thin pool [self-arb]",
+                    skip_simulate=True, fixed_gas=300_000, gas_tier="fast",
+                    dry_run=dry_run)
+        gibs_received = 0
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", gas_price)
+            gibs_after = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
+            gibs_received = gibs_after - gibs_before
+
+        if gibs_received == 0 and not dry_run:
+            return EngineResult(success=False, profit_wei=0, gas_wei=gas_spent,
+                                tx_hashes=tx_hashes, notes="self_arb: buy failed")
+
+        # Sell: GIBS → WPLS via V2 router
+        sell_router_addr = cs(PULSEX_V2_ROUTER)
+        approve_if_needed(
+            w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
+            sell_router_addr, MAX_UINT,
+            "GIBS→V2Router [arb]", dry_run=dry_run)
+
+        sell_router = w3_submit.eth.contract(address=sell_router_addr, abi=SWAP_ABI)
+        min_pls_out = int(buy_wei * 0.85)  # at minimum get 85% back
+
+        r = send_tx(sell_router.functions.swapExactTokensForTokens(
+                        gibs_received, min_pls_out, sell_path,
+                        JOEY_WALLET, int(time.time()) + 300),
+                    f"sell {gibs_received//10**18} GIBS on WPLS [self-arb]",
+                    skip_simulate=True, fixed_gas=200_000, gas_tier="fast",
+                    dry_run=dry_run)
+        if r:
+            tx_hashes.append(r["transactionHash"].hex())
+            gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", gas_price)
+
+        actual_profit = int(best_profit * 1e18)
+        log.info("E2: self-arb complete — est profit %.0f PLS, gas %.0f PLS",
+                 best_profit, gas_spent / 1e18)
+
+        return EngineResult(
+            success=True, profit_wei=actual_profit, gas_wei=gas_spent,
+            tx_hashes=tx_hashes,
+            notes=f"self_arb: buy {best_buy_pls} PLS → {best_gibs:.0f} GIBS (thin {thin_pair_cs[-8:]}), "
+                  f"profit ~{best_profit:.0f} PLS",
         )
 
     def _best_sell_route(self, gibs_sell_wei: int) -> tuple[list[str], int, int]:
@@ -902,12 +1315,16 @@ class DSSEngine(EngineBase):
 
         try:
             # 2. Ensure Hub has AFF
-            aff_needed = signal.mint_count * 10**18
+            # Purchase cost: mint_count AFF (1 AFF per GIBS).
+            # LP partner cost: ~mint_count * (R_aff/R_gibs) AFF when doing 100% LP.
+            # We estimate 2.2x mint_count to cover both Purchase + LP matching.
+            aff_per_cycle = int(signal.mint_count * 2.2)
+            aff_needed = aff_per_cycle * 10**18
             aff_in_hub = self._aff_in_hub()
             if aff_in_hub < aff_needed:
                 AFF_BATCH_CYCLES = 30
                 aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-                desired_deposit = signal.mint_count * AFF_BATCH_CYCLES * 10**18
+                desired_deposit = aff_per_cycle * AFF_BATCH_CYCLES * 10**18
                 deposit_amount = min(desired_deposit, aff_joey)
                 if deposit_amount < aff_needed:
                     # Joey wallet AFF insufficient — acquire from DEX
@@ -949,46 +1366,152 @@ class DSSEngine(EngineBase):
                         tx_hashes.append(r["transactionHash"].hex())
                         gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # 3. Prime GIBS if Hub self-balance is low
+            # 3. Thin-pool displacement strategy
+            #
+            # LP on GIBS/AFF (deep — position building, fee earning).
+            # Sell on the thinnest GIBS pair (GIBS/ATROPA, GIBS/VOID, etc.)
+            # to create 20-30% price impact with just 17 GIBS.
+            # Arb bots buy cheap GIBS from the thin pool, sell into deep pools
+            # → volume flows through our GIBS/AFF LP → we earn fees.
+            #
             gibs_needed = signal.mint_count * 10**18
-            gibs_in_hub = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
-            if gibs_in_hub < gibs_needed:
-                r = send_tx(
-                    hub.functions.primeGibs(signal.mint_count),
-                    f"primeGibs({signal.mint_count}) [LADDER]",
-                    dry_run=dry_run, gas_tier="fast",
+
+            # Initialize sell vars (used by legacy path and post-TX logging)
+            aff_cs = Web3.to_checksum_address(AFFECTION)
+            wpls_cs = Web3.to_checksum_address(WPLS)
+            gibs_cs = Web3.to_checksum_address(GIBS_LAU)
+            sell_path = [gibs_cs, aff_cs, wpls_cs]
+            sell_dex = 1
+            expected_sell = 0
+            min_sell_out = 0
+
+            # 4. Try atomic mintLPAndSellPair
+            if self._has_mint_lp_sell_pair(hub):
+                # Find thinnest GIBS pair for max displacement
+                thin_pair, thin_other, thin_rg, thin_dex = self._find_thinnest_pair()
+
+                if thin_pair and thin_rg > 0:
+                    sell_gibs_wei = gibs_needed * (10000 - signal.lp_bps) // 10000
+
+                    # Build sell path through thin pair: [GIBS, thin_other, WPLS]
+                    thin_other_cs = Web3.to_checksum_address(thin_other)
+                    if thin_other_cs.lower() == wpls_cs.lower():
+                        sell_path = [gibs_cs, wpls_cs]
+                    else:
+                        sell_path = [gibs_cs, thin_other_cs, wpls_cs]
+                    sell_dex = thin_dex
+
+                    from ..oracle.price import get_amounts_out_v2, get_amounts_out
+                    try:
+                        if sell_dex == 1:
+                            amounts = get_amounts_out_v2(sell_gibs_wei, sell_path)
+                        else:
+                            amounts = get_amounts_out(sell_gibs_wei, sell_path)
+                        expected_sell = amounts[-1] if amounts else 0
+                    except Exception:
+                        expected_sell = 0
+                    min_sell_out = int(expected_sell * 85 / 100) if expected_sell else 0
+
+                    sell_impact = 17 / thin_rg * 200 if thin_rg > 0 else 0
+
+                    log.info(
+                        "E2: DISPLACE — mint %d, LP %d%% on GIBS/AFF, sell %d%% into "
+                        "%s (R=%d GIBS, ~%.0f%% impact) sell=%s min=%.0f PLS [ATOMIC]",
+                        signal.mint_count, signal.lp_bps / 100,
+                        (10000 - signal.lp_bps) / 100,
+                        thin_pair[-8:], int(thin_rg),
+                        sell_impact,
+                        "->".join(a[-6:] for a in sell_path),
+                        min_sell_out / 1e18,
+                    )
+
+                    result = self._execute_harvest_pair(
+                        lau=GIBS_LAU,
+                        payment_token=AFFECTION,
+                        lp_partner=AFFECTION,   # LP on GIBS/AFF
+                        prime_count=signal.mint_count,
+                        purchase_amt=signal.mint_count,
+                        lp_bps=signal.lp_bps,
+                        sell_path=sell_path,
+                        sell_dex=sell_dex,
+                        min_sell_out=min_sell_out,
+                        dry_run=dry_run,
+                    )
+                else:
+                    # No thin pair found — fall back to sell through AFF
+                    sell_gibs_wei = gibs_needed * (10000 - signal.lp_bps) // 10000
+                    sell_path = [gibs_cs, aff_cs, wpls_cs]
+                    from ..oracle.price import get_amounts_out_v2
+                    try:
+                        amounts = get_amounts_out_v2(sell_gibs_wei, sell_path)
+                        expected_sell = amounts[-1] if amounts else 0
+                    except Exception:
+                        expected_sell = 0
+                    min_sell_out = int(expected_sell * 90 / 100) if expected_sell else 0
+
+                    log.info(
+                        "E2: HARVEST — mint %d, LP %d%% on GIBS/AFF, sell via AFF "
+                        "(no thin pair) min=%.0f PLS [ATOMIC]",
+                        signal.mint_count, signal.lp_bps / 100, min_sell_out / 1e18,
+                    )
+                    result = self._execute_harvest_pair(
+                        lau=GIBS_LAU,
+                        payment_token=AFFECTION,
+                        lp_partner=AFFECTION,
+                        prime_count=signal.mint_count,
+                        purchase_amt=signal.mint_count,
+                        lp_bps=signal.lp_bps,
+                        sell_path=sell_path,
+                        sell_dex=sell_dex,
+                        min_sell_out=min_sell_out,
+                        dry_run=dry_run,
+                    )
+
+                tx_hashes.extend(result.tx_hashes)
+                gas_spent += result.gas_wei
+                r = {"transactionHash": bytes.fromhex(result.tx_hashes[0]) if result.tx_hashes else b"",
+                     "blockNumber": 0, "gasUsed": 0} if result.success else None
+
+                # Self-arb: buy cheap GIBS from displaced thin pool, sell on deep pool
+                if result.success and thin_pair:
+                    arb_result = self._self_arb_thin_pool(
+                        thin_pair, thin_other, thin_dex, dry_run=dry_run)
+                    tx_hashes.extend(arb_result.tx_hashes)
+                    gas_spent += arb_result.gas_wei
+
+            else:
+                # Legacy 2-TX path: primeGibs + mintLPAndSell (GIBS/WPLS)
+                gibs_in_hub = safe(erc20(GIBS_LAU), "balanceOf", JOYSTICK_HUB) or 0
+                if gibs_in_hub < gibs_needed:
+                    r = send_tx(
+                        hub.functions.primeGibs(signal.mint_count),
+                        f"primeGibs({signal.mint_count}) [LADDER]",
+                        dry_run=dry_run, gas_tier="fast",
+                    )
+                    if r:
+                        tx_hashes.append(r["transactionHash"].hex())
+                        gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
+
+                wpls_needed = self._wpls_needed_for_lp(gibs_needed * signal.lp_bps // 10000)
+
+                log.info(
+                    "E2: LADDER %s — mintLPAndSell(%d, lp=%d%%, burn=%d%%, min=%.1f PLS) "
+                    "gap=%.2f%% disp=%.1f GIBS [LEGACY 2-TX]",
+                    signal.mode, signal.mint_count, signal.lp_bps / 100,
+                    signal.burn_bps / 100, min_sell_out / 1e18,
+                    signal.gap_pct, signal.displacement_gibs,
                 )
-                if r:
-                    tx_hashes.append(r["transactionHash"].hex())
-                    gas_spent += r["gasUsed"] * r.get("effectiveGasPrice", w3_submit.eth.gas_price)
 
-            # 4. Build mintLPAndSell params
-            sell_gibs_wei = gibs_needed * (10000 - signal.lp_bps) // 10000
-            sell_path, sell_dex, expected_sell = self._best_sell_route(sell_gibs_wei)
-            min_sell_out = int(expected_sell * 95 / 100) if expected_sell else 0
-
-            # WPLS needed for LP side
-            wpls_needed = self._wpls_needed_for_lp(gibs_needed * signal.lp_bps // 10000)
-
-            log.info(
-                "E2: LADDER %s — mintLPAndSell(%d, lp=%d%%, burn=%d%%, min=%.1f PLS) "
-                "gap=%.2f%% disp=%.1f GIBS",
-                signal.mode, signal.mint_count, signal.lp_bps / 100,
-                signal.burn_bps / 100, min_sell_out / 1e18,
-                signal.gap_pct, signal.displacement_gibs,
-            )
-
-            # 5. Send mintLPAndSell TX
-            r = send_tx(
-                hub.functions.mintLPAndSell(
-                    signal.mint_count, signal.lp_bps, signal.burn_bps,
-                    1,  # lpDex = V2
-                    min_sell_out, sell_path, sell_dex,
-                ),
-                f"mintLPAndSell({signal.mint_count}) [LADDER {signal.mode}]",
-                dry_run=dry_run, value=wpls_needed,
-                skip_simulate=True, fixed_gas=750_000, gas_tier="fast",
-            )
+                r = send_tx(
+                    hub.functions.mintLPAndSell(
+                        signal.mint_count, signal.lp_bps, signal.burn_bps,
+                        1,  # lpDex = V2
+                        min_sell_out, sell_path, sell_dex,
+                    ),
+                    f"mintLPAndSell({signal.mint_count}) [LADDER {signal.mode}]",
+                    dry_run=dry_run, value=wpls_needed,
+                    skip_simulate=True, fixed_gas=750_000, gas_tier="fast",
+                )
             actual_pls = 0
             if r:
                 tx_hashes.append(r["transactionHash"].hex())
@@ -1155,8 +1678,30 @@ class DSSEngine(EngineBase):
             if lp_target is not None:
                 lp_pair = self.probe.lp_add_pair()
                 try:
-                    if lp_pair:
-                        # Arb was on a non-default pair (e.g., GIBS/AFF) → LP via TGSv8
+                    if lp_pair and self._has_mint_lp_sell_pair(hub):
+                        # Atomic LP+sell on non-WPLS pair via mintLPAndSellPair
+                        lp_mint_count = (lp_target + 10**18 - 1) // 10**18
+                        lp_sell_path, lp_sell_dex, lp_expected = self._best_sell_route(
+                            lp_target * (10000 - HARVEST_LP_BPS) // 10000)
+                        lp_min_out = int(lp_expected * 90 / 100) if lp_expected else 0
+                        # Determine LP partner from pair
+                        from ..core.chain import pair_contract as _pair_c
+                        _pc = _pair_c(Web3.to_checksum_address(lp_pair))
+                        _t0 = safe(_pc, "token0")
+                        _lp_partner = safe(_pc, "token1") if _t0 and _t0.lower() == GIBS_LAU.lower() else _t0
+                        if _lp_partner:
+                            lp_result = self._execute_harvest_pair(
+                                lau=GIBS_LAU, payment_token=AFFECTION,
+                                lp_partner=_lp_partner,
+                                prime_count=lp_mint_count, purchase_amt=lp_mint_count,
+                                lp_bps=HARVEST_LP_BPS, sell_path=lp_sell_path,
+                                sell_dex=lp_sell_dex, min_sell_out=lp_min_out,
+                                dry_run=dry_run)
+                        else:
+                            lp_result = self._execute_lp_add_via_tgsv8(
+                                lp_target, lp_pair, dry_run=dry_run)
+                    elif lp_pair:
+                        # Fallback: non-WPLS pair but no mintLPAndSellPair module
                         lp_result = self._execute_lp_add_via_tgsv8(
                             lp_target, lp_pair, dry_run=dry_run)
                     else:
@@ -1226,6 +1771,48 @@ class DSSEngine(EngineBase):
                             notes=f"Floor: {mint_count} GIBS — {lp_bps/100:.0f}% LP (→ Joey), "
                                   f"sell={sell_gibs/1e18:.1f} GIBS → {wpls_from_sell/1e18:.1f} WPLS",
                         )
+
+            # Priority 1.5: mintLPAndSellPair (atomic LP+sell on ANY pair)
+            # Use this when we want to LP on a non-WPLS pair (e.g., GIBS/AFF)
+            if self._has_mint_lp_sell_pair(hub):
+                gibs_amount = mint_count * 10**18
+                sell_gibs_wei = gibs_amount * (10000 - lp_bps) // 10000
+
+                # Sell through the LP partner: [GIBS, AFF, WPLS]
+                aff_cs = Web3.to_checksum_address(AFFECTION)
+                wpls_cs = Web3.to_checksum_address(WPLS)
+                gibs_cs = Web3.to_checksum_address(GIBS_LAU)
+                sell_path = [gibs_cs, aff_cs, wpls_cs]
+                sell_dex = 1  # V2
+                from ..oracle.price import get_amounts_out_v2
+                try:
+                    amounts = get_amounts_out_v2(sell_gibs_wei, sell_path)
+                    expected_sell = amounts[-1] if amounts else 0
+                except Exception:
+                    expected_sell = 0
+                min_sell_out = int(expected_sell * 90 / 100) if expected_sell else 0
+
+                result = self._execute_harvest_pair(
+                    lau=GIBS_LAU,
+                    payment_token=AFFECTION,
+                    lp_partner=AFFECTION,  # LP on GIBS/AFF pair
+                    prime_count=mint_count,
+                    purchase_amt=mint_count,
+                    lp_bps=lp_bps,
+                    sell_path=sell_path,
+                    sell_dex=sell_dex,
+                    min_sell_out=min_sell_out,
+                    dry_run=dry_run,
+                )
+                if result.success:
+                    return EngineResult(
+                        success=True,
+                        profit_wei=revenue_wei,
+                        gas_wei=gas_spent + result.gas_wei,
+                        tx_hashes=tx_hashes + result.tx_hashes,
+                        notes=result.notes,
+                    )
+                # If mintLPAndSellPair failed, fall through to primeAndSell
 
             # Priority 2: primeAndSell (atomic sell-only, anti-sniper)
             gibs_amount = mint_count * 10**18

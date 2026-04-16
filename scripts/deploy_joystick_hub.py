@@ -78,6 +78,7 @@ CONTRACTS_TO_DEPLOY = ["JoystickHub", "HarvestModule", "AffectionModule", "Purch
 HARVEST_FUNCTIONS = [
     "primeGibs(uint256)",
     "mintLPAndSell(uint256,uint256,uint256,uint8,uint256,address[],uint8)",
+    "mintLPAndSellPair(address,address,address,uint256,uint256,uint256,uint256,uint8,uint256,address[],uint8)",
     "batchReseed(address[],uint256[])",
     "harvestConfig()",
 ]
