@@ -59,8 +59,12 @@ def _load_cache(allow_stale: bool = False) -> list[dict] | None:
             return data["tokens"]
         # Stale cache grace: return old data rather than triggering 4,600+ RPC calls
         if allow_stale and age < CACHE_TTL * 2:
-            log.info("Scanner cache stale (%.0fs > TTL %.0fs) — using anyway to avoid RPC blast",
-                     age, CACHE_TTL)
+            # Warn (not info) because stale prices on thin pools can be
+            # actively exploitable per Heart's Law — operators should know
+            # they are trading on aged snapshots.
+            log.warning("Scanner cache STALE (%.0fs > TTL %.0fs) — prices may be "
+                        "manipulable on thin pools; refresh when capacity allows",
+                        age, CACHE_TTL)
             return data["tokens"]
     except Exception as exc:
         log.debug("Cache load failed: %s", exc)
@@ -144,7 +148,11 @@ def _find_best_pair(token_addr: str) -> dict | None:
             r_token, r_wpls = reserves[0], reserves[1]
         else:
             r_token, r_wpls = reserves[1], reserves[0]
-        if r_token == 0:
+        if r_token == 0 or r_wpls == 0:
+            # Skip empty or half-empty pools. r_wpls==0 makes spot_price==0
+            # which silently deprioritises the pair instead of excluding it,
+            # and empty/near-empty WPLS reserves are where thin-pool price
+            # manipulation hides.
             continue
         # Spot price: WPLS per token (in wei)
         spot_price = r_wpls * 10**18 // r_token
