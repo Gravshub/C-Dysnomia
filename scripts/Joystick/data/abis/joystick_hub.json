@@ -801,6 +801,85 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "lau",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "paymentToken",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "lpPartner",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "primeCount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "purchaseAmt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lpBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "burnBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "lpDex",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "minSellOut",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "sellPath",
+        "type": "address[]"
+      },
+      {
+        "internalType": "uint8",
+        "name": "sellDex",
+        "type": "uint8"
+      }
+    ],
+    "name": "mintLPAndSellPair",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokensMinted",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "lpMinted",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sellReceived",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "count",
         "type": "uint256"

@@ -644,43 +644,37 @@ def _setup_logging() -> None:
 
 def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
     """
-    Balanced GIBS uptrend: mint cheap → small sell (displacement) → arb correction
-    → LP ratchet (floor lock) → periodic buy (directional nudge).
+    Balanced GIBS uptrend via atomic mintLPAndSellPair.
 
-    Cost: ~1,100 PLS/cycle (vs 10K for pure pump). Arb bots do the heavy lifting.
+    Each cycle: 1 TX via Hub — prime → purchase → LP → sell.
+    Gas: ~300 PLS (vs ~3,000 PLS in old multi-TX pipeline).
+    Arb bots do the heavy lifting — our sell creates price impact,
+    they arb it back, we LP at the corrected price next cycle.
+
+    P&L tracked per cycle: sell_revenue - mint_cost = net PLS.
     """
     import time
     from web3 import Web3
     from .core.config import (
         GIBS_LAU, AFFECTION, WPLS, JOYSTICK_HUB, JOEY_WALLET,
-        PULSEX_V1_ROUTER, PULSEX_V2_ROUTER, GIBS_WPLS_V2_PAIR,
+        PULSEX_V1_ROUTER, GIBS_WPLS_V2_PAIR,
     )
     from .core.chain import (
-        safe, erc20, joystick_hub, tgsv8_contract, router_contract,
-        w3_submit, w3_read, pair_contract,
+        safe, erc20, joystick_hub, router_contract,
+        w3_submit, w3_read,
     )
     from .core.executor import send_tx, approve_if_needed
     from .core.probe_controller import ProbeController, ArbResponseKind
     from .oracle.price import get_amounts_out_v2
+    from .engines.dss import DSSEngine
 
     cs = Web3.to_checksum_address
     GIBS_AFF_V2 = "0x1E2fAeF811b8eA8dC5E0dEEe2c3b0E355A7d7EA0"
     PLS_FLOOR = 200_000
     MAX_UINT = 2**256 - 1
 
-    MINT_COUNT = 17          # GIBS per cycle (same as E2 harvest)
-    SELL_COUNT = 5           # small sell for displacement
-    LP_COUNT = 12            # rest goes to LP
-    BUY_EVERY_N = 5          # buy GIBS every Nth cycle
-    BUY_PLS = 3_000          # PLS to spend on buy cycles
-
-    probe = ProbeController()
-    hub = joystick_hub(w3=w3_submit)
-    tgs = tgsv8_contract(w3=w3_submit)
-    gibs_cs = cs(GIBS_LAU)
-    aff_cs = cs(AFFECTION)
-    wpls_cs = cs(WPLS)
-    tgs_addr = tgs.address
+    LP_BPS = 7000          # 70% to LP, 30% to sell
+    AFF_PLS_EST = 38.0     # fallback AFF/PLS price estimate
 
     pair_abi = [
         {"constant": True, "inputs": [], "name": "getReserves",
@@ -690,80 +684,86 @@ def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
          "outputs": [{"name": "", "type": "address"}], "type": "function"},
     ]
 
+    gibs_cs = cs(GIBS_LAU)
+    aff_cs = cs(AFFECTION)
+    wpls_cs = cs(WPLS)
+
+    probe = ProbeController()
+    e2 = DSSEngine(probe_controller=probe)
+    hub = joystick_hub(w3=w3_submit)
+
     def _gibs_prices():
         """Return (wpls_price, aff_price) in PLS."""
-        # WPLS pair
         pc1 = w3_read.eth.contract(address=cs(GIBS_WPLS_V2_PAIR), abi=pair_abi)
         r1 = pc1.functions.getReserves().call()
         t0 = pc1.functions.token0().call()
-        if t0.lower() == GIBS_LAU.lower():
-            p_wpls = r1[1] / r1[0]
-        else:
-            p_wpls = r1[0] / r1[1]
-        # AFF pair
+        p_wpls = r1[1] / r1[0] if t0.lower() == GIBS_LAU.lower() else r1[0] / r1[1]
+
         pc2 = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
         r2 = pc2.functions.getReserves().call()
         t0b = pc2.functions.token0().call()
-        if t0b.lower() == AFFECTION.lower():
-            aff_ratio = r2[0] / r2[1]  # AFF per GIBS
-        else:
-            aff_ratio = r2[1] / r2[0]
+        aff_ratio = r2[0] / r2[1] if t0b.lower() == AFFECTION.lower() else r2[1] / r2[0]
         aff_pls = get_amounts_out_v2(10**18, [aff_cs, wpls_cs])
-        aff_price_pls = aff_pls[-1] / 1e18 if aff_pls else 38.0
-        p_aff = aff_ratio * aff_price_pls
-        return p_wpls, p_aff
+        aff_price_pls = aff_pls[-1] / 1e18 if aff_pls else AFF_PLS_EST
+        return p_wpls, aff_ratio * aff_price_pls
 
-    def _aff_ratio():
-        """AFF per GIBS in GIBS/AFF pool (unitless)."""
-        pc = w3_read.eth.contract(address=cs(GIBS_AFF_V2), abi=pair_abi)
-        r = pc.functions.getReserves().call()
-        t0 = pc.functions.token0().call()
-        if t0.lower() == AFFECTION.lower():
-            return r[0] / r[1]
-        return r[1] / r[0]
+    # Check if mintLPAndSellPair is available
+    has_atomic = e2._has_mint_lp_sell_pair(hub)
+    if not has_atomic:
+        print("  mintLPAndSellPair NOT registered on Hub — deploy HarvestV3 first.")
+        print("  Run: python3 scripts/deploy_harvest_v3.py")
+        return
 
-    # One-time approvals
-    PURCHASE_ABI = [{"inputs": [{"name": "_t", "type": "address"},
-                     {"name": "_a", "type": "uint256"}],
-                     "name": "Purchase", "outputs": [], "type": "function"}]
-    gibs_contract = w3_submit.eth.contract(address=gibs_cs, abi=PURCHASE_ABI)
-
-    approve_if_needed(
-        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
-        gibs_cs, MAX_UINT, "AFF→GIBS_LAU")
-    approve_if_needed(
-        w3_submit.eth.contract(address=gibs_cs, abi=erc20(GIBS_LAU).abi),
-        tgs_addr, MAX_UINT, "GIBS→TGSv8")
-    approve_if_needed(
-        w3_submit.eth.contract(address=aff_cs, abi=erc20(AFFECTION).abi),
-        tgs_addr, MAX_UINT, "AFF→TGSv8")
-
-    TRANSFER_ABI = [{"inputs": [{"name": "to", "type": "address"},
-                     {"name": "amount", "type": "uint256"}],
-                     "name": "transfer", "outputs": [{"name": "", "type": "bool"}],
-                     "type": "function"}]
-    SWAP_ABI = [{"inputs": [{"name": "amount0Out", "type": "uint256"},
-                 {"name": "amount1Out", "type": "uint256"},
-                 {"name": "to", "type": "address"},
-                 {"name": "data", "type": "bytes"}],
-                 "name": "swap", "outputs": [], "type": "function"}]
+    # Ensure Hub has enough AFF for cycles
+    aff_hub = (safe(erc20(AFFECTION), "balanceOf", cs(JOYSTICK_HUB)) or 0) / 1e18
+    print(f"  Hub AFF balance: {aff_hub:.0f}")
+    if aff_hub < 20:
+        print(f"  Hub needs AFF. Deposit AFF to Hub before running --pump.")
+        return
 
     start_wpls, start_aff = _gibs_prices()
+    cumulative_pls = 0.0
     arb_count = 0
-    sells = 0
-    buys = 0
+    cycle_count = 0
 
     for batch in range(1, max_batches + 1):
         p_wpls, p_aff = _gibs_prices()
         joey_pls = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
-        is_buy_cycle = (batch % BUY_EVERY_N == 0)
-        mode = "BUY+LP" if is_buy_cycle else "SELL+LP"
+
+        # Size the sell to trigger arb bots (displacement on AFF pair, ref WPLS pair)
+        trigger_gibs = e2._arb_trigger_size(GIBS_AFF_V2, GIBS_WPLS_V2_PAIR)
+        if trigger_gibs < 1:
+            trigger_gibs = 5  # fallback
+        # sell_amount is 30% of total mint (LP_BPS=7000 → sell=3000)
+        sell_pct = (10000 - LP_BPS) / 10000
+        mint_count = max(1, int(trigger_gibs / sell_pct))
+
+        # Estimate mint cost (1 AFF per GIBS)
+        aff_pls_quote = get_amounts_out_v2(10**18, [aff_cs, wpls_cs])
+        aff_price = aff_pls_quote[-1] / 1e18 if aff_pls_quote else AFF_PLS_EST
+        mint_cost_pls = mint_count * aff_price
+
+        # Estimate sell revenue — route through LP partner (GIBS→AFF→WPLS)
+        sell_gibs = int(mint_count * sell_pct)
+        sell_gibs_wei = sell_gibs * 10**18
+        sell_path = [gibs_cs, aff_cs, wpls_cs]
+        sell_dex = 1  # V2
+        try:
+            amounts = get_amounts_out_v2(sell_gibs_wei, sell_path)
+            expected_sell = amounts[-1] if amounts else 0
+        except Exception:
+            expected_sell = 0
+        est_sell_pls = expected_sell / 1e18 if expected_sell else 0
 
         print(f"\n{'━'*60}")
-        print(f"  Cycle {batch}/{max_batches}  [{mode}]")
+        print(f"  Cycle {batch}/{max_batches}  [ATOMIC — mintLPAndSellPair]")
         print(f"  GIBS: WPLS={p_wpls:.2f}  AFF={p_aff:.2f}  "
-              f"Δ: WPLS {p_wpls-start_wpls:+.2f}  AFF {p_aff-start_aff:+.2f}")
-        print(f"  PLS: {joey_pls:,.0f}  Arbs: {arb_count}  Sells: {sells}  Buys: {buys}")
+              f"D: WPLS {p_wpls-start_wpls:+.2f}  AFF {p_aff-start_aff:+.2f}")
+        print(f"  PLS: {joey_pls:,.0f}  Arbs: {arb_count}  Cycles: {cycle_count}  "
+              f"Cumulative: {cumulative_pls:+,.0f} PLS")
+        print(f"  Mint: {mint_count} GIBS (cost ~{mint_cost_pls:.0f} PLS)  "
+              f"Sell: {sell_gibs} GIBS (~{est_sell_pls:.0f} PLS)  "
+              f"LP: {mint_count - sell_gibs} GIBS")
         print(f"{'━'*60}")
 
         if joey_pls < PLS_FLOOR:
@@ -775,201 +775,60 @@ def _ladder_up(max_batches: int = 40, dry_run: bool = False) -> None:
         arb_resp = probe.check_arb_response()
         if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
             arb_count += 1
-            print(f"  ★ ARB! {arb_resp.gibs_size_wei/1e18:.1f} GIBS by {arb_resp.sender[:10]}")
-            # LP ratchet at corrected price
-            lp_target = probe.lp_add_target()
-            if lp_target and lp_target > 10**18:
-                from .engines.dss import DSSEngine
-                e2 = DSSEngine(probe_controller=probe)
-                lp_result = e2._execute_lp_add_via_tgsv8(lp_target, GIBS_AFF_V2, dry_run=dry_run)
-                if lp_result.success:
-                    probe.clear_lp_add_target()
-                    print(f"  ↑ Floor locked at new price!")
-                else:
-                    probe.record_lp_add_failure()
-                    print(f"  ↑ Ratchet failed: {lp_result.notes}")
-            else:
-                probe.clear_lp_add_target()
+            print(f"  ARB! {arb_resp.gibs_size_wei/1e18:.1f} GIBS by {arb_resp.sender[:10]}")
+            probe.clear_lp_add_target()
         elif arb_resp.kind is ArbResponseKind.PENDING:
-            print(f"  ⏳ Arb pending — waiting 12s")
+            print(f"  Arb pending — waiting 12s")
             time.sleep(12)
             arb_resp = probe.check_arb_response()
             if arb_resp.kind is ArbResponseKind.ARB_DETECTED:
                 arb_count += 1
-                print(f"  ★ ARB (delayed)! {arb_resp.gibs_size_wei/1e18:.1f} GIBS")
+                print(f"  ARB (delayed)! {arb_resp.gibs_size_wei/1e18:.1f} GIBS")
                 probe.clear_lp_add_target()
 
-        if is_buy_cycle:
-            # ── BUY cycle: small buy from cheapest pair (upward nudge) ──
-            buys += 1
-            cheapest = "WPLS" if p_wpls <= p_aff else "AFF"
-            print(f"  ▲ BUY {BUY_PLS:,} PLS of GIBS from {cheapest} pair")
+        # ── Execute atomic cycle ──
+        min_sell_out = int(expected_sell * 85 / 100) if expected_sell else 0
 
-            WPLS_DEP_ABI = [{"constant": False, "inputs": [], "name": "deposit",
-                             "outputs": [], "payable": True, "type": "function"}]
-            wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_DEP_ABI)
-            send_tx(wpls_c.functions.deposit(),
-                    f"wrap {BUY_PLS} PLS", value=BUY_PLS * 10**18,
-                    skip_simulate=True, fixed_gas=50_000)
+        result = e2._execute_harvest_pair(
+            lau=GIBS_LAU,
+            payment_token=AFFECTION,
+            lp_partner=AFFECTION,
+            prime_count=mint_count,
+            purchase_amt=mint_count,
+            lp_bps=LP_BPS,
+            sell_path=sell_path,
+            sell_dex=sell_dex,
+            min_sell_out=min_sell_out,
+            dry_run=dry_run,
+            sell_pair_address=GIBS_AFF_V2,
+        )
 
-            v2_router_addr = cs(PULSEX_V2_ROUTER)
-            approve_if_needed(
-                w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
-                v2_router_addr, MAX_UINT, "WPLS→V2Router")
-
-            ROUTER_SWAP = [{"inputs": [
-                {"name": "amountIn", "type": "uint256"},
-                {"name": "amountOutMin", "type": "uint256"},
-                {"name": "path", "type": "address[]"},
-                {"name": "to", "type": "address"},
-                {"name": "deadline", "type": "uint256"}],
-                "name": "swapExactTokensForTokens",
-                "outputs": [{"name": "", "type": "uint256[]"}],
-                "type": "function"}]
-            v2_router = w3_submit.eth.contract(address=v2_router_addr, abi=ROUTER_SWAP)
-
-            path = [wpls_cs, aff_cs, gibs_cs]
-            r = send_tx(v2_router.functions.swapExactTokensForTokens(
-                            BUY_PLS * 10**18, 0, path,
-                            JOEY_WALLET, int(time.time()) + 300),
-                        f"buy GIBS ({BUY_PLS} PLS)",
-                        skip_simulate=True, fixed_gas=350_000, gas_tier="fast")
-            if r:
-                print(f"     TX: 0x{r['transactionHash'].hex()}")
-
-            # LP the bought GIBS + matching AFF
-            gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
-            aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-            ratio = _aff_ratio()
-            lp_g = gibs_bal
-            lp_a = int(lp_g * ratio)
-            if lp_a > aff_bal:
-                lp_a = aff_bal
-                lp_g = int(lp_a / ratio)
-            if lp_g > 10**18 and lp_a > 10**18:
-                send_tx(tgs.functions.deposit(gibs_cs, lp_g),
-                        "deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
-                send_tx(tgs.functions.deposit(aff_cs, lp_a),
-                        "deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
-                r = send_tx(tgs.functions.addLiquidity(
-                                gibs_cs, aff_cs, lp_g, lp_a,
-                                1500, cs(JOEY_WALLET), 1),
-                            f"LP {lp_g//10**18} GIBS + {lp_a//10**18} AFF",
-                            skip_simulate=True, fixed_gas=500_000)
-                if r:
-                    print(f"     LP: 0x{r['transactionHash'].hex()}")
-
+        if result.success:
+            cycle_count += 1
+            gas_pls = result.gas_wei / 1e18 if result.gas_wei else 0
+            net_pls = est_sell_pls - mint_cost_pls - gas_pls
+            cumulative_pls += net_pls
+            print(f"  P&L: sell~{est_sell_pls:.0f} - mint~{mint_cost_pls:.0f} "
+                  f"- gas~{gas_pls:.0f} = {net_pls:+.0f} PLS  "
+                  f"(cumulative: {cumulative_pls:+,.0f})")
         else:
-            # ── SELL+LP cycle: mint → small sell → LP rest ──
-            sells += 1
-
-            # Acquire AFF for minting (from Hub or buy)
-            aff_joey = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-            aff_hub = safe(erc20(AFFECTION), "balanceOf", cs(JOYSTICK_HUB)) or 0
-            aff_needed = MINT_COUNT * 10**18
-            if aff_joey + aff_hub < aff_needed:
-                # Quick AFF buy
-                deficit_aff = int((aff_needed - aff_joey - aff_hub) / 10**18) + 5
-                pls_cost = deficit_aff * 42
-                WPLS_DEP_ABI = [{"constant": False, "inputs": [], "name": "deposit",
-                                 "outputs": [], "payable": True, "type": "function"}]
-                wpls_c = w3_submit.eth.contract(address=wpls_cs, abi=WPLS_DEP_ABI)
-                send_tx(wpls_c.functions.deposit(),
-                        f"wrap {pls_cost} PLS", value=pls_cost * 10**18,
-                        skip_simulate=True, fixed_gas=50_000)
-                v1_router = router_contract(w3=w3_submit)
-                approve_if_needed(
-                    w3_submit.eth.contract(address=wpls_cs, abi=erc20(WPLS).abi),
-                    cs(PULSEX_V1_ROUTER), MAX_UINT, "WPLS→V1Router")
-                send_tx(v1_router.functions.swapExactTokensForTokens(
-                            pls_cost * 10**18, 0, [wpls_cs, aff_cs],
-                            JOEY_WALLET, int(time.time()) + 300),
-                        f"buy {deficit_aff} AFF",
-                        skip_simulate=True, fixed_gas=300_000)
-
-            # Prime + Purchase GIBS
-            print(f"  ▼ Mint {MINT_COUNT} GIBS → sell {SELL_COUNT} + LP {LP_COUNT}")
-            send_tx(hub.functions.primeGibs(MINT_COUNT),
-                    f"primeGibs({MINT_COUNT})", gas_tier="fast")
-            send_tx(gibs_contract.functions.Purchase(aff_cs, MINT_COUNT * 10**18),
-                    f"Purchase({MINT_COUNT} GIBS)",
-                    skip_simulate=True, fixed_gas=200_000)
-
-            # Sell SELL_COUNT GIBS into GIBS/AFF pair
-            pair_cs = cs(GIBS_AFF_V2)
-            pc = w3_submit.eth.contract(address=pair_cs, abi=pair_abi)
-            res = pc.functions.getReserves().call()
-            t0 = pc.functions.token0().call()
-            if t0.lower() == AFFECTION.lower():
-                r_aff, r_gibs = res[0], res[1]
-            else:
-                r_gibs, r_aff = res[0], res[1]
-
-            sell_wei = SELL_COUNT * 10**18
-            aff_out = (sell_wei * 997 * r_aff) // (r_gibs * 1000 + sell_wei * 997)
-
-            gibs_token = w3_submit.eth.contract(address=gibs_cs, abi=TRANSFER_ABI)
-            send_tx(gibs_token.functions.transfer(pair_cs, sell_wei),
-                    f"transfer {SELL_COUNT} GIBS → pair",
-                    skip_simulate=True, fixed_gas=150_000, gas_tier="fast")
-
-            pair_swap = w3_submit.eth.contract(address=pair_cs, abi=SWAP_ABI)
-            # token0=AFF, token1=GIBS → GIBS in, AFF out = amount0Out
-            r = send_tx(pair_swap.functions.swap(aff_out, 0, JOEY_WALLET, b""),
-                        f"swap {SELL_COUNT} GIBS → {aff_out//10**18} AFF",
-                        skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
-            if r:
-                print(f"     Sold: 0x{r['transactionHash'].hex()}")
-                try:
-                    probe.record_sell(
-                        sell_gibs_wei=sell_wei,
-                        block_number=r["blockNumber"],
-                        tx_hash=r["transactionHash"].hex(),
-                        pair_address=GIBS_AFF_V2,
-                        gibs_is_token0=False,
-                    )
-                except Exception as exc:
-                    print(f"     probe: {exc}")
-
-            # LP remaining GIBS + AFF
-            gibs_bal = safe(erc20(GIBS_LAU), "balanceOf", JOEY_WALLET) or 0
-            aff_bal = safe(erc20(AFFECTION), "balanceOf", JOEY_WALLET) or 0
-            ratio = _aff_ratio()
-            lp_g = gibs_bal
-            lp_a = int(lp_g * ratio)
-            if lp_a > aff_bal:
-                lp_a = aff_bal
-                lp_g = int(lp_a / ratio)
-            if lp_g > 10**18 and lp_a > 10**18:
-                send_tx(tgs.functions.deposit(gibs_cs, lp_g),
-                        "deposit GIBS", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
-                send_tx(tgs.functions.deposit(aff_cs, lp_a),
-                        "deposit AFF", skip_simulate=True, fixed_gas=200_000, gas_tier="fast")
-                r = send_tx(tgs.functions.addLiquidity(
-                                gibs_cs, aff_cs, lp_g, lp_a,
-                                1500, cs(JOEY_WALLET), 1),
-                            f"LP {lp_g//10**18} GIBS + {lp_a//10**18} AFF",
-                            skip_simulate=True, fixed_gas=500_000)
-                if r:
-                    print(f"     LP: 0x{r['transactionHash'].hex()}")
-
-        # Post-cycle prices
-        new_wpls, new_aff = _gibs_prices()
-        print(f"  → WPLS={new_wpls:.2f} ({new_wpls-p_wpls:+.2f})  "
-              f"AFF={new_aff:.2f} ({new_aff-p_aff:+.2f})")
+            print(f"  FAILED: {result.notes}")
+            if "insufficient" in result.notes.lower():
+                print(f"  Hub may need more AFF. Stopping.")
+                break
 
         if batch < max_batches:
-            wait = 20 if not is_buy_cycle else 10
-            time.sleep(wait)
+            time.sleep(20)
 
     # Summary
     final_wpls, final_aff = _gibs_prices()
     joey_final = w3_read.eth.get_balance(cs(JOEY_WALLET)) / 1e18
     print(f"\n{'━'*60}")
-    print(f"  LADDER-UP COMPLETE  ({max_batches} cycles)")
-    print(f"  GIBS/WPLS: {start_wpls:.2f} → {final_wpls:.2f} ({final_wpls-start_wpls:+.2f})")
-    print(f"  GIBS/AFF:  {start_aff:.2f} → {final_aff:.2f} ({final_aff-start_aff:+.2f})")
-    print(f"  Arb detections: {arb_count}  Sells: {sells}  Buys: {buys}")
+    print(f"  PUMP COMPLETE  ({cycle_count}/{max_batches} cycles)")
+    print(f"  GIBS/WPLS: {start_wpls:.2f} -> {final_wpls:.2f} ({final_wpls-start_wpls:+.2f})")
+    print(f"  GIBS/AFF:  {start_aff:.2f} -> {final_aff:.2f} ({final_aff-start_aff:+.2f})")
+    print(f"  Arb detections: {arb_count}  Cycles: {cycle_count}")
+    print(f"  Cumulative P&L: {cumulative_pls:+,.0f} PLS")
     print(f"  Joey PLS: {joey_final:,.0f}")
     print(f"{'━'*60}")
 
