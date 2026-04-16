@@ -178,6 +178,13 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8369"))  # 369 = PulseChain :)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 
+# ─── Privileged endpoint gate ────────────────────────────────────────
+# Required for /ws/terminal (can execute scripts) and POST /api/lp-fees/reset-baseline
+# (mutates baseline state). If unset, both endpoints return 503 Service Unavailable.
+# The token is a shared secret — set it in .env.pulse and pass it as ?token=<value>
+# on WS connect, or as Authorization: Bearer <value> on REST.
+DASHBOARD_TERMINAL_TOKEN = os.getenv("DASHBOARD_TERMINAL_TOKEN", "")
+
 # ─── Polling ─────────────────────────────────────────────────────────
 # How often the dashboard frontend should poll (hint to client)
 POLL_INTERVAL_SEC = 15

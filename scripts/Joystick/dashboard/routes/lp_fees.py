@@ -8,8 +8,9 @@ baseline (auth TODO — no auth pattern exists in the dashboard yet).
 
 import logging
 from dataclasses import asdict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..auth import require_admin
 from ...oracle.lp_fees import (
     compute_fee_accrual,
     load_baseline,
@@ -100,8 +101,7 @@ async def get_lp_fee_history(max_entries: int = 1000):
 
 
 @router.post("/lp-fees/reset-baseline", response_model=LPFeeResetResponse)
-async def reset_lp_fee_baseline():
-    # TODO: add auth token check — no dashboard auth pattern exists yet.
+async def reset_lp_fee_baseline(request: Request, _: None = Depends(require_admin)):
     try:
         positions = scan_joey_lp_positions()
         save_baseline(positions)

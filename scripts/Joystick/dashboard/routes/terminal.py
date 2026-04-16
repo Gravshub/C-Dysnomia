@@ -15,9 +15,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 
 from .. import config
+from ..auth import check_ws_token
 
 router = APIRouter()
 logger = logging.getLogger("joystick.routes.terminal")
@@ -179,9 +180,14 @@ async def get_logs(
 # ── WebSocket: Live terminal ────────────────────────────────────────
 
 @router.websocket("/ws/terminal")
-async def terminal_ws(ws: WebSocket):
+async def terminal_ws(ws: WebSocket, token: Optional[str] = Query(default=None)):
     """
     WebSocket terminal.
+
+    Auth: requires ?token=<DASHBOARD_TERMINAL_TOKEN>. Connections without a
+    matching token are closed with policy-violation (1008). If the server
+    token is unset, ALL connections are closed — the endpoint is effectively
+    disabled, which is the safe default for public deploys.
 
     Server → Client messages:
       {"type": "log",    "text": "...", "ts": epoch}
@@ -191,6 +197,11 @@ async def terminal_ws(ws: WebSocket):
     Client → Server messages:
       {"type": "command", "text": "..."}
     """
+    if not check_ws_token(token):
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+        logger.warning("Terminal WS rejected (invalid/missing token)")
+        return
+
     await ws.accept()
     _clients.add(ws)
     logger.info(f"Terminal client connected ({len(_clients)} total)")

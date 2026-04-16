@@ -67,9 +67,12 @@ async def health():
             "block": block,
         }
     except Exception as e:
+        # Don't leak stack paths / RPC internals to unauthenticated callers;
+        # full exception goes to the server log instead.
+        logger.exception("health: RPC probe failed")
         return {
             "status": "degraded",
-            "error": str(e),
+            "error": "rpc probe failed",
         }
 
 # ─── Routes ──────────────────────────────────────────────────────────
