@@ -515,7 +515,7 @@ Full source in project file `TGSv8`. Key functions:
 | Web Weave | E8 | Deploy V4 → mint → pair → burn LP → creates new arb/spine edges |
 
 ### Implementation Rules
-- Always simulate via `eth_call` before sending any TX
+- Always simulate via `eth_call` before sending any TX — EXCEPT on trusted hot paths where execution latency matters (e.g., E2 `primeGibs` / `mintLPAndSell`); these may set `skip_simulate=True` because the path has been hardened and simulation overhead costs fills
 - Always `estimate_gas()` with `GAS_MULT` (2.5x) multiplier — abort if it fails, never send blind
 - **EIP-1559 Type 2 transactions** — all TXs use `maxFeePerGas` + `maxPriorityFeePerGas`, gas ceiling checks against actual `maxFeePerGas`
 - Gas denomination: **Beats** (not Gwei). 1 PLS = 1,000,000,000 Beats. `eth_gasPrice` returns Impulses (wei-equiv) — divide by 10^9 for Beats
