@@ -87,6 +87,15 @@ def arb_profit(
             "reason": "No tokens available to purchase",
         }
 
+    # Guard against broken Purchase contracts that would report a zero market
+    # rate. Without this, payment_cost = 0 makes any arb look infinitely
+    # profitable and outranks real opportunities.
+    if not rate or rate <= 0:
+        return {
+            "profitable": False, "profit_wei": 0, "token_amount": token_amount,
+            "reason": "Zero/invalid market rate — Purchase contract likely broken",
+        }
+
     # Cost in payment tokens
     payment_cost = token_amount * rate // 10**18
 
