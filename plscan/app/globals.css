@@ -41,3 +41,16 @@ body {
   background: linear-gradient(90deg, transparent, #8A2BE2, transparent);
   animation: scanner 1.2s linear infinite;
 }
+
+/* Focus ring for keyboard nav */
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid #B44FFF;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Mobile table scroll hint */
+@media (max-width: 640px) {
+  .card-surface { padding: 1rem; }
+  table { min-width: 560px; }
+}
