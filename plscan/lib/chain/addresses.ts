@@ -15,14 +15,14 @@ export interface Factory {
   initCodeHash: Hex | null;
 }
 
-// NOTE: 9inch V2 and 9mm V2 factory addresses must be verified against
-// each project's docs/deployed contracts before first deploy.
-// Values below are the current mainnet (PulseChain) deployments.
+// Factory addresses are canonical EIP-55 checksum. The 9inch V2 and 9mm V2
+// addresses are cross-checked against scripts/Joystick/core/config.py where
+// they've been in production use for months.
 export const FACTORIES: Factory[] = [
   { dex: 'pulsex-v1', address: '0x1715a3E4A142d8b698131108995174F37aEBA10D', initCodeHash: null },
   { dex: 'pulsex-v2', address: '0x29eA7545DEf87022BAdc76323F373EA1e707C523', initCodeHash: null },
-  { dex: '9inch-v2',  address: '0xe5dCDc13B628C2df813dB1080367e929c1507CA0', initCodeHash: null },
-  { dex: '9mm-v2',    address: '0x3a0Fa7884dD93f3cd234bBE2A0958Ef04b05E13b', initCodeHash: null }
+  { dex: '9inch-v2',  address: '0x7A8fC9Dea0B3316B76686f2CF58e1B3c02890f8D', initCodeHash: null },
+  { dex: '9mm-v2',    address: '0xE26E7f6b5A43a667DbA42cd9c829D5c75A8093B1', initCodeHash: null }
 ];
 
 // Curated quote-token universe for discovery.
@@ -33,11 +33,11 @@ export const QUOTE_TOKENS: ReadonlyArray<{ address: Hex; symbol: string; isStabl
   { address: PDAI,                                             symbol: 'pDAI',     isStableUsd: true },
   { address: PUSDC,                                            symbol: 'pUSDC',    isStableUsd: true },
   { address: PUSDT,                                            symbol: 'pUSDT',    isStableUsd: true },
-  { address: '0x2b591e99afe9f32eaa6214f7b7629768c40eeb39',    symbol: 'HEX',      isStableUsd: false },
-  { address: '0x95b303987a60c71504d99aa1b13b4da07b0790ab',    symbol: 'PLSX',     isStableUsd: false },
+  { address: '0x2b591e99afE9f32eAA6214f7B7629768c40Eeb39',    symbol: 'HEX',      isStableUsd: false },
+  { address: '0x95B303987A60C71504D99Aa1b13B4DA07b0790ab',    symbol: 'PLSX',     isStableUsd: false },
   { address: '0x2fa878Ab3F87CC1C9737Fc071108F904c0B0C95d',    symbol: 'INC',      isStableUsd: false },
   { address: '0xCc78A0acDF847A2C1714D2A925bB4477df5d48a6',    symbol: 'ATROPA',   isStableUsd: false },
-  { address: '0x1d177cb9efeea49a8b97ab1c72785a3a37abc9ff',    symbol: 'FED',      isStableUsd: false },
+  { address: '0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff',    symbol: 'FED',      isStableUsd: false },
   { address: '0x24F0154C1dCe548AdF15da2098Fdd8B8A3B8151D',    symbol: 'AFFECTION',isStableUsd: false },
   { address: '0xA1BEe1daE9Af77dAC73aA0459eD63b4D93fC6d29',    symbol: 'WM',       isStableUsd: false },
   { address: '0x02DcdD04e3F455D838cd1249292C58f3B79e3C3C',    symbol: 'WETH',     isStableUsd: false }
