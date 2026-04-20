@@ -29,13 +29,15 @@ export async function callWithFallback<T>(
   fn: (p: JsonRpcProvider) => Promise<T>,
   urls: string[] = rpcUrls()
 ): Promise<T> {
-  let lastErr: unknown;
+  const errors: Error[] = [];
   for (const url of urls) {
     try {
       return await fn(buildProvider(url));
     } catch (err) {
-      lastErr = err;
+      const e = err instanceof Error ? err : new Error(String(err));
+      (e as Error & { rpcUrl?: string }).rpcUrl = url;
+      errors.push(e);
     }
   }
-  throw new Error(`All RPCs failed: ${String(lastErr)}`);
+  throw new AggregateError(errors, `All ${urls.length} RPC URLs failed`);
 }
