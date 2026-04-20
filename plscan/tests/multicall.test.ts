@@ -32,4 +32,18 @@ describe('multicall', () => {
     expect(results).toHaveLength(1600);
     expect(results.every(r => r.success)).toBe(true);
   }, 30000);
+
+  it('throws on chunkSize 0 instead of looping forever', async () => {
+    const calls = [{ target: WPLS, allowFailure: true, callData: erc20.encodeFunctionData('decimals', []) }];
+    await expect(multicallBatch(calls, { chunkSize: 0 })).rejects.toThrow(/chunkSize must be > 0/);
+  });
+
+  it('throws when allowFailure=false and target reverts', async () => {
+    const calls = [{
+      target: WPLS,
+      allowFailure: false,
+      callData: '0xdeadbeef' // unknown selector — pair call reverts
+    }];
+    await expect(multicallBatch(calls)).rejects.toThrow();
+  }, 20000);
 });
