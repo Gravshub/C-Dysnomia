@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getAddress } from 'ethers';
 import { FACTORIES, QUOTE_TOKENS, MULTICALL3, WPLS, PDAI } from '@/lib/chain/addresses';
+import { labelFor, KNOWN_LABELS } from '@/lib/labels';
 
 const isAddr = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s);
 
@@ -49,5 +50,22 @@ describe('chain/addresses EIP-55 checksum', () => {
       expect(() => getAddress(q.address)).not.toThrow();
       expect(getAddress(q.address)).toBe(q.address);
     }
+  });
+});
+
+describe('labels', () => {
+  it('labels known PulseX routers', () => {
+    expect(labelFor('0x98bf93ebf5c380C0e6Ae8e192A7e2AE08edAcc02')).toBe('PulseX V1 Router');
+    expect(labelFor('0x165C3410fC91EF562C50559f7d2289fEbed552d9')).toBe('PulseX V2 Router');
+  });
+  it('labels burn addresses', () => {
+    expect(labelFor('0x0000000000000000000000000000000000000000')).toBe('Null');
+    expect(labelFor('0x000000000000000000000000000000000000dEaD')).toBe('Burn');
+  });
+  it('returns null for unknown addresses', () => {
+    expect(labelFor('0x17367877aF5A8D0Eb33ba5689A880f696386E24D')).toBeNull();
+  });
+  it('is case-insensitive', () => {
+    expect(labelFor('0x165c3410fc91ef562c50559f7d2289febed552d9')).toBe('PulseX V2 Router');
   });
 });
