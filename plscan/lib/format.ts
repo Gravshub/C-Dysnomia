@@ -47,7 +47,6 @@ export function formatDex(d: string): string {
   switch (d) {
     case 'pulsex-v1': return 'PulseX V1';
     case 'pulsex-v2': return 'PulseX V2';
-    case '9inch-v2':  return '9inch V2';
     case '9mm-v2':    return '9mm V2';
     default:          return d;
   }

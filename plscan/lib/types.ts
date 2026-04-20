@@ -11,7 +11,6 @@ export interface TokenMeta {
 export type DexName =
   | 'pulsex-v1'
   | 'pulsex-v2'
-  | '9inch-v2'
   | '9mm-v2';
 
 export interface PairReserves {
