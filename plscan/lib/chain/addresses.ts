@@ -15,14 +15,16 @@ export interface Factory {
   initCodeHash: Hex | null;
 }
 
-// Factory addresses are canonical EIP-55 checksum. The 9inch V2 and 9mm V2
-// addresses are cross-checked against scripts/Joystick/core/config.py where
-// they've been in production use for months.
+// Factory addresses are canonical EIP-55 checksum, each confirmed to have
+// on-chain bytecode and respond to getPair(). The Joystick production config
+// (scripts/Joystick/core/config.py) stores an obsolete 9mm address that has
+// no code on-chain; the value below is the live 9mm V2 factory (confirmed
+// 2026-04-20 via getPair(WPLS, pDAI) → 0x363aDf24...).
+// 9inch V2 factory on PulseChain has not been located yet — MVP skips it.
 export const FACTORIES: Factory[] = [
   { dex: 'pulsex-v1', address: '0x1715a3E4A142d8b698131108995174F37aEBA10D', initCodeHash: null },
   { dex: 'pulsex-v2', address: '0x29eA7545DEf87022BAdc76323F373EA1e707C523', initCodeHash: null },
-  { dex: '9inch-v2',  address: '0x7A8fC9Dea0B3316B76686f2CF58e1B3c02890f8D', initCodeHash: null },
-  { dex: '9mm-v2',    address: '0xE26E7f6b5A43a667DbA42cd9c829D5c75A8093B1', initCodeHash: null }
+  { dex: '9mm-v2',    address: '0x3a0Fa7884dD93f3cd234bBE2A0958Ef04b05E13b', initCodeHash: null }
 ];
 
 // Curated quote-token universe for discovery.

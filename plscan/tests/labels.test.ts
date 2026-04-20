@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getAddress } from 'ethers';
 import { FACTORIES, QUOTE_TOKENS, MULTICALL3, WPLS, PDAI } from '@/lib/chain/addresses';
+import { callWithFallback } from '@/lib/chain/rpc';
 import { labelFor, KNOWN_LABELS } from '@/lib/labels';
 
 const isAddr = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s);
@@ -68,4 +69,18 @@ describe('labels', () => {
   it('is case-insensitive', () => {
     expect(labelFor('0x165c3410fc91ef562c50559f7d2289febed552d9')).toBe('PulseX V2 Router');
   });
+});
+
+describe('chain/addresses liveness', () => {
+  it('all factory addresses have bytecode on PulseChain', async () => {
+    for (const f of FACTORIES) {
+      const code = await callWithFallback(async (p) => p.getCode(f.address));
+      expect(code.length, `${f.dex} at ${f.address} has no code`).toBeGreaterThan(2);
+    }
+  }, 30000);
+
+  it('MULTICALL3 has bytecode', async () => {
+    const code = await callWithFallback(async (p) => p.getCode(MULTICALL3));
+    expect(code.length).toBeGreaterThan(2);
+  }, 15000);
 });
