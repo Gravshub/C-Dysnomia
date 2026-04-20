@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0D0D1A;
+  --bg-secondary: #13132A;
+  --accent-primary: #8A2BE2;
+  --accent-tertiary: #FF2D9D;
+}
+
+body {
+  background: var(--bg-primary);
+  color: #FFFFFF;
+  min-height: 100vh;
+}
+
+.card-surface {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(138, 43, 226, 0.2);
+  border-radius: 12px;
+}
+
+.frost {
+  backdrop-filter: blur(8px);
+  background: rgba(19, 19, 42, 0.7);
+}
+
+.brand-text {
+  background: linear-gradient(135deg, #8A2BE2, #FF2D9D);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
