@@ -1,4 +1,4 @@
-import { Contract, JsonRpcProvider } from 'ethers';
+import { Contract } from 'ethers';
 import { MULTICALL3 } from './addresses';
 import { ABI_MULTICALL3 } from './abi';
 import { callWithFallback } from './rpc';
@@ -15,9 +15,11 @@ export interface Result3 {
 
 export async function multicallBatch(
   calls: Call3[],
-  opts: { chunkSize?: number; provider?: JsonRpcProvider } = {}
+  opts: { chunkSize?: number } = {}
 ): Promise<Result3[]> {
   const chunkSize = opts.chunkSize ?? 1000;
+  if (chunkSize <= 0) throw new Error(`chunkSize must be > 0, got ${chunkSize}`);
+
   const chunks: Call3[][] = [];
   for (let i = 0; i < calls.length; i += chunkSize) chunks.push(calls.slice(i, i + chunkSize));
 
@@ -25,13 +27,19 @@ export async function multicallBatch(
     callWithFallback(async (provider) => {
       const mc = new Contract(MULTICALL3, ABI_MULTICALL3, provider);
       const raw = await mc.aggregate3.staticCall(chunk);
-      return (raw as { success: boolean; returnData: string }[]).map(r => ({
-        success: r.success,
-        returnData: r.returnData
-      }));
+      return (raw as Result3[]).map(r => ({ success: r.success, returnData: r.returnData }));
     });
 
   const results: Result3[] = [];
-  for (const chunk of chunks) results.push(...await runChunk(chunk));
+  for (let ci = 0; ci < chunks.length; ci++) {
+    try {
+      results.push(...await runChunk(chunks[ci]));
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      (e as Error & { chunkIndex?: number; chunkSize?: number }).chunkIndex = ci;
+      (e as Error & { chunkIndex?: number; chunkSize?: number }).chunkSize = chunks[ci].length;
+      throw e;
+    }
+  }
   return results;
 }
