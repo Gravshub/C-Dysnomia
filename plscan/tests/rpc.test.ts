@@ -18,4 +18,10 @@ describe('rpc', () => {
     const block = await callWithFallback(async (p) => p.getBlockNumber(), urls);
     expect(block).toBeGreaterThan(25_000_000);
   }, 20000);
+
+  it('callWithFallback throws AggregateError when all URLs fail', async () => {
+    const urls = ['http://127.0.0.1:1', 'http://127.0.0.1:2'];
+    await expect(callWithFallback(async (p) => p.getBlockNumber(), urls))
+      .rejects.toThrow(/All 2 RPC URLs failed/);
+  }, 20000);
 });
