@@ -32,3 +32,12 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+@keyframes scanner {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.scanner-line {
+  background: linear-gradient(90deg, transparent, #8A2BE2, transparent);
+  animation: scanner 1.2s linear infinite;
+}
