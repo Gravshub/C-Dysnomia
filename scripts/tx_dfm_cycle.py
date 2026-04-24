@@ -106,6 +106,107 @@ def save_state(state: dict) -> None:
     os.replace(tmp, STATE_FILE)
 
 
+# ─── TX helpers ──────────────────────────────────────────────────────────
+def _load_signing_key() -> str:
+    pk = os.environ.get("JOEY_PK") or os.environ.get("DYSNOMIA_PRIVATE_KEY")
+    if not pk:
+        print("ERROR: set JOEY_PK or DYSNOMIA_PRIVATE_KEY env var", file=sys.stderr)
+        sys.exit(2)
+    return pk if pk.startswith("0x") else "0x" + pk
+
+
+def build_gas_params() -> dict:
+    base_fee = w3_read.eth.gas_price
+    if base_fee > GAS_PRICE_CEIL:
+        raise RuntimeError(f"gas too high: {base_fee/1e9:.0f} Beats > ceiling {GAS_PRICE_CEIL/1e9:.0f} Beats")
+    max_fee = int(base_fee * 1.5)
+    return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": PRIORITY_FEE}
+
+
+def simulate_call(to: str, data: bytes, value: int = 0, sender: str = JOEY) -> bytes:
+    """Raw eth_call simulation. Raises ContractLogicError on revert with decoded message if available."""
+    return w3_read.eth.call({"from": sender, "to": to, "data": data, "value": value})
+
+
+def preflight_gas() -> None:
+    """Abort if gas price is over ceiling or PLS balance below floor."""
+    pls = w3_read.eth.get_balance(JOEY)
+    if pls < PLS_FLOOR:
+        raise RuntimeError(f"PLS balance {pls/1e18:,.0f} below floor {PLS_FLOOR/1e18:,.0f}")
+    gp = w3_read.eth.gas_price
+    if gp > GAS_PRICE_CEIL:
+        raise RuntimeError(f"gas too high: {gp/1e9:.0f} Beats")
+
+
+def send_tx(to: str, data: bytes, value: int = 0, *, label: str, dry_run: bool) -> Optional[dict]:
+    """
+    Simulate via eth_call, estimate gas, then (unless dry_run) sign + submit + await receipt.
+    Returns receipt dict on success, None on dry_run success. Raises on any failure.
+    """
+    print(f"\n── {label} ──")
+
+    # 1. Simulate
+    try:
+        simulate_call(to, data, value)
+        print(f"  simulate: OK")
+    except ContractLogicError as e:
+        print(f"  simulate: REVERT — {e}")
+        raise
+    except Exception as e:
+        print(f"  simulate: ERROR — {e}")
+        raise
+
+    # 2. Gas estimate (with 2.5x multiplier)
+    try:
+        est = w3_read.eth.estimate_gas({"from": JOEY, "to": to, "data": data, "value": value})
+    except Exception as e:
+        print(f"  estimate_gas: FAIL — {e}")
+        raise
+    gas_limit = int(est * GAS_MULT)
+    print(f"  estimate_gas: {est:,} → gas_limit {gas_limit:,}")
+
+    # 3. Gas params
+    gas_params = build_gas_params()
+    print(f"  maxFeePerGas: {gas_params['maxFeePerGas']/1e9:,.0f} Beats, priority: {gas_params['maxPriorityFeePerGas']/1e9:.6f} Beats")
+
+    if dry_run:
+        print("  [dry-run] skipping submit")
+        return None
+
+    # 4. Sign + submit
+    nonce = w3_submit.eth.get_transaction_count(JOEY)
+    tx = {
+        "from":     JOEY,
+        "to":       to,
+        "data":     data,
+        "value":    value,
+        "gas":      gas_limit,
+        "nonce":    nonce,
+        "chainId":  CHAIN_ID,
+        "type":     2,
+        **gas_params,
+    }
+    signed = w3_submit.eth.account.sign_transaction(tx, _load_signing_key())
+    tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+    print(f"  submit: 0x{tx_hash.hex()}  (nonce {nonce})")
+
+    # 5. Await receipt
+    receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+    if receipt["status"] != 1:
+        raise RuntimeError(f"TX {tx_hash.hex()} reverted on-chain")
+    print(f"  confirmed: block {receipt['blockNumber']}, gas used {receipt['gasUsed']:,}")
+    return dict(receipt)
+
+
+def confirm_or_abort(prompt: str, skip: bool) -> None:
+    if skip:
+        return
+    ans = input(f"\n{prompt} [y/N]: ").strip().lower()
+    if ans != "y":
+        print("Aborted.")
+        sys.exit(0)
+
+
 # ─── --verify mode ───────────────────────────────────────────────────────
 def do_verify() -> None:
     block = w3_read.eth.block_number
