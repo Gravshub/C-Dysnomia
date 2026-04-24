@@ -9,6 +9,7 @@ Phases:
 
 Flags:
   --n <int>          Tokens per round for cycle phase (default 10)
+  --hold-back <int>  Retain this many of each ammo during Claim phase (default 0)
   --dry-run          eth_call simulate every TX, submit nothing
   --yes              Skip per-phase interactive confirmation
   --verify           Print balances + ammo state + allowances, exit
@@ -382,10 +383,18 @@ def _encode_tt_claim(spend_token: str, amount: int) -> bytes:
     return SEL_TT_CLAIM + abi_encode(["address", "uint256"], [spend_token, amount])
 
 
-def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
-    """One batch cycle: DFM.mint(5N) + ammo.mint(N)×5 + DFM.Claim(ammo, N)×5."""
+def do_cycle(*, n: int, hold_back: int = 0, dry_run: bool, skip_confirm: bool) -> None:
+    """One batch cycle: DFM.mint(5N) + ammo.mint(N)×5 + DFM.Claim(ammo, N-K)×5.
+
+    hold_back K: amount of each ammo retained in Joey's wallet per batch
+    (Claim amount is N-K). K=0 preserves original behavior.
+    """
     if n <= 0:
         raise ValueError("--n must be positive")
+    if hold_back < 0:
+        raise ValueError("--hold-back must be >= 0")
+    if hold_back > n:
+        raise ValueError(f"--hold-back ({hold_back}) cannot exceed --n ({n})")
     preflight_gas()
 
     state = load_state()
@@ -396,9 +405,14 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
     ammo_addrs = [Web3.to_checksum_address(a["address"]) for a in ammo_entries]
 
     # Scale to wei
-    N_wei   = n * 10**18
-    TOTAL   = 5 * N_wei
-    print(f"Phase: cycle  N={n}  total_fdic_approvals_needed={10*n}  dry_run={dry_run}")
+    N_wei       = n * 10**18
+    K_wei       = hold_back * 10**18
+    CLAIM_WEI   = N_wei - K_wei
+    claim_amt   = n - hold_back
+    TOTAL       = 5 * N_wei
+    skip_claim  = (hold_back == n)
+    tx_count    = 1 + 5 + (0 if skip_claim else 5)
+    print(f"Phase: cycle  N={n}  hold_back={hold_back}  claim={claim_amt}  tx_count={tx_count}  dry_run={dry_run}")
 
     # Prerequisite: FDIC balance for 10N (5N for DFM.mint + 5×N for ammo.mint)
     fdic_bal = erc20_balance(FDIC, JOEY)
@@ -411,7 +425,7 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
     for addr in ammo_addrs:
         if erc20_allowance(FDIC, JOEY, addr) < N_wei:
             raise RuntimeError(f"FDIC → {addr} allowance too low — run --phase deploy")
-        if erc20_allowance(addr, JOEY, DFM) < N_wei:
+        if not skip_claim and erc20_allowance(addr, JOEY, DFM) < CLAIM_WEI:
             raise RuntimeError(f"{addr} → DFM allowance too low — run --phase deploy")
 
     # Live Debenture verification
@@ -422,18 +436,22 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
 
     # Pre-snapshot
     pre = {
-        "fdic_joey":  erc20_balance(FDIC, JOEY),
-        "dfm_joey":   erc20_balance(DFM,  JOEY),
-        "fdic_ammo":  [erc20_balance(FDIC, a) for a in ammo_addrs],
+        "fdic_joey":   erc20_balance(FDIC, JOEY),
+        "dfm_joey":    erc20_balance(DFM,  JOEY),
+        "fdic_ammo":   [erc20_balance(FDIC, a) for a in ammo_addrs],
+        "joey_ammo":   [erc20_balance(a,    JOEY) for a in ammo_addrs],
     }
     print(f"\nPre-batch state:")
     print(f"  Joey FDIC: {pre['fdic_joey']/1e18:,.6f}")
     print(f"  Joey DFM:  {pre['dfm_joey']/1e18:,.6f}")
     for i, bal in enumerate(pre["fdic_ammo"]):
-        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal/1e18:,.6f}")
+        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal/1e18:,.6f}  |  Joey holds: {pre['joey_ammo'][i]/1e18:,.6f}")
 
+    # FDIC spent by Joey = 10N minted - 5*(N-K) claimed back = 5N + 5K
+    fdic_spend     = 5 * (n + hold_back)
+    hold_back_note = "" if hold_back == 0 else f" + hold back {hold_back} of each ammo ({5*hold_back} total)"
     confirm_or_abort(
-        f"Execute 11-TX batch? (will lock 5×{n} = {5*n} FDIC permanently, gain {5*n} DFM)",
+        f"Execute {tx_count}-TX batch? (spend {fdic_spend} FDIC, gain {5*n} DFM{hold_back_note})",
         skip_confirm or dry_run,
     )
 
@@ -444,25 +462,29 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
     for entry, addr in zip(ammo_entries, ammo_addrs):
         send_tx(addr, _encode_tt_mint(N_wei), label=f"{entry['symbol']}.mint({n})", dry_run=dry_run)
 
-    # TXs 7-11: each DFM.Claim(ammo, N)
-    for entry, addr in zip(ammo_entries, ammo_addrs):
-        send_tx(
-            DFM,
-            _encode_tt_claim(addr, N_wei),
-            label=f"DFM.Claim({entry['symbol']}, {n})",
-            dry_run=dry_run,
-        )
+    # TXs 7-11: each DFM.Claim(ammo, N-K) — skipped entirely if hold_back == n
+    if skip_claim:
+        print(f"\n[hold-back={n}] Skipping Claim phase — all {5*n} ammo retained in Joey's wallet.")
+    else:
+        for entry, addr in zip(ammo_entries, ammo_addrs):
+            send_tx(
+                DFM,
+                _encode_tt_claim(addr, CLAIM_WEI),
+                label=f"DFM.Claim({entry['symbol']}, {claim_amt})",
+                dry_run=dry_run,
+            )
 
     if dry_run:
-        print("\n[dry-run] 11 TXs simulated OK.")
+        print(f"\n[dry-run] {tx_count} TXs simulated OK.")
         return
 
     # Post-snapshot + verification
     time.sleep(2)  # small settle for RPC consistency
     post = {
-        "fdic_joey":  erc20_balance(FDIC, JOEY),
-        "dfm_joey":   erc20_balance(DFM,  JOEY),
-        "fdic_ammo":  [erc20_balance(FDIC, a) for a in ammo_addrs],
+        "fdic_joey":   erc20_balance(FDIC, JOEY),
+        "dfm_joey":    erc20_balance(DFM,  JOEY),
+        "fdic_ammo":   [erc20_balance(FDIC, a) for a in ammo_addrs],
+        "joey_ammo":   [erc20_balance(a,    JOEY) for a in ammo_addrs],
     }
     d_fdic = post["fdic_joey"] - pre["fdic_joey"]
     d_dfm  = post["dfm_joey"]  - pre["dfm_joey"]
@@ -470,11 +492,16 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
     print(f"  Joey FDIC: {post['fdic_joey']/1e18:,.6f}  (Δ {d_fdic/1e18:+,.6f})")
     print(f"  Joey DFM:  {post['dfm_joey']/1e18:,.6f}  (Δ {d_dfm/1e18:+,.6f})")
     for i, (bal_now, bal_pre) in enumerate(zip(post["fdic_ammo"], pre["fdic_ammo"])):
-        d = bal_now - bal_pre
-        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal_now/1e18:,.6f}  (Δ {d/1e18:+,.6f})")
+        d    = bal_now - bal_pre
+        held = post["joey_ammo"][i] - pre["joey_ammo"][i]
+        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal_now/1e18:,.6f}  (Δ {d/1e18:+,.6f})  |  Joey {ammo_entries[i]['symbol']} Δ {held/1e18:+,.6f}")
 
-    # Hard assertions
-    expected_fdic_delta = -5 * N_wei
+    # Hard assertions:
+    #   FDIC: -10N minted + 5·(N-K) claimed = -(5N + 5K)
+    #   DFM:  +5N (unchanged by hold-back — DFM accumulates ammo instead)
+    #   each ammo vault: +N FDIC (unchanged — ammo.mint locks N regardless of Claim)
+    #   Joey per-ammo balance: +K (held back)
+    expected_fdic_delta = -(5 * n + 5 * hold_back) * 10**18
     expected_dfm_delta  = +5 * N_wei
     if d_fdic != expected_fdic_delta:
         raise RuntimeError(f"FDIC delta mismatch: got {d_fdic}, expected {expected_fdic_delta}")
@@ -483,6 +510,10 @@ def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
     for i, (bal_now, bal_pre) in enumerate(zip(post["fdic_ammo"], pre["fdic_ammo"])):
         if bal_now - bal_pre != N_wei:
             raise RuntimeError(f"{ammo_entries[i]['symbol']} vault delta wrong: {bal_now-bal_pre} vs {N_wei}")
+    for i, (bal_now, bal_pre) in enumerate(zip(post["joey_ammo"], pre["joey_ammo"])):
+        held = bal_now - bal_pre
+        if held != K_wei:
+            raise RuntimeError(f"{ammo_entries[i]['symbol']} Joey-holdings delta wrong: {held} vs {K_wei}")
 
     print("\n✓ Cycle phase complete — all invariants hold.")
 
@@ -528,6 +559,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="FDIC → DFM treasury cycle")
     parser.add_argument("--phase", choices=["approve", "deploy", "cycle"], help="phase to execute")
     parser.add_argument("--n", type=int, default=10, help="tokens per round (cycle phase)")
+    parser.add_argument("--hold-back", type=int, default=0, help="retain this many of each ammo during Claim (default 0)")
     parser.add_argument("--dry-run", action="store_true", help="simulate only, do not submit")
     parser.add_argument("--yes",     action="store_true", help="skip per-phase confirmation")
     parser.add_argument("--verify",  action="store_true", help="print state and exit")
@@ -545,7 +577,7 @@ def main() -> int:
     elif args.phase == "deploy":
         do_deploy(dry_run=args.dry_run, skip_confirm=args.yes)
     elif args.phase == "cycle":
-        do_cycle(n=args.n, dry_run=args.dry_run, skip_confirm=args.yes)
+        do_cycle(n=args.n, hold_back=args.hold_back, dry_run=args.dry_run, skip_confirm=args.yes)
 
     return 0
 
