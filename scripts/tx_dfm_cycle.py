@@ -362,6 +362,120 @@ def do_deploy(*, dry_run: bool, skip_confirm: bool) -> None:
     print("\nDeploy phase complete.")
 
 
+# ─── Phase: cycle ────────────────────────────────────────────────────────
+def _encode_tt_mint(amount: int) -> bytes:
+    return SEL_TT_MINT + abi_encode(["uint256"], [amount])
+
+
+def _encode_tt_claim(spend_token: str, amount: int) -> bytes:
+    return SEL_TT_CLAIM + abi_encode(["address", "uint256"], [spend_token, amount])
+
+
+def do_cycle(*, n: int, dry_run: bool, skip_confirm: bool) -> None:
+    """One batch cycle: DFM.mint(5N) + ammo.mint(N)×5 + DFM.Claim(ammo, N)×5."""
+    if n <= 0:
+        raise ValueError("--n must be positive")
+    preflight_gas()
+
+    state = load_state()
+    ammo_entries = state.get("ammo", [])
+    if len(ammo_entries) != 5:
+        raise RuntimeError(f"state file has {len(ammo_entries)} ammo — need exactly 5. Run --phase deploy first.")
+
+    ammo_addrs = [Web3.to_checksum_address(a["address"]) for a in ammo_entries]
+
+    # Scale to wei
+    N_wei   = n * 10**18
+    TOTAL   = 5 * N_wei
+    print(f"Phase: cycle  N={n}  total_fdic_approvals_needed={10*n}  dry_run={dry_run}")
+
+    # Prerequisite: FDIC balance for 10N (5N for DFM.mint + 5×N for ammo.mint)
+    fdic_bal = erc20_balance(FDIC, JOEY)
+    if fdic_bal < 10 * N_wei:
+        raise RuntimeError(f"FDIC balance {fdic_bal/1e18:,.0f} < 10×N {10*n:,}")
+
+    # Allowance checks
+    if erc20_allowance(FDIC, JOEY, DFM) < TOTAL:
+        raise RuntimeError("FDIC → DFM allowance too low — run --phase approve")
+    for addr in ammo_addrs:
+        if erc20_allowance(FDIC, JOEY, addr) < N_wei:
+            raise RuntimeError(f"FDIC → {addr} allowance too low — run --phase deploy")
+        if erc20_allowance(addr, JOEY, DFM) < N_wei:
+            raise RuntimeError(f"{addr} → DFM allowance too low — run --phase deploy")
+
+    # Live Debenture verification
+    for entry in ammo_entries:
+        addr = entry["address"]
+        if not tt_debenture(addr):
+            raise RuntimeError(f"{entry['symbol']} Debenture=False! Claim will revert. Aborting.")
+
+    # Pre-snapshot
+    pre = {
+        "fdic_joey":  erc20_balance(FDIC, JOEY),
+        "dfm_joey":   erc20_balance(DFM,  JOEY),
+        "fdic_ammo":  [erc20_balance(FDIC, a) for a in ammo_addrs],
+    }
+    print(f"\nPre-batch state:")
+    print(f"  Joey FDIC: {pre['fdic_joey']/1e18:,.6f}")
+    print(f"  Joey DFM:  {pre['dfm_joey']/1e18:,.6f}")
+    for i, bal in enumerate(pre["fdic_ammo"]):
+        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal/1e18:,.6f}")
+
+    confirm_or_abort(
+        f"Execute 11-TX batch? (will lock 5×{n} = {5*n} FDIC permanently, gain {5*n} DFM)",
+        skip_confirm or dry_run,
+    )
+
+    # TX 1: DFM.mint(5N) — seeds DFM's FDIC vault and mints 5N DFM to Joey
+    send_tx(DFM, _encode_tt_mint(TOTAL), label=f"DFM.mint({5*n})", dry_run=dry_run)
+
+    # TXs 2-6: each ammo.mint(N)
+    for entry, addr in zip(ammo_entries, ammo_addrs):
+        send_tx(addr, _encode_tt_mint(N_wei), label=f"{entry['symbol']}.mint({n})", dry_run=dry_run)
+
+    # TXs 7-11: each DFM.Claim(ammo, N)
+    for entry, addr in zip(ammo_entries, ammo_addrs):
+        send_tx(
+            DFM,
+            _encode_tt_claim(addr, N_wei),
+            label=f"DFM.Claim({entry['symbol']}, {n})",
+            dry_run=dry_run,
+        )
+
+    if dry_run:
+        print("\n[dry-run] 11 TXs simulated OK.")
+        return
+
+    # Post-snapshot + verification
+    time.sleep(2)  # small settle for RPC consistency
+    post = {
+        "fdic_joey":  erc20_balance(FDIC, JOEY),
+        "dfm_joey":   erc20_balance(DFM,  JOEY),
+        "fdic_ammo":  [erc20_balance(FDIC, a) for a in ammo_addrs],
+    }
+    d_fdic = post["fdic_joey"] - pre["fdic_joey"]
+    d_dfm  = post["dfm_joey"]  - pre["dfm_joey"]
+    print(f"\nPost-batch state:")
+    print(f"  Joey FDIC: {post['fdic_joey']/1e18:,.6f}  (Δ {d_fdic/1e18:+,.6f})")
+    print(f"  Joey DFM:  {post['dfm_joey']/1e18:,.6f}  (Δ {d_dfm/1e18:+,.6f})")
+    for i, (bal_now, bal_pre) in enumerate(zip(post["fdic_ammo"], pre["fdic_ammo"])):
+        d = bal_now - bal_pre
+        print(f"  {ammo_entries[i]['symbol']} FDIC vault: {bal_now/1e18:,.6f}  (Δ {d/1e18:+,.6f})")
+
+    # Hard assertions
+    expected_fdic_delta = -5 * N_wei
+    expected_dfm_delta  = +5 * N_wei
+    if d_fdic != expected_fdic_delta:
+        raise RuntimeError(f"FDIC delta mismatch: got {d_fdic}, expected {expected_fdic_delta}")
+    if d_dfm != expected_dfm_delta:
+        raise RuntimeError(f"DFM delta mismatch: got {d_dfm}, expected {expected_dfm_delta}")
+    for i, (bal_now, bal_pre) in enumerate(zip(post["fdic_ammo"], pre["fdic_ammo"])):
+        if bal_now - bal_pre != N_wei:
+            raise RuntimeError(f"{ammo_entries[i]['symbol']} vault delta wrong: {bal_now-bal_pre} vs {N_wei}")
+
+    print("\n✓ Cycle phase complete — all invariants hold.")
+
+
 # ─── --verify mode ───────────────────────────────────────────────────────
 def do_verify() -> None:
     block = w3_read.eth.block_number
@@ -420,7 +534,7 @@ def main() -> int:
     elif args.phase == "deploy":
         do_deploy(dry_run=args.dry_run, skip_confirm=args.yes)
     elif args.phase == "cycle":
-        print(f"TODO: implement cycle phase (N={args.n})")
+        do_cycle(n=args.n, dry_run=args.dry_run, skip_confirm=args.yes)
 
     return 0
 
