@@ -1,0 +1,47 @@
+{
+  "deployed_at_block": 26370538,
+  "target": {
+    "symbol": "PARADE",
+    "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+    "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+  },
+  "probe_verified": true,
+  "ammo": [
+    {
+      "symbol": "幹B01",
+      "address": "0xaA300c01Ee1Ce306cb4eA2F47c09092B0a62A979",
+      "deploy_tx": "0x752d0cc782fb645a44a93671130abe1ee6dc207c26e7fccfdba3565979fead66",
+      "debenture_verified": true,
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+    },
+    {
+      "symbol": "幹B02",
+      "address": "0x047cFD51837195FC78FAb0ddF18cd25bca30aAC9",
+      "deploy_tx": "0xd40bbde414d25f0dbb50f6cf586521ca5368c08e98c08ef651d0bdcb5fbcfd19",
+      "debenture_verified": true,
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+    },
+    {
+      "symbol": "幹B03",
+      "address": "0x2A92FdFe3d67422c7DdE49CfCDBE2B48381e2FD0",
+      "deploy_tx": "0x1953dba024be51a7723736053de876d557131dcac0a27f563c10a25f7fad9c29",
+      "debenture_verified": true,
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+    },
+    {
+      "symbol": "幹B04",
+      "address": "0xaa3F4630BBAFf1FF43fcFC3333DE5BB7C88fBd3d",
+      "deploy_tx": "0xb2df75e01c3eb9b50b1f496277f304f61bd92e0999e61fc94e7791d5929949c4",
+      "debenture_verified": true,
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+    },
+    {
+      "symbol": "幹B05",
+      "address": "0xAa197FAF935C934f88150050C8Db269AF8Fcc9A5",
+      "deploy_tx": "0xc2925b65005459dbbece3cf062762ebc934d9dc15ba83a7b69dbabb30a1227e5",
+      "debenture_verified": true,
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E"
+    }
+  ],
+  "probe_block": 26370606
+}
