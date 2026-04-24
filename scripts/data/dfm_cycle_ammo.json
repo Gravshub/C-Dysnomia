@@ -1,0 +1,40 @@
+{
+  "deployed_at_block": 26369760,
+  "ammo": [
+    {
+      "symbol": "幹A01",
+      "address": "0xc6fe5ae3f0532068B35A021aa9154063C9EE029d",
+      "deploy_tx": "0xb708ad496b1de92f4f7f84afd87e414e7f69eafd0a60940435949c92d57476ef",
+      "debenture_verified": true,
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"
+    },
+    {
+      "symbol": "幹A02",
+      "address": "0x2d9bc346446F11038915100Fe5C9832b5A14F7d7",
+      "deploy_tx": "0x1ac0ab32c0ff831c64c931a6d1e3311f51d9bfccbd44d27961e891767943982e",
+      "debenture_verified": true,
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"
+    },
+    {
+      "symbol": "幹A03",
+      "address": "0x1a4f84FFe479bEc911d2EC607A29CB4348adE8e9",
+      "deploy_tx": "0xb810c0a4653825e5db4231559578248abc680a35a70e864ea6ab8b455657a5df",
+      "debenture_verified": true,
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"
+    },
+    {
+      "symbol": "幹A04",
+      "address": "0x4982dedf108Ef71c956536fD9053995104c01D4A",
+      "deploy_tx": "0x15a0d0965d94c5a6a0fa7284be5587cb014686a9170f8d700815ba4a2d5a56ff",
+      "debenture_verified": true,
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"
+    },
+    {
+      "symbol": "幹A05",
+      "address": "0xE37bcbAA7bD89C11f979ba7A1A88A75C22A2Cea2",
+      "deploy_tx": "0x719a94e98b9610b382c8a62d9c137b1f2ef56c5eec22eaaf7821120a6670dfda",
+      "debenture_verified": true,
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9"
+    }
+  ]
+}
