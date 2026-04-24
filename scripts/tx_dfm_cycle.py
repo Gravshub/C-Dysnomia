@@ -207,6 +207,45 @@ def confirm_or_abort(prompt: str, skip: bool) -> None:
         sys.exit(0)
 
 
+# ─── Phase: approve ──────────────────────────────────────────────────────
+def _encode_approve(spender: str, amount: int) -> bytes:
+    return SEL_APPROVE + abi_encode(["address", "uint256"], [spender, amount])
+
+
+def do_approve(*, dry_run: bool, skip_confirm: bool) -> None:
+    """Static MAX approvals: WM→V2Minter, FDIC→DFM."""
+    preflight_gas()
+    print(f"Phase: approve  dry_run={dry_run}")
+
+    pairs = [
+        ("WM → V2Minter",  WM,   V2MINTER),
+        ("FDIC → DFM",     FDIC, DFM),
+    ]
+
+    todo = []
+    for label, token, spender in pairs:
+        cur = erc20_allowance(token, JOEY, spender)
+        if cur >= MAX_UINT256 >> 1:
+            print(f"  {label}: already MAX ({cur}) — skip")
+            continue
+        todo.append((label, token, spender))
+
+    if not todo:
+        print("\nAll approvals already set. Nothing to do.")
+        return
+
+    print(f"\nPending approvals: {len(todo)}")
+    for label, _, _ in todo:
+        print(f"  - {label}")
+    confirm_or_abort(f"Submit {len(todo)} approval TX(s)?", skip_confirm or dry_run)
+
+    for label, token, spender in todo:
+        data = _encode_approve(spender, MAX_UINT256)
+        send_tx(token, data, label=f"approve {label}", dry_run=dry_run)
+
+    print("\nApprove phase complete.")
+
+
 # ─── --verify mode ───────────────────────────────────────────────────────
 def do_verify() -> None:
     block = w3_read.eth.block_number
@@ -261,7 +300,7 @@ def main() -> int:
         parser.error("--phase is required unless using --verify")
 
     if args.phase == "approve":
-        print("TODO: implement approve phase")
+        do_approve(dry_run=args.dry_run, skip_confirm=args.yes)
     elif args.phase == "deploy":
         print("TODO: implement deploy phase")
     elif args.phase == "cycle":
