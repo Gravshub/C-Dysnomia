@@ -246,6 +246,122 @@ def do_approve(*, dry_run: bool, skip_confirm: bool) -> None:
     print("\nApprove phase complete.")
 
 
+# ─── Phase: deploy ───────────────────────────────────────────────────────
+AMMO_PLAN = [
+    ("幹 A01", "幹A01"),
+    ("幹 A02", "幹A02"),
+    ("幹 A03", "幹A03"),
+    ("幹 A04", "幹A04"),
+    ("幹 A05", "幹A05"),
+]
+AMMO_INITIAL_MINT = 1 * 10**18  # 1 token × 10^18 — matches user spec
+
+
+def _encode_v2m_new(name: str, symbol: str, initial_mint: int, parent: str) -> bytes:
+    return SEL_V2M_NEW + abi_encode(
+        ["string", "string", "uint256", "address"],
+        [name, symbol, initial_mint, parent],
+    )
+
+
+def _predict_ammo_address(name: str, symbol: str, initial_mint: int, parent: str) -> str:
+    """eth_call V2Minter.New(...) returns the new contract address without submitting."""
+    data = _encode_v2m_new(name, symbol, initial_mint, parent)
+    raw  = simulate_call(V2MINTER, data)
+    return Web3.to_checksum_address(abi_decode(["address"], raw)[0])
+
+
+def do_deploy(*, dry_run: bool, skip_confirm: bool) -> None:
+    """Deploy 5 ammo tokens + interleaved FDIC→ammo + ammo→DFM approvals."""
+    preflight_gas()
+    state = load_state()
+    already = {a["symbol"] for a in state.get("ammo", [])}
+    print(f"Phase: deploy  dry_run={dry_run}  already_deployed={sorted(already)}")
+
+    # Verify prerequisites
+    wm_bal = erc20_balance(WM, JOEY)
+    needed_wm = AMMO_INITIAL_MINT * (5 - len(already))
+    if wm_bal < needed_wm:
+        raise RuntimeError(f"Insufficient WM: have {wm_bal/1e18:.4f}, need {needed_wm/1e18:.4f}")
+    wm_allow = erc20_allowance(WM, JOEY, V2MINTER)
+    if wm_allow < needed_wm:
+        raise RuntimeError("WM→V2Minter allowance too low — run --phase approve first")
+
+    pending = [(n, s) for n, s in AMMO_PLAN if s not in already]
+    if not pending:
+        print("\nAll 5 ammo already deployed.")
+        return
+
+    confirm_or_abort(
+        f"Deploy {len(pending)} ammo tokens × (1 New + 2 approves) = {len(pending)*3} TXs?",
+        skip_confirm or dry_run,
+    )
+
+    for name, symbol in pending:
+        print(f"\n━━━ Deploying {symbol} ━━━")
+
+        predicted = _predict_ammo_address(name, symbol, AMMO_INITIAL_MINT, FDIC)
+        print(f"  predicted address: {predicted}")
+
+        new_data = _encode_v2m_new(name, symbol, AMMO_INITIAL_MINT, FDIC)
+        receipt = send_tx(V2MINTER, new_data, label=f"V2Minter.New({symbol})", dry_run=dry_run)
+
+        if dry_run:
+            entry = {
+                "symbol":             symbol,
+                "address":            predicted,
+                "deploy_tx":          None,
+                "debenture_verified": None,
+                "parent":             FDIC,
+                "dry_run":            True,
+            }
+        else:
+            # Verify on-chain state at predicted address
+            code = w3_read.eth.get_code(predicted)
+            if code in (b"", b"0x", None):
+                raise RuntimeError(f"{symbol}: no code at predicted address {predicted}")
+            if not tt_debenture(predicted):
+                raise RuntimeError(f"{symbol} Debenture=False after deploy — aborting")
+            if tt_parent(predicted) != FDIC:
+                raise RuntimeError(f"{symbol} Parent != FDIC — aborting")
+            if v2m_treasury_owner(predicted) != JOEY:
+                raise RuntimeError(f"{symbol} V2Minter.TreasuryTokens[ammo] != Joey — aborting")
+            print(f"  verified: Debenture=true, Parent=FDIC, Owner=Joey")
+
+            entry = {
+                "symbol":             symbol,
+                "address":            predicted,
+                "deploy_tx":          "0x" + receipt["transactionHash"].hex() if isinstance(receipt["transactionHash"], bytes) else receipt["transactionHash"],
+                "debenture_verified": True,
+                "parent":             FDIC,
+            }
+
+        # FDIC → ammo approval
+        send_tx(
+            FDIC,
+            _encode_approve(predicted, MAX_UINT256),
+            label=f"FDIC → {symbol} approve MAX",
+            dry_run=dry_run,
+        )
+
+        # ammo → DFM approval
+        send_tx(
+            predicted,
+            _encode_approve(DFM, MAX_UINT256),
+            label=f"{symbol} → DFM approve MAX",
+            dry_run=dry_run,
+        )
+
+        if not dry_run:
+            state.setdefault("ammo", []).append(entry)
+            if state.get("deployed_at_block") is None:
+                state["deployed_at_block"] = w3_read.eth.block_number
+            save_state(state)
+            print(f"  state persisted: {STATE_FILE}")
+
+    print("\nDeploy phase complete.")
+
+
 # ─── --verify mode ───────────────────────────────────────────────────────
 def do_verify() -> None:
     block = w3_read.eth.block_number
@@ -302,7 +418,7 @@ def main() -> int:
     if args.phase == "approve":
         do_approve(dry_run=args.dry_run, skip_confirm=args.yes)
     elif args.phase == "deploy":
-        print("TODO: implement deploy phase")
+        do_deploy(dry_run=args.dry_run, skip_confirm=args.yes)
     elif args.phase == "cycle":
         print(f"TODO: implement cycle phase (N={args.n})")
 
