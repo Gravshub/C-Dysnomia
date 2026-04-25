@@ -170,20 +170,12 @@
     }
   ],
   "fallback": null,
-  "runner_up": {
-    "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
-    "child_count": 1,
-    "debenture": false,
-    "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
-    "is_qing_underlying": null,
-    "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
-    "parent_reachable": true,
-    "parent_symbol": "FDIC",
-    "symbol": "DFM",
-    "total_supply": "228123353293089646960553164532929655857"
+  "manual_override": {
+    "date": "2026-04-25",
+    "previous_winner": "FDIC",
+    "reason": "User selected TLRz: parent=PARADE gives 96.79T fuel runway vs FDIC parent=FED with only 154K fuel."
   },
-  "scanned_at_block": 26378493,
-  "winner": {
+  "runner_up": {
     "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
     "child_count": 1,
     "debenture": false,
@@ -194,5 +186,18 @@
     "parent_symbol": "FED",
     "symbol": "FDIC",
     "total_supply": "298627257716731377603787038519279512"
+  },
+  "scanned_at_block": 26378493,
+  "winner": {
+    "address": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
+    "child_count": 1,
+    "debenture": false,
+    "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+    "is_qing_underlying": null,
+    "parent": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+    "parent_reachable": true,
+    "parent_symbol": "PARADE",
+    "symbol": "TLRz",
+    "total_supply": "1788763170264356405743469482234581891787"
   }
 }
