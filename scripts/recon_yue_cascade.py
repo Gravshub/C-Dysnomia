@@ -340,11 +340,17 @@ def check_holdings() -> int:
         out["balances_human"][sym] = bal / 10**dec
         print(f"  {sym:10s} {bal / 10**dec:>22,.4f}")
 
-    # Watchdog
+    # Watchdog (fail-closed: read failure treated as triggered)
     try:
         without_bal = erc20_balance(WITHOUT, JOEY)
-    except Exception:
-        without_bal = 0
+    except Exception as e:
+        print(f"  WITHOUT: read failed: {e} — TREATING AS WATCHDOG TRIGGERED for safety")
+        out["balances_wei"]["WITHOUT"]   = "READ_FAILED"
+        out["balances_human"]["WITHOUT"] = None
+        atomic_write_json(HOLD_FILE, out)
+        print(f"[1d] wrote {HOLD_FILE} (with WITHOUT read failure)")
+        return 1
+
     out["balances_wei"]["WITHOUT"]   = str(without_bal)
     out["balances_human"]["WITHOUT"] = without_bal / 10**18
     print(f"  {'WITHOUT':10s} {without_bal / 10**18:>22,.4f}  {'WATCHDOG TRIGGERED' if without_bal > 0 else 'clean'}")
