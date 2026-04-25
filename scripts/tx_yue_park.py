@@ -102,20 +102,58 @@ def load_state() -> dict:
 
 # ─── --verify ────────────────────────────────────────────────────────────
 def cmd_verify() -> int:
+    """Pre-flight safety gate. Exit 0 = safe to park; non-zero = abort."""
+    EXIT_CHECK_FILE = os.path.join(REPO_ROOT, "scripts", "data", "yue_exit_check.json")
+    exit_verdicts = {}
+    if os.path.exists(EXIT_CHECK_FILE):
+        with open(EXIT_CHECK_FILE) as f:
+            exit_data = json.load(f)
+        exit_verdicts = {
+            sym: e.get("exit_path_ok", False)
+            for sym, e in exit_data.get("tokens", {}).items()
+        }
+
     print(f"verify @ block {w3_read.eth.block_number}")
+
     pls = w3_read.eth.get_balance(JOEY)
-    print(f"  PLS(joey) = {pls/1e18:,.4f}  ({'OK' if pls > PLS_FLOOR else 'BELOW FLOOR'})")
+    pls_ok = pls >= PLS_FLOOR
+    print(f"  PLS(joey) = {pls/1e18:,.4f}  ({'OK' if pls_ok else 'BELOW FLOOR'})")
+
     without_bal = erc20_balance(WITHOUT, JOEY)
-    print(f"  WITHOUT(joey) = {without_bal}  ({'WATCHDOG TRIGGERED' if without_bal > 0 else 'clean'})")
+    without_ok = without_bal == 0
+    print(f"  WITHOUT(joey) = {without_bal}  ({'WATCHDOG TRIGGERED' if not without_ok else 'clean'})")
+
+    if not exit_verdicts:
+        print(f"  WARN: {EXIT_CHECK_FILE} missing — Phase 1b not run; cannot determine park caps")
+
+    yuan_ok_all = True
     for sym, token in PARK_TOKENS.items():
         d = erc20_decimals(token)
         be = erc20_balance(token, JOEY)
         bl = erc20_balance(token, JOEY_LAU)
         by = erc20_balance(token, JOEY_YUE)
         yu = choa_yuan(token)
-        ok = yu == be + 10*bl + 40*by
-        print(f"  {sym:8s}  EOA={be/10**d:>22,.4f}  LAU={bl/10**d:>16,.4f}  YUE={by/10**d:>22,.4f}  Yuan={yu/10**d:>22,.4f}  {'OK' if ok else 'MISMATCH'}")
-    return 0 if without_bal == 0 else 1
+        formula_ok = yu == be + 10*bl + 40*by
+        if not formula_ok:
+            yuan_ok_all = False
+        cap = exit_verdicts.get(sym)
+        if cap is True:
+            cap_str = "exit:OK (aggressive park)"
+        elif cap is False:
+            cap_str = "exit:ONE-WAY (cap 10%)"
+        else:
+            cap_str = "exit:UNKNOWN"
+        print(f"  {sym:8s}  EOA={be/10**d:>22,.4f}  LAU={bl/10**d:>16,.4f}  YUE={by/10**d:>22,.4f}  Yuan={yu/10**d:>22,.4f}  {'OK' if formula_ok else 'MISMATCH'}  {cap_str}")
+
+    all_ok = pls_ok and without_ok and yuan_ok_all
+    if not all_ok:
+        reasons = []
+        if not pls_ok: reasons.append("PLS below floor")
+        if not without_ok: reasons.append("WITHOUT triggered")
+        if not yuan_ok_all: reasons.append("Yuan formula MISMATCH")
+        print(f"  FAIL: {', '.join(reasons)}")
+        return 1
+    return 0
 
 # ─── Stub for chunked transfer (Task 7 fills in) ─────────────────────────
 def cmd_park(token_sym: str, total_human: int, chunks: int, dry_run: bool, yes: bool) -> int:
