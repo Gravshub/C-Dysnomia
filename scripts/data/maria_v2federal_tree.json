@@ -1,5 +1,5 @@
 {
-  "scanned_at_block": 26378438,
+  "scanned_at_block": 26378493,
   "tokens": [
     {
       "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
@@ -16,7 +16,7 @@
       "pls_per_token": 1.2592017383e-08,
       "self_balance": "14330675472146828378010103048209",
       "symbol": "FDIC",
-      "total_supply": "298597773404328840569942963377865012"
+      "total_supply": "298627257716731377603787038519279512"
     },
     {
       "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",

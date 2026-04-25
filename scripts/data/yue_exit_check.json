@@ -1,7 +1,7 @@
 {
   "candidate_count": 14,
   "candidate_source": "v2_federal_tokens.json (PROXY \u2014 not real QING enumeration; B may be undercounted)",
-  "checked_at_block": 26378421,
+  "checked_at_block": 26378487,
   "tokens": {
     "DFM": {
       "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
