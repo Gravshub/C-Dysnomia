@@ -51,7 +51,7 @@ PARK_TOKENS = {"FDIC": FDIC, "PARADE": PARADE, "DFM": DFM}
 # ─── Constants ───────────────────────────────────────────────────────────
 CHAIN_ID       = 369
 GAS_MULT       = 2.5
-GAS_PRICE_CEIL = 2_000_000 * 10**9
+GAS_PRICE_CEIL = 3_000_000 * 10**9
 PLS_FLOOR      = 100_000 * 10**18
 PRIORITY_FEE   = 100_000 * 10**9         # 100K Beats — see memory feedback_pulsechain_priority_fee
 
@@ -99,6 +99,46 @@ def load_state() -> dict:
         with open(STATE_FILE) as f:
             return json.load(f)
     return {"parked": {}, "history": []}
+
+# ─── Gas + TX submission helpers ─────────────────────────────────────────
+JOEY_PK = os.environ.get("JOEY_PK")
+
+def build_gas_params() -> dict:
+    base = w3_read.eth.gas_price  # impulses (wei)
+    max_fee = int(base * 2) + PRIORITY_FEE
+    if max_fee > GAS_PRICE_CEIL:
+        raise RuntimeError(f"max_fee {max_fee} > ceiling {GAS_PRICE_CEIL}")
+    return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": PRIORITY_FEE}
+
+def estimate_and_send(tx: dict, label: str, dry_run: bool) -> Optional[str]:
+    """Simulate, estimate, sign, send. Returns tx_hash or None for dry-run."""
+    try:
+        w3_read.eth.call(tx)
+    except ContractLogicError as e:
+        print(f"  [{label}] eth_call REVERT: {e}")
+        return None
+    try:
+        gas_est = w3_read.eth.estimate_gas(tx)
+    except Exception as e:
+        print(f"  [{label}] estimate_gas FAIL: {e}")
+        return None
+    tx["gas"]      = int(gas_est * GAS_MULT)
+    tx["nonce"]    = w3_submit.eth.get_transaction_count(JOEY)
+    tx["chainId"]  = CHAIN_ID
+    tx.update(build_gas_params())
+    if dry_run:
+        print(f"  [{label}] DRY-RUN gas={gas_est} (would send w/ gas={tx['gas']})")
+        return None
+    if not JOEY_PK:
+        print(f"  [{label}] JOEY_PK env var unset — cannot sign")
+        return None
+    signed = w3_submit.eth.account.sign_transaction(tx, JOEY_PK)
+    tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
+    print(f"  [{label}] sent: 0x{tx_hash.hex()}")
+    rcpt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    if rcpt.status != 1:
+        raise RuntimeError(f"  [{label}] tx reverted: 0x{tx_hash.hex()}")
+    return "0x" + tx_hash.hex()
 
 # ─── --verify ────────────────────────────────────────────────────────────
 def cmd_verify() -> int:
@@ -155,9 +195,97 @@ def cmd_verify() -> int:
         return 1
     return 0
 
-# ─── Stub for chunked transfer (Task 7 fills in) ─────────────────────────
 def cmd_park(token_sym: str, total_human: int, chunks: int, dry_run: bool, yes: bool) -> int:
-    raise NotImplementedError("Task 7 fills this in")
+    token = PARK_TOKENS[token_sym]
+    decimals = erc20_decimals(token)
+    total_wei = total_human * 10**decimals
+    chunk_wei = total_wei // chunks
+
+    pls = w3_read.eth.get_balance(JOEY)
+    if pls < PLS_FLOOR:
+        print(f"ABORT: PLS={pls/1e18:.4f} below floor {PLS_FLOOR/1e18:.0f}")
+        return 1
+
+    without_bal = erc20_balance(WITHOUT, JOEY)
+    if without_bal != 0:
+        print(f"ABORT: WITHOUT={without_bal} (watchdog)")
+        return 1
+
+    eoa_bal = erc20_balance(token, JOEY)
+    if eoa_bal < total_wei:
+        print(f"ABORT: {token_sym} EOA balance {eoa_bal} < total {total_wei}")
+        return 1
+
+    print(f"park {token_sym}: total={total_human:,} ({total_wei} wei) over {chunks} chunks (~{chunk_wei/10**decimals:,.0f} per chunk)")
+    if not yes:
+        ans = input("proceed? [y/N] ").strip().lower()
+        if ans != "y":
+            print("aborted by user")
+            return 1
+
+    state = load_state()
+    state.setdefault("parked", {}).setdefault(token_sym, "0")
+    state.setdefault("history", [])
+
+    for i in range(chunks):
+        # Last chunk gobbles the remainder so we don't lose dust
+        wei = chunk_wei if i < chunks - 1 else (total_wei - chunk_wei * (chunks - 1))
+        print(f"\n--- chunk {i+1}/{chunks}: {wei/10**decimals:,.4f} {token_sym} ---")
+
+        # Pre-state
+        be0 = erc20_balance(token, JOEY)
+        by0 = erc20_balance(token, JOEY_YUE)
+        yu0 = choa_yuan(token)
+        print(f"  pre:  EOA={be0/10**decimals:,.4f}  YUE={by0/10**decimals:,.4f}  Yuan={yu0/10**decimals:,.4f}")
+
+        # Watchdog re-check before each chunk
+        if erc20_balance(WITHOUT, JOEY) != 0:
+            print("  ABORT: WITHOUT became nonzero mid-run")
+            atomic_write_json(STATE_FILE, state)
+            return 1
+
+        data = SEL_TRANSFER + abi_encode(["address", "uint256"], [JOEY_YUE, wei])
+        tx = {"from": JOEY, "to": token, "value": 0, "data": data}
+        tx_hash = estimate_and_send(tx, f"transfer-{i+1}", dry_run)
+        if dry_run:
+            print(f"  dry-run only — skipping post-state assertions")
+            continue
+        if tx_hash is None:
+            print(f"  ABORT: tx submission failed")
+            atomic_write_json(STATE_FILE, state)
+            return 1
+
+        # Post-state assertions
+        be1 = erc20_balance(token, JOEY)
+        by1 = erc20_balance(token, JOEY_YUE)
+        yu1 = choa_yuan(token)
+        d_e  = be1 - be0
+        d_y  = by1 - by0
+        d_yu = yu1 - yu0
+        print(f"  post: EOA={be1/10**decimals:,.4f}  YUE={by1/10**decimals:,.4f}  Yuan={yu1/10**decimals:,.4f}")
+        print(f"        Δ EOA = {d_e}  (expect {-wei})")
+        print(f"        Δ YUE = {d_y}  (expect {wei})")
+        print(f"        Δ Yuan = {d_yu}  (expect {40*wei})")
+
+        if d_e != -wei or d_y != wei or d_yu != 40 * wei:
+            print(f"  ABORT: assertion failed")
+            state["history"].append({
+                "tx": tx_hash, "chunk": i+1, "wei": str(wei),
+                "delta_eoa": str(d_e), "delta_yue": str(d_y), "delta_yuan": str(d_yu),
+                "asserted": False,
+            })
+            atomic_write_json(STATE_FILE, state)
+            return 1
+
+        state["parked"][token_sym] = str(int(state["parked"].get(token_sym, "0")) + wei)
+        state["history"].append({
+            "tx": tx_hash, "chunk": i+1, "wei": str(wei), "asserted": True,
+            "block": w3_read.eth.block_number,
+        })
+        atomic_write_json(STATE_FILE, state)
+
+    print(f"\n[done] parked {total_human:,} {token_sym} into JOEY_YUE")
+    return 0
 
 def main() -> int:
     ap = argparse.ArgumentParser()
