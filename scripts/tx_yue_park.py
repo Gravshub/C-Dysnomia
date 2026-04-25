@@ -28,13 +28,12 @@ import argparse
 import json
 import os
 import sys
-import time
 from typing import Optional
 
 from eth_abi import encode as abi_encode
 from eth_abi import decode as abi_decode
 from web3 import Web3
-from web3.exceptions import ContractLogicError
+from web3.exceptions import ContractLogicError, TimeExhausted
 
 # ─── Identity (mirrors recon_yue_cascade.py — keep in sync) ──────────────
 JOEY      = Web3.to_checksum_address("0x17367877aF5A8D0Eb33ba5689A880f696386E24D")
@@ -134,11 +133,16 @@ def estimate_and_send(tx: dict, label: str, dry_run: bool) -> Optional[str]:
         return None
     signed = w3_submit.eth.account.sign_transaction(tx, JOEY_PK)
     tx_hash = w3_submit.eth.send_raw_transaction(signed.raw_transaction)
-    print(f"  [{label}] sent: 0x{tx_hash.hex()}")
-    rcpt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+    tx_hash_hex = "0x" + tx_hash.hex()
+    print(f"  [{label}] sent: {tx_hash_hex}")
+    try:
+        rcpt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
+    except TimeExhausted:
+        print(f"  [{label}] TIMEOUT after 300s waiting for receipt: {tx_hash_hex} — investigate manually before re-running")
+        raise
     if rcpt.status != 1:
-        raise RuntimeError(f"  [{label}] tx reverted: 0x{tx_hash.hex()}")
-    return "0x" + tx_hash.hex()
+        raise RuntimeError(f"  [{label}] tx reverted: {tx_hash_hex}")
+    return tx_hash_hex
 
 # ─── --verify ────────────────────────────────────────────────────────────
 def cmd_verify() -> int:
@@ -255,10 +259,17 @@ def cmd_park(token_sym: str, total_human: int, chunks: int, dry_run: bool, yes: 
             atomic_write_json(STATE_FILE, state)
             return 1
 
-        # Post-state assertions
-        be1 = erc20_balance(token, JOEY)
-        by1 = erc20_balance(token, JOEY_YUE)
-        yu1 = choa_yuan(token)
+        # Post-state assertions — read from w3_submit (same node that confirmed receipt)
+        # to avoid read-RPC lag producing false mismatches
+        def _post_bal(t: str, h: str) -> int:
+            data = SEL_BALANCE_OF + abi_encode(["address"], [h])
+            return abi_decode(["uint256"], w3_submit.eth.call({"to": t, "data": data}))[0]
+        def _post_yuan(t: str) -> int:
+            data = SEL_CHOA_YUAN + abi_encode(["address"], [t])
+            return abi_decode(["uint256"], w3_submit.eth.call({"to": CHOA, "data": data, "from": JOEY}))[0]
+        be1 = _post_bal(token, JOEY)
+        by1 = _post_bal(token, JOEY_YUE)
+        yu1 = _post_yuan(token)
         d_e  = be1 - be0
         d_y  = by1 - by0
         d_yu = yu1 - yu0
