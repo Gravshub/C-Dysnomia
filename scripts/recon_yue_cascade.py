@@ -73,6 +73,7 @@ SEL_SYMBOL      = Web3.keccak(text="symbol()")[:4]
 SEL_HAS_MINT    = Web3.keccak(text="hasMint(address)")[:4]
 SEL_CHOA_YUAN   = Web3.keccak(text="Yuan(address)")[:4]
 SEL_V2M_TT      = Web3.keccak(text="TreasuryTokens(address)")[:4]
+SEL_GETRATE     = Web3.keccak(text="GetAssetRate(address,address)")[:4]  # YUE exit B-check
 
 # ─── Reads ───────────────────────────────────────────────────────────────
 def erc20_balance(token: str, holder: str) -> int:
@@ -150,6 +151,23 @@ def check_yuan() -> int:
     print("[1a] PASS")
     return 0
 
+# ─── Helpers ─────────────────────────────────────────────────────────────
+def _load_candidate_qings() -> list:
+    """
+    Returns checksummed addresses to probe for GetAssetRate.
+
+    Currently uses V2 Federal tokens as a proxy for the QING universe (each V2
+    Federal token may anchor a QING). Replace with MAP/CHOA enumeration when
+    that becomes available. The single source-of-truth swap point is this
+    function — callers should not know about V2F_INPUT.
+    """
+    if not os.path.exists(V2F_INPUT):
+        return []
+    with open(V2F_INPUT) as f:
+        v2f = json.load(f)
+    return [Web3.to_checksum_address(t["address"]) for t in v2f.get("tokens", [])]
+
+
 # ─── Stubs for later sub-commands (filled in subsequent tasks) ───────────
 def check_exits() -> int:
     """
@@ -168,17 +186,16 @@ def check_exits() -> int:
     """
     print(f"[1b] YUE exit-mechanism check on JOEY_YUE={JOEY_YUE}")
 
-    if not os.path.exists(V2F_INPUT):
-        print(f"  WARN: {V2F_INPUT} missing; B-check will be empty")
-        candidate_qings = []
-    else:
-        with open(V2F_INPUT) as f:
-            v2f = json.load(f)
-        candidate_qings = [Web3.to_checksum_address(t["address"]) for t in v2f.get("tokens", [])]
+    candidate_qings = _load_candidate_qings()
+    if not candidate_qings:
+        print(f"  WARN: no candidate QINGs available; B-check will be empty")
 
-    SEL_GETRATE = Web3.keccak(text="GetAssetRate(address,address)")[:4]
-
-    out = {"checked_at_block": w3_read.eth.block_number, "tokens": {}}
+    out = {
+        "checked_at_block": w3_read.eth.block_number,
+        "candidate_source": "v2_federal_tokens.json (PROXY — not real QING enumeration; B may be undercounted)",
+        "candidate_count": len(candidate_qings),
+        "tokens": {},
+    }
     for sym, token in PARK_TOKENS.items():
         try:
             has_mint = yue_has_mint(JOEY_YUE, token)
@@ -187,6 +204,7 @@ def check_exits() -> int:
             has_mint = False
 
         hong_paths = []
+        non_revert_errors = []
         for qing in candidate_qings:
             data = SEL_GETRATE + abi_encode(["address", "address"], [qing, token])
             try:
@@ -194,9 +212,17 @@ def check_exits() -> int:
                 rate = abi_decode(["uint256"], raw)[0]
                 if rate > 0:
                     hong_paths.append({"qing": qing, "rate": str(rate)})
-            except Exception:
-                # GetAssetRate reverts when pair invalid — that's fine, just no path
-                pass
+            except Exception as e:
+                err_str = str(e).lower()
+                if "execution reverted" in err_str or "revert" in err_str:
+                    # Expected: not a valid (Qing, SpendAsset) pair. Skip silently.
+                    pass
+                else:
+                    # Transport / decode / other — do NOT silently mask
+                    non_revert_errors.append({"qing": qing, "error": str(e)})
+
+        if non_revert_errors:
+            print(f"  WARN: {len(non_revert_errors)} non-revert errors during GetAssetRate scan for {sym}")
 
         exit_ok = has_mint or len(hong_paths) > 0
         verdict = "OK" if exit_ok else "ONE-WAY (cap 10%)"
@@ -205,6 +231,7 @@ def check_exits() -> int:
             "address": token,
             "has_mint": has_mint,
             "hong_paths": hong_paths,
+            "non_revert_errors": non_revert_errors,
             "exit_path_ok": exit_ok,
         }
 
