@@ -312,7 +312,46 @@ def check_tree() -> int:
     return 0
 
 def check_holdings() -> int:
-    raise NotImplementedError("Task 4 fills this in")
+    """Refresh joey balances for every token relevant to parking + cascade decisions."""
+    print(f"[1d] holdings refresh for joey={JOEY}")
+    out = {
+        "scanned_at_block": w3_read.eth.block_number,
+        "joey": JOEY,
+        "joey_lau": JOEY_LAU,
+        "joey_yue": JOEY_YUE,
+        "balances_wei": {},
+        "balances_human": {},
+    }
+    pls_wei = w3_read.eth.get_balance(JOEY)
+    out["balances_wei"]["PLS"]   = str(pls_wei)
+    out["balances_human"]["PLS"] = pls_wei / 10**18
+    print(f"  {'PLS':10s} {pls_wei / 10**18:>22,.4f}")
+
+    for sym, token in HOLDING_TOKENS.items():
+        try:
+            bal = erc20_balance(token, JOEY)
+            dec = erc20_decimals(token)
+        except Exception as e:
+            print(f"  {sym}: read failed: {e}")
+            out["balances_wei"][sym] = "0"
+            out["balances_human"][sym] = 0.0
+            continue
+        out["balances_wei"][sym]   = str(bal)
+        out["balances_human"][sym] = bal / 10**dec
+        print(f"  {sym:10s} {bal / 10**dec:>22,.4f}")
+
+    # Watchdog
+    try:
+        without_bal = erc20_balance(WITHOUT, JOEY)
+    except Exception:
+        without_bal = 0
+    out["balances_wei"]["WITHOUT"]   = str(without_bal)
+    out["balances_human"]["WITHOUT"] = without_bal / 10**18
+    print(f"  {'WITHOUT':10s} {without_bal / 10**18:>22,.4f}  {'WATCHDOG TRIGGERED' if without_bal > 0 else 'clean'}")
+
+    atomic_write_json(HOLD_FILE, out)
+    print(f"[1d] wrote {HOLD_FILE}")
+    return 1 if without_bal > 0 else 0
 
 # ─── CLI ─────────────────────────────────────────────────────────────────
 def main() -> int:
