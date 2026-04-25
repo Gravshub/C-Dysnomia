@@ -240,7 +240,76 @@ def check_exits() -> int:
     return 0
 
 def check_tree() -> int:
-    raise NotImplementedError("Task 3 fills this in")
+    """
+    Re-scan V2 Federal tokens from v2_federal_tokens.json:
+      - Parent() (correct the "FED/BAR chain" placeholder)
+      - Debenture()
+      - totalSupply()
+      - decimals()
+      - V2Minter.TreasuryTokens(token) -> deployer
+    Then build a 'children' array per token by joining each token against
+    every other token's Parent.
+
+    Note: we do NOT scan V2Minter.New() events here — the v2_federal_tokens.json
+    universe is treated as authoritative. If new Maria tokens land later, the
+    canopy/phreak intelligence files surface them; rebuild this file then.
+    """
+    print(f"[1c] V2 Federal tree re-scan from {V2F_INPUT}")
+    if not os.path.exists(V2F_INPUT):
+        print(f"  ERROR: input missing: {V2F_INPUT}")
+        return 1
+    with open(V2F_INPUT) as f:
+        v2f = json.load(f)
+
+    tokens_in = v2f.get("tokens", [])
+    print(f"  scanning {len(tokens_in)} tokens")
+
+    enriched = []
+    for entry in tokens_in:
+        addr = Web3.to_checksum_address(entry["address"])
+        sym  = entry.get("symbol", "?")
+        try:
+            parent = tt_parent(addr)
+            deb    = tt_debenture(addr)
+            sup    = erc20_total_supply(addr)
+            dec    = erc20_decimals(addr)
+        except Exception as e:
+            print(f"  {sym} ({addr}): read failed: {e}")
+            continue
+        try:
+            deployer = v2m_treasury_owner(addr)
+        except Exception:
+            deployer = None
+        enriched.append({
+            "address": addr,
+            "symbol": sym,
+            "parent": parent,
+            "debenture": deb,
+            "total_supply": str(sup),
+            "decimals": dec,
+            "deployer": deployer,
+            "pls_per_token": entry.get("pls_per_token"),
+            "self_balance": entry.get("selfBalance"),
+        })
+        print(f"  {sym:10s} parent={parent[:10]}…  Deb={deb}  sup={sup // 10**dec:>20d}  deployer={deployer[:10] if deployer else 'none'}…")
+
+    # Build children
+    by_addr = {t["address"]: t for t in enriched}
+    for t in enriched:
+        t["children"] = [
+            {"address": c["address"], "symbol": c["symbol"]}
+            for c in enriched
+            if c["parent"] == t["address"] and c["address"] != t["address"]
+        ]
+
+    out = {
+        "scanned_at_block": w3_read.eth.block_number,
+        "v2minter": V2MINTER,
+        "tokens": enriched,
+    }
+    atomic_write_json(TREE_FILE, out)
+    print(f"[1c] wrote {TREE_FILE} with {len(enriched)} tokens")
+    return 0
 
 def check_holdings() -> int:
     raise NotImplementedError("Task 4 fills this in")

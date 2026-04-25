@@ -1,0 +1,239 @@
+{
+  "scanned_at_block": 26378438,
+  "tokens": [
+    {
+      "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
+      "children": [
+        {
+          "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
+          "symbol": "DFM"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x1D177CB9EfEEa49A8B97ab1C72785a3A37ABc9Ff",
+      "pls_per_token": 1.2592017383e-08,
+      "self_balance": "14330675472146828378010103048209",
+      "symbol": "FDIC",
+      "total_supply": "298597773404328840569942963377865012"
+    },
+    {
+      "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
+      "children": [
+        {
+          "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+          "symbol": "PARADE"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
+      "pls_per_token": 3.82325612e-10,
+      "self_balance": "0",
+      "symbol": "DFM",
+      "total_supply": "228123353293089646960553164532929655857"
+    },
+    {
+      "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+      "children": [
+        {
+          "address": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
+          "symbol": "TLRz"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
+      "pls_per_token": 3.0931252e-11,
+      "self_balance": "0",
+      "symbol": "PARADE",
+      "total_supply": "11595445931396202036698441631335471770194"
+    },
+    {
+      "address": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
+      "children": [
+        {
+          "address": "0x6A8Ee78653c588530D31fa308F4b165F346BD9E0",
+          "symbol": "JOB"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+      "pls_per_token": 9.472668e-12,
+      "self_balance": "0",
+      "symbol": "TLRz",
+      "total_supply": "1788763170264356405743469482234581891787"
+    },
+    {
+      "address": "0x6A8Ee78653c588530D31fa308F4b165F346BD9E0",
+      "children": [
+        {
+          "address": "0x1c27Fd7Ab4FAA8141119484E00D2455851639C2b",
+          "symbol": "SSA"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xC7145e1290B1d1221Aba5Ae48d4aCE17c6BE088F",
+      "pls_per_token": 1.1512954e-11,
+      "self_balance": "0",
+      "symbol": "JOB",
+      "total_supply": "1718700448465197848105412373382993150687"
+    },
+    {
+      "address": "0x1c27Fd7Ab4FAA8141119484E00D2455851639C2b",
+      "children": [
+        {
+          "address": "0xDb4eBEAfb23eCA5275821aB0D87c7f6fa5514EA4",
+          "symbol": "SCOIETY"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x6A8Ee78653c588530D31fa308F4b165F346BD9E0",
+      "pls_per_token": 9.688848e-12,
+      "self_balance": "0",
+      "symbol": "SSA",
+      "total_supply": "1355381504473389597878358458497954866844"
+    },
+    {
+      "address": "0xDb4eBEAfb23eCA5275821aB0D87c7f6fa5514EA4",
+      "children": [
+        {
+          "address": "0xD33358F1B3130e2E9715C5992028D9de384544E8",
+          "symbol": "CAMPAIGN"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x1c27Fd7Ab4FAA8141119484E00D2455851639C2b",
+      "pls_per_token": 1.2180987e-11,
+      "self_balance": "148845497327331202308530623753000",
+      "symbol": "SCOIETY",
+      "total_supply": "1302433205909771859276407064017671817717"
+    },
+    {
+      "address": "0xD33358F1B3130e2E9715C5992028D9de384544E8",
+      "children": [
+        {
+          "address": "0x7Ba907a5d308024E2A2010ea60318b834c1D8E9E",
+          "symbol": "OPIUM"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xDb4eBEAfb23eCA5275821aB0D87c7f6fa5514EA4",
+      "pls_per_token": 5.7017567e-11,
+      "self_balance": "0",
+      "symbol": "CAMPAIGN",
+      "total_supply": "706000513547142621093617395169322261295"
+    },
+    {
+      "address": "0x7Ba907a5d308024E2A2010ea60318b834c1D8E9E",
+      "children": [
+        {
+          "address": "0xf5f1E1B45524cf6919e7Ce3EdDB83569eC452aeA",
+          "symbol": "BGDHTZ"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xD33358F1B3130e2E9715C5992028D9de384544E8",
+      "pls_per_token": 1.5267147e-11,
+      "self_balance": "0",
+      "symbol": "OPIUM",
+      "total_supply": "247832697736710865346857538480290965433"
+    },
+    {
+      "address": "0xf5f1E1B45524cf6919e7Ce3EdDB83569eC452aeA",
+      "children": [
+        {
+          "address": "0x921Bc9A18EaF7299Ae42c1cc416ef070b04EF81E",
+          "symbol": "TEHATER"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x7Ba907a5d308024E2A2010ea60318b834c1D8E9E",
+      "pls_per_token": 9.635435e-12,
+      "self_balance": "0",
+      "symbol": "BGDHTZ",
+      "total_supply": "147649087578782448921534178804591765204"
+    },
+    {
+      "address": "0x921Bc9A18EaF7299Ae42c1cc416ef070b04EF81E",
+      "children": [
+        {
+          "address": "0xca803da0dF03c7E0897ff09bC53369654be0e3E7",
+          "symbol": "ARMS"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xf5f1E1B45524cf6919e7Ce3EdDB83569eC452aeA",
+      "pls_per_token": 5.2988242e-11,
+      "self_balance": "0",
+      "symbol": "TEHATER",
+      "total_supply": "188999072300432773610619085616829385704"
+    },
+    {
+      "address": "0xca803da0dF03c7E0897ff09bC53369654be0e3E7",
+      "children": [
+        {
+          "address": "0xaAE18Cd46C45d343BbA1eab46716B4D69d799734",
+          "symbol": "BAR"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0x921Bc9A18EaF7299Ae42c1cc416ef070b04EF81E",
+      "pls_per_token": 1.1368231e-11,
+      "self_balance": "0",
+      "symbol": "ARMS",
+      "total_supply": "8062001865647932396787509240166539329920"
+    },
+    {
+      "address": "0xaAE18Cd46C45d343BbA1eab46716B4D69d799734",
+      "children": [
+        {
+          "address": "0x52b4F56d87765E7A9567E35bea97de13C3386554",
+          "symbol": "OZZY"
+        }
+      ],
+      "debenture": false,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xca803da0dF03c7E0897ff09bC53369654be0e3E7",
+      "pls_per_token": 1.0286925e-10,
+      "self_balance": "11288175104634213601485937494956206",
+      "symbol": "BAR",
+      "total_supply": "250287116192978676754882284759551190287277"
+    },
+    {
+      "address": "0x52b4F56d87765E7A9567E35bea97de13C3386554",
+      "children": [],
+      "debenture": true,
+      "decimals": 18,
+      "deployer": "0xBF182955401aF3f2f7e244cb31184E93E74a2501",
+      "parent": "0xaAE18Cd46C45d343BbA1eab46716B4D69d799734",
+      "pls_per_token": 1.5475932e-11,
+      "self_balance": "0",
+      "symbol": "OZZY",
+      "total_supply": "218789144197049890264050414007818660049"
+    }
+  ],
+  "v2minter": "0xc15c5F699Daf5e1135732139f05D2c05b3EF4354"
+}
