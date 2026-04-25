@@ -1,0 +1,23 @@
+{
+  "checked_at_block": 26378378,
+  "tokens": {
+    "DFM": {
+      "address": "0x51160F352ED148C89d48dfe6384Edd07aFA24E0E",
+      "exit_path_ok": false,
+      "has_mint": false,
+      "hong_paths": []
+    },
+    "FDIC": {
+      "address": "0x812571A12330A74E2A3C1fF8953f6f3aac7a83e9",
+      "exit_path_ok": false,
+      "has_mint": false,
+      "hong_paths": []
+    },
+    "PARADE": {
+      "address": "0xE37ACc54711562510FaFC45d8199Ee329ebBceDd",
+      "exit_path_ok": false,
+      "has_mint": false,
+      "hong_paths": []
+    }
+  }
+}

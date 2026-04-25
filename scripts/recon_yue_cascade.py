@@ -152,7 +152,65 @@ def check_yuan() -> int:
 
 # ─── Stubs for later sub-commands (filled in subsequent tasks) ───────────
 def check_exits() -> int:
-    raise NotImplementedError("Task 2 fills this in")
+    """
+    For each parking token:
+      A = YUE.hasMint(token) — Withdraw is theoretically callable
+      B = at least one QING returns non-zero rate with `token` as SpendAsset (Hong path)
+
+    Decision rule:
+      A or B  -> "exit_path_ok": True  -> aggressive parking allowed
+      neither -> "exit_path_ok": False -> cap parking at 10% of bag
+
+    Note: B requires QING enumeration. We use the v2_federal_tokens.json input as
+    a proxy for the QING universe (each V2 Federal token may anchor a QING). For a
+    more thorough scan, future work can enumerate from MAP/CHOA. For Phase 1b we
+    accept that 'B' may be undercounted — the safer side; we'd just over-cap.
+    """
+    print(f"[1b] YUE exit-mechanism check on JOEY_YUE={JOEY_YUE}")
+
+    if not os.path.exists(V2F_INPUT):
+        print(f"  WARN: {V2F_INPUT} missing; B-check will be empty")
+        candidate_qings = []
+    else:
+        with open(V2F_INPUT) as f:
+            v2f = json.load(f)
+        candidate_qings = [Web3.to_checksum_address(t["address"]) for t in v2f.get("tokens", [])]
+
+    SEL_GETRATE = Web3.keccak(text="GetAssetRate(address,address)")[:4]
+
+    out = {"checked_at_block": w3_read.eth.block_number, "tokens": {}}
+    for sym, token in PARK_TOKENS.items():
+        try:
+            has_mint = yue_has_mint(JOEY_YUE, token)
+        except Exception as e:
+            print(f"  {sym}: hasMint reverted ({e}) — assuming False")
+            has_mint = False
+
+        hong_paths = []
+        for qing in candidate_qings:
+            data = SEL_GETRATE + abi_encode(["address", "address"], [qing, token])
+            try:
+                raw = w3_read.eth.call({"to": JOEY_YUE, "data": data})
+                rate = abi_decode(["uint256"], raw)[0]
+                if rate > 0:
+                    hong_paths.append({"qing": qing, "rate": str(rate)})
+            except Exception:
+                # GetAssetRate reverts when pair invalid — that's fine, just no path
+                pass
+
+        exit_ok = has_mint or len(hong_paths) > 0
+        verdict = "OK" if exit_ok else "ONE-WAY (cap 10%)"
+        print(f"  {sym:8s}  hasMint={has_mint}  hong_paths={len(hong_paths)}  -> {verdict}")
+        out["tokens"][sym] = {
+            "address": token,
+            "has_mint": has_mint,
+            "hong_paths": hong_paths,
+            "exit_path_ok": exit_ok,
+        }
+
+    atomic_write_json(EXIT_FILE, out)
+    print(f"[1b] wrote {EXIT_FILE}")
+    return 0
 
 def check_tree() -> int:
     raise NotImplementedError("Task 3 fills this in")
