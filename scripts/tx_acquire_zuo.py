@@ -26,6 +26,7 @@ Plan:
   Phase 4: Verify Yuan(ZUO) > 0
   Phase 5: Beat dry-run via .call()
 """
+import os
 import sys
 import time
 from web3 import Web3
@@ -36,7 +37,7 @@ DRY_RUN = "--dry-run" in sys.argv
 # ── Config ────────────────────────────────────────────────────────────────────
 READ_RPC  = "https://rpc.pulsechain.com"
 WRITE_RPC = "https://rpc.pulsechain.com"
-PRIV_KEY  = "0x***LEAKED-KEY-2026-04-26-PURGED***"
+PRIV_KEY  = os.environ["JOEY_PK"]  # set via env: export JOEY_PK=0x... (NEVER hardcode)
 CHAIN_ID  = 369
 
 w3 = Web3(Web3.HTTPProvider(READ_RPC))
