@@ -47,7 +47,7 @@ GAS_MULT       = 2.5
 GAS_PRICE_CEIL = 2_000_000 * 10**9      # 2M Gwei in wei
 PLS_FLOOR      = 100_000 * 10**18        # 100K PLS gas floor
 MAX_UINT256    = (1 << 256) - 1
-PRIORITY_FEE   = 100_000 * 10**9         # 100K Beats priority tip (avoids stuck TX on PulseChain)
+PRIORITY_FEE   = 200_000 * 10**9         # 200K Beats priority tip (bumped from 100K after cycle 7 dropped TX 2026-04-25)
 
 READ_RPC   = os.environ.get("PULSECHAIN_READ_RPC", "https://rpc-pulsechain.g4mm4.io")
 SUBMIT_RPC = os.environ.get("PULSECHAIN_RPC",      "https://rpc.pulsechain.com")
@@ -132,7 +132,7 @@ def build_gas_params() -> dict:
     base_fee = w3_read.eth.gas_price
     if base_fee > GAS_PRICE_CEIL:
         raise RuntimeError(f"gas too high: {base_fee/1e9:.0f} Beats > ceiling {GAS_PRICE_CEIL/1e9:.0f} Beats")
-    max_fee = max(int(base_fee * 1.5), base_fee + PRIORITY_FEE + 1)
+    max_fee = max(int(base_fee * 3), base_fee + PRIORITY_FEE + 1)
     return {"maxFeePerGas": max_fee, "maxPriorityFeePerGas": PRIORITY_FEE}
 
 
@@ -195,16 +195,16 @@ def send_tx(to: str, data: bytes, value: int = 0, *, label: str, dry_run: bool) 
 
     receipt = None
     try:
-        receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=420)
+        receipt = w3_submit.eth.wait_for_transaction_receipt(tx_hash, timeout=1200)
     except Exception:
-        for _ in range(60):
+        for _ in range(180):
             try:
                 receipt = w3_read.eth.get_transaction_receipt(tx_hash)
                 break
             except Exception:
                 time.sleep(5)
         if receipt is None:
-            raise RuntimeError(f"TX 0x{tx_hash.hex()} not confirmed after 720s — check explorer")
+            raise RuntimeError(f"TX 0x{tx_hash.hex()} not confirmed after 2100s — check explorer")
     if receipt["status"] != 1:
         raise RuntimeError(f"TX 0x{tx_hash.hex()} reverted on-chain")
     print(f"  confirmed: block {receipt['blockNumber']}, gas used {receipt['gasUsed']:,}")
